@@ -254,7 +254,8 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 ### Lebenszyklus
 
 - **Elemente werden nicht gelöscht, sondern verschwinden:** `present = false`. Kommt dasselbe Element mit derselben `external_id` zurück, sind Label, Notizen und Gruppen wieder da.
-- **Geräte und Quellen werden nie gelöscht.** Läufe, Befunde und Audit verweisen auf sie; ohne Gerät wären alte Einträge nicht mehr lesbar. Eine Quelle wird stattdessen deaktiviert (`enabled = false`).
+- **Geräte werden weich gelöscht.** Läufe, Befunde und Audit verweisen auf sie; ohne Gerät wären alte Einträge nicht mehr lesbar. Löschen setzt `device.deleted_at`, deaktiviert alle Quellen, setzt alle Elemente auf `monitored = false` und entfernt sie aus allen Gruppen. Die UI blendet gelöschte Geräte aus; ihre Quellen lassen sich nicht wieder aktivieren. Solange ein Preset-Schritt auf ein Element des Geräts zielt, wird das Löschen abgelehnt.
+- Eine einzelne Quelle wird nicht gelöscht, sondern deaktiviert (`enabled = false`).
 - **Abschluss jeder Discovery:** ein Statement pro Lauf und Quelle setzt `last_seen_at` aller gemeldeten Elemente und `present = false` für alle übrigen. `last_seen_at` stimmt damit auch dann, wenn sich am Inventar nichts geändert hat.
 - **Vorab-Anlage:** Der User kann Treiber-Elemente anlegen, bevor der Treiber sie gesehen hat (`first_seen_at = NULL`, z. B. ein erwarteter Peer vor einer Produktion). Findet der Treiber das Element, übernimmt er die Zeile anhand der `external_id`.
 - **Wiederverwendete IDs:** Manche Geräte vergeben gelöschte IDs neu (XLink-Units). Ein neues Element erbt dann Labels und Regeln des alten. Faustregel: **Labels und Regeln gehören an stabile Dinge** (Ports, Geräte, vor allem Gruppen).
@@ -761,7 +762,7 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 | `permission_grant.scope_element_id` | `CASCADE` |
 | `device_source.secret_id`, `forward_target.secret_id` | `RESTRICT` (verwendete Secrets sind nicht löschbar) |
 | Verweise auf `app_user` | Benutzer werden nie gelöscht |
-| Verweise auf `element`, `device`, `device_source` | Geräte und Quellen werden nie gelöscht; Elemente verschwinden nur (`present = false`) |
+| Verweise auf `element`, `device`, `device_source` | Geräte werden nur weich gelöscht (`device.deleted_at`), Quellen deaktiviert; Elemente verschwinden nur (`present = false`) |
 
 ---
 

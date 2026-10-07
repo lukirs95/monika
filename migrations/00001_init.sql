@@ -114,7 +114,8 @@ CREATE TABLE "device" (
   "vendor" text,
   "model" text,
   "serial" text,
-  "firmware" text
+  "firmware" text,
+  "deleted_at" timestamptz
 );
 
 CREATE TABLE "device_source" (
@@ -464,7 +465,9 @@ COMMENT ON COLUMN "element"."first_seen_at" IS 'NULL = vom User vorab angelegt, 
 
 COMMENT ON COLUMN "element"."monitored" IS 'false = von allen Regeln ausgenommen (unbenutzt)';
 
-COMMENT ON TABLE "device" IS '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source.';
+COMMENT ON TABLE "device" IS '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source. Geräte werden nie hart gelöscht.';
+
+COMMENT ON COLUMN "device"."deleted_at" IS 'weich gelöscht: Quellen deaktiviert, Elemente nicht überwacht, aus Gruppen entfernt; Zeilen bleiben für Läufe, Befunde und Audit';
 
 COMMENT ON TABLE "device_source" IS 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.';
 

@@ -696,13 +696,15 @@ type AuditLog struct {
 	After json.RawMessage
 }
 
-// 1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source.
+// 1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source. Geräte werden nie hart gelöscht.
 type Device struct {
 	ElementID uuid.UUID
 	Vendor    *string
 	Model     *string
 	Serial    *string
 	Firmware  *string
+	// weich gelöscht: Quellen deaktiviert, Elemente nicht überwacht, aus Gruppen entfernt; Zeilen bleiben für Läufe, Befunde und Audit
+	DeletedAt *time.Time
 }
 
 // Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.

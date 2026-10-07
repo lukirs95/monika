@@ -274,12 +274,14 @@ Table device {
   serial     text
   firmware   text
 
+  deleted_at timestamptz [note: 'weich gelöscht: Quellen deaktiviert, Elemente nicht überwacht, aus Gruppen entfernt; Zeilen bleiben für Läufe, Befunde und Audit']
+
   indexes {
     (vendor, model)
     firmware
   }
 
-  Note: '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source.'
+  Note: '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source. Geräte werden nie hart gelöscht.'
 }
 
 Table device_source {

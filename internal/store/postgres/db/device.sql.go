@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -64,6 +65,33 @@ func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSource
 	return err
 }
 
+const deleteDevice = `-- name: DeleteDevice :exec
+WITH sources AS (
+  UPDATE device_source
+  SET enabled = false, updated_at = now()
+  WHERE device_id = $1::uuid
+), elements AS (
+  UPDATE element
+  SET monitored = false, updated_at = now()
+  WHERE device_id = $1::uuid
+), memberships AS (
+  DELETE FROM element_link l
+  USING element e
+  WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = $1::uuid
+)
+UPDATE device
+SET deleted_at = now()
+WHERE element_id = $1::uuid
+`
+
+// Weiches Löschen: Quellen deaktivieren, Elemente nicht mehr überwachen, aus allen Gruppen
+// entfernen. Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
+// Nur über postgres.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
+func (q *Queries) DeleteDevice(ctx context.Context, deviceID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDevice, deviceID)
+	return err
+}
+
 const listDeviceSources = `-- name: ListDeviceSources :many
 SELECT id, device_id, driver, address, config, secret_id, enabled, created_at, updated_at FROM device_source
 ORDER BY id
@@ -100,7 +128,7 @@ func (q *Queries) ListDeviceSources(ctx context.Context) ([]DeviceSource, error)
 }
 
 const listDevices = `-- name: ListDevices :many
-SELECT element_id, vendor, model, serial, firmware FROM device
+SELECT element_id, vendor, model, serial, firmware, deleted_at FROM device
 ORDER BY element_id
 `
 
@@ -119,6 +147,7 @@ func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
 			&i.Model,
 			&i.Serial,
 			&i.Firmware,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -128,6 +157,56 @@ func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listPresetsUsingDevice = `-- name: ListPresetsUsingDevice :many
+SELECT DISTINCT p.id, p.name
+FROM preset p
+JOIN preset_step s ON s.preset_id = p.id
+JOIN element e ON e.id = s.element_id
+WHERE e.device_id = $1::uuid
+ORDER BY p.name, p.id
+`
+
+type ListPresetsUsingDeviceRow struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// Presets mit Schritten, die auf ein Element des Geräts zielen; sie blockieren das Löschen.
+func (q *Queries) ListPresetsUsingDevice(ctx context.Context, deviceID uuid.UUID) ([]ListPresetsUsingDeviceRow, error) {
+	rows, err := q.db.Query(ctx, listPresetsUsingDevice, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPresetsUsingDeviceRow
+	for rows.Next() {
+		var i ListPresetsUsingDeviceRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockDevice = `-- name: LockDevice :one
+SELECT deleted_at
+FROM device
+WHERE element_id = $1
+FOR UPDATE
+`
+
+// Sperrt die Geräte-Zeile bis zum Ende der Transaktion; liefert deleted_at.
+func (q *Queries) LockDevice(ctx context.Context, elementID uuid.UUID) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, lockDevice, elementID)
+	var deleted_at *time.Time
+	err := row.Scan(&deleted_at)
+	return deleted_at, err
 }
 
 const updateDeviceIdentity = `-- name: UpdateDeviceIdentity :execrows
@@ -181,6 +260,7 @@ SET address    = $1,
     enabled    = $4,
     updated_at = now()
 WHERE id = $5
+  AND device_id IN (SELECT element_id FROM device WHERE deleted_at IS NULL)
 `
 
 type UpdateDeviceSourceParams struct {
@@ -192,6 +272,7 @@ type UpdateDeviceSourceParams struct {
 }
 
 // Treiber und Gerät einer Quelle stehen fest; sonst würden ihre Elemente den Besitzer wechseln.
+// Quellen gelöschter Geräte bleiben unverändert (0 Zeilen).
 func (q *Queries) UpdateDeviceSource(ctx context.Context, arg UpdateDeviceSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateDeviceSource,
 		arg.Address,
