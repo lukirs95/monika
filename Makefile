@@ -8,11 +8,12 @@ GO      ?= go
 DOCKER  ?= docker
 COMPOSE := $(DOCKER) compose -f deploy/compose.yaml
 
-# Werkzeuge mit fester Version; laufen per go run bzw. in Docker, nichts muss lokal installiert sein.
+# Go wird lokal vorausgesetzt. Übrige Werkzeuge mit fester Version per go run bzw. als fertiges Docker-Image.
 GOOSE          := $(GO) run github.com/pressly/goose/v3/cmd/goose@v3.28.0
 DBML2SQL       := $(DOCKER) run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false \
                   -v $(CURDIR)/docs/schema:/schema:ro node:24-alpine \
                   npx --yes --loglevel=error -p @dbml/cli@10.3.0 dbml2sql --postgres
+SQLC           := $(DOCKER) run --rm --user $$(id -u):$$(id -g) -v $(CURDIR):/src -w /src sqlc/sqlc:1.31.1
 POSTGRES_IMAGE := postgres:18-alpine
 
 DATABASE_URL ?= postgres://monika:monika@127.0.0.1:5432/monika?sslmode=disable
@@ -31,6 +32,10 @@ db-generate: ## Erzeugt migrations/00001_init.sql aus docs/schema/monika.dbml
 	  $(DBML2SQL) /schema/monika.dbml; \
 	  echo '-- +goose StatementEnd'; } > migrations/00001_init.sql.tmp
 	mv migrations/00001_init.sql.tmp migrations/00001_init.sql
+
+.PHONY: db-gen-go
+db-gen-go: ## Erzeugt Go-Code aus Migrationen und Queries (sqlc)
+	$(SQLC) generate
 
 .PHONY: db-validate
 db-validate: ## Spielt alle Migrationen in eine frische, temporäre PostgreSQL ein
