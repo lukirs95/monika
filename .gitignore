@@ -1,0 +1,33 @@
+# Build-Ausgaben
+/bin/
+/dist/
+/monika
+
+# Go
+*.test
+*.out
+coverage.*
+/vendor/
+go.work
+go.work.sum
+
+# Konfiguration und Secrets (.env.example bleibt versioniert)
+.env
+.env.*
+!.env.example
+
+# Lokale Daten aus der Docker-Umgebung
+/deploy/data/
+
+# Frontend
+/web/node_modules/
+/web/dist/
+
+# Editor und Betriebssystem
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Claude Code (lokale Einstellungen)
+.claude/settings.local.json
