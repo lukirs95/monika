@@ -54,6 +54,7 @@ db-generate: ## Erzeugt migrations/00001_init.sql aus docs/schema/monika.dbml
 
 .PHONY: db-gen-go
 db-gen-go: ## Erzeugt Go-Code aus Migrationen und Queries (sqlc)
+	rm -rf internal/store/postgres/db # sqlc entfernt keine Dateien entfallener Queries
 	$(SQLC) generate
 
 .PHONY: db-validate

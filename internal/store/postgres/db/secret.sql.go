@@ -13,7 +13,6 @@ import (
 )
 
 const createSecret = `-- name: CreateSecret :exec
-
 INSERT INTO secret (id, name, description, ciphertext, nonce, key_id, created_by_id, updated_by_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 `
@@ -28,8 +27,6 @@ type CreateSecretParams struct {
 	CreatedByID *uuid.UUID
 }
 
-// Secret-Store (docs/ARCHITECTURE.md, Abschnitt 14).
-// Werte werden nur in Go ver- und entschlüsselt; Abfragen für die Anzeige liefern nie ciphertext.
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
 	_, err := q.db.Exec(ctx, createSecret,
 		arg.ID,
@@ -135,6 +132,7 @@ type ListSecretsRow struct {
 	UpdatedAt   time.Time
 }
 
+// Für die Anzeige: liefert nie den verschlüsselten Wert.
 func (q *Queries) ListSecrets(ctx context.Context) ([]ListSecretsRow, error) {
 	rows, err := q.db.Query(ctx, listSecrets)
 	if err != nil {

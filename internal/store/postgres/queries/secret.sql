@@ -1,6 +1,3 @@
--- Secret-Store (docs/ARCHITECTURE.md, Abschnitt 14).
--- Werte werden nur in Go ver- und entschlüsselt; Abfragen für die Anzeige liefern nie ciphertext.
-
 -- name: CreateSecret :exec
 INSERT INTO secret (id, name, description, ciphertext, nonce, key_id, created_by_id, updated_by_id)
 VALUES (@id, @name, @description, @ciphertext, @nonce, @key_id, @created_by_id, @created_by_id);
@@ -11,6 +8,7 @@ FROM secret
 WHERE id = @id;
 
 -- name: ListSecrets :many
+-- Für die Anzeige: liefert nie den verschlüsselten Wert.
 SELECT id, name, description, created_at, updated_at
 FROM secret
 ORDER BY name;
