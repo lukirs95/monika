@@ -18,6 +18,68 @@ var (
 	ErrBatchAlreadyClosed = errors.New("batch already closed")
 )
 
+const insertDriverLink = `-- name: InsertDriverLink :batchexec
+INSERT INTO element_link (id, type, source_id, from_id, from_ref, to_id, to_ref)
+VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)
+`
+
+type InsertDriverLinkBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type InsertDriverLinkParams struct {
+	ID       uuid.UUID
+	Type     LinkType
+	SourceID uuid.UUID
+	FromID   *uuid.UUID
+	FromRef  *string
+	ToID     *uuid.UUID
+	ToRef    *string
+}
+
+// Discovery: neuer Link einer Quelle (feeds, uses, represents). Ein noch unbekannter
+// Endpunkt steht als global_ref in from_ref bzw. to_ref.
+func (q *Queries) InsertDriverLink(ctx context.Context, arg []InsertDriverLinkParams) *InsertDriverLinkBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ID,
+			a.Type,
+			a.SourceID,
+			a.FromID,
+			a.FromRef,
+			a.ToID,
+			a.ToRef,
+		}
+		batch.Queue(insertDriverLink, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &InsertDriverLinkBatchResults{br, len(arg), false}
+}
+
+func (b *InsertDriverLinkBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *InsertDriverLinkBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertDriverElement = `-- name: UpsertDriverElement :batchone
 INSERT INTO element (
   id, kind, parent_id, device_id, source_id, external_id, global_ref,

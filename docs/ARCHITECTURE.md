@@ -254,6 +254,8 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 ### Lebenszyklus
 
 - **Elemente werden nicht gelöscht, sondern verschwinden:** `present = false`. Kommt dasselbe Element mit derselben `external_id` zurück, sind Label, Notizen und Gruppen wieder da.
+- **Geräte und Quellen werden nie gelöscht.** Läufe, Befunde und Audit verweisen auf sie; ohne Gerät wären alte Einträge nicht mehr lesbar. Eine Quelle wird stattdessen deaktiviert (`enabled = false`).
+- **Abschluss jeder Discovery:** ein Statement pro Lauf und Quelle setzt `last_seen_at` aller gemeldeten Elemente und `present = false` für alle übrigen. `last_seen_at` stimmt damit auch dann, wenn sich am Inventar nichts geändert hat.
 - **Vorab-Anlage:** Der User kann Treiber-Elemente anlegen, bevor der Treiber sie gesehen hat (`first_seen_at = NULL`, z. B. ein erwarteter Peer vor einer Produktion). Findet der Treiber das Element, übernimmt er die Zeile anhand der `external_id`.
 - **Wiederverwendete IDs:** Manche Geräte vergeben gelöschte IDs neu (XLink-Units). Ein neues Element erbt dann Labels und Regeln des alten. Faustregel: **Labels und Regeln gehören an stabile Dinge** (Ports, Geräte, vor allem Gruppen).
 
@@ -270,7 +272,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 - Gruppen sind Elemente (`kind = group`) und werden vom User angelegt.
 - Hierarchie und Mitgliedschaft laufen **ausschließlich über `element_link` vom Typ `member`**, nie über `parent_id`. Damit sind sie n:m und beliebig verschachtelt.
 - **Position und Label hängen an der Mitgliedschaft**, nicht am Element: Gerät B / Input 1 ist *in dieser Stagebox* Kanal 5.
-- `member`-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung per rekursiver Abfrage).
+- `member`-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung per rekursiver Abfrage). Prüfung und Insert laufen in einer Transaktion unter einem Advisory Lock (`pg_advisory_xact_lock`), damit zwei parallele Änderungen nicht gemeinsam einen Zyklus erzeugen.
 - Health einer Gruppe = schlimmster Zustand der Mitglieder, plus Rollup mit Zählern. **Keine Redundanzlogik:** Jeder Ausfall ist ein Fehler, auch wenn die Produktion weiterläuft.
 - Standorte und Produktionen werden als Gruppen modelliert.
 
@@ -759,6 +761,7 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 | `permission_grant.scope_element_id` | `CASCADE` |
 | `device_source.secret_id`, `forward_target.secret_id` | `RESTRICT` (verwendete Secrets sind nicht löschbar) |
 | Verweise auf `app_user` | Benutzer werden nie gelöscht |
+| Verweise auf `element`, `device`, `device_source` | Geräte und Quellen werden nie gelöscht; Elemente verschwinden nur (`present = false`) |
 
 ---
 
