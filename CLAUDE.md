@@ -5,7 +5,7 @@ Arbeitsregeln für Claude in diesem Repository.
 ## Projektstand
 
 - Verbindlich sind `docs/ARCHITECTURE.md` (Verhalten, Architekturentscheidungen) und `docs/schema/monika.dbml` (Datenbankschema).
-- Eine Go-spezifische Architektur (Pakete, Interfaces, Typen) gibt es noch nicht. Sie entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen.
+- Die Go-Architektur entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen. Bereits festgelegt ist das Muster für die Persistenz (siehe unten).
 - Abhängigkeiten zeigen nur nach innen: `drivers/*` importiert nur `sdk/` (und die jeweilige Gerätelibrary), nie `internal/`.
 
 ## Go
@@ -22,6 +22,19 @@ Arbeitsregeln für Claude in diesem Repository.
   - strukturiertes Logging mit `log/slog`
   - table-driven Tests
 - Code ist mit `gofmt`/`goimports` formatiert und besteht `go vet` sowie den Linter.
+
+## Persistenz
+
+Vorbild ist `internal/core/inventory` mit `internal/store/postgres`.
+
+- **Schema:** `docs/schema/monika.dbml` ist die Quelle. `make db-generate` erzeugt daraus `migrations/00001_init.sql`; nur was DBML nicht ausdrücken kann (z. B. Teilindizes), steht in handgeschriebenen Migrationen.
+- **Queries:** SQL in `internal/store/postgres/queries/`, `make db-gen-go` erzeugt mit sqlc das Paket `internal/store/postgres/db/`. Generierten Code nie von Hand ändern.
+- **Interfaces beim Verwender:** Jedes Fachpaket definiert sein eigenes `Store`-Interface mit genau den Methoden, die es braucht (z. B. `inventory.Store`).
+- **Domänentypen im Fachpaket:** Typen und fachliche Fehler (`ErrNotFound`, `ErrMemberCycle` …) liegen im Fachpaket, nicht in einem gemeinsamen `model`-Paket. Leere Werte bedeuten „nicht gesetzt“; Pointer nur, wo der leere Wert ein gültiger Wert ist.
+- **Fachliche Operationen:** Jede Store-Methode ist eine in sich atomare fachliche Operation (z. B. `ApplyDiscovery`, `DeleteDevice`). Transaktionen öffnet und schließt nur der Store; Fachpakete sehen keine Transaktionen.
+- **Eine Implementierung:** `postgres.Store` erfüllt alle Store-Interfaces, abgesichert per `var _ paket.Store = (*Store)(nil)`. Er übersetzt zwischen Domänentypen und sqlc-Typen (Helfer in `convert.go`).
+- **sqlc-Typen verlassen `store/postgres` nie.** Fachpakete importieren weder `postgres` noch `db`; verdrahtet wird in `cmd/monika`.
+- **Tests:** Der Store wird mit Integrationstests gegen PostgreSQL getestet, Fachpakete mit Unit-Tests gegen eine In-Memory-Attrappe ihres Interfaces.
 
 ## Build und Tests
 
