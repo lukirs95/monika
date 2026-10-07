@@ -26,8 +26,9 @@ Arbeitsregeln für Claude in diesem Repository.
 ## Build und Tests
 
 - `make` ist das einzige Build- und Testsystem. Alles, was regelmäßig ausgeführt wird (Build, Unit-Tests, Integrationstests, Lint, Migrationen, lokale Umgebung), bekommt ein Make-Target. Keine losen Shell-Skripte als Einstiegspunkt.
-- Alle Integrationstests laufen mit Docker (PostgreSQL, InfluxDB usw. in Containern). Keine Abhängigkeit von lokal installierten Diensten.
-- Unit-Tests laufen ohne Docker und ohne Netzwerk und bleiben schnell. Integrationstests sind davon getrennt (z. B. per Build-Tag `integration`) und haben ein eigenes Make-Target.
+- Go ist lokal vorausgesetzt; Go-Code wird nie in Docker gebaut oder getestet. Docker stellt nur die Dienste bereit (PostgreSQL, InfluxDB usw.). Keine Abhängigkeit von lokal installierten Diensten.
+- Integrationstests starten ihre Dienste selbst per testcontainers-go (für PostgreSQL: `internal/store/postgres/pgtest`, eine frische Datenbank pro Test). Sie tragen das Build-Tag `integration` und laufen mit `make test-integration`.
+- Unit-Tests laufen ohne Docker und ohne Netzwerk und bleiben schnell (`make test`).
 
 ## Änderungen und Git
 

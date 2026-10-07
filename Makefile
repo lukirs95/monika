@@ -22,6 +22,25 @@ DATABASE_URL ?= postgres://monika:monika@127.0.0.1:5432/monika?sslmode=disable
 help: ## Zeigt diese Hilfe
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z-]*:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+# --- Go ----------------------------------------------------------------------
+
+.PHONY: build
+build: ## Baut alle Pakete
+	$(GO) build ./...
+
+.PHONY: test
+test: ## Unit-Tests (ohne Docker)
+	$(GO) test ./...
+
+.PHONY: test-integration
+test-integration: ## Integrationstests; startet PostgreSQL per testcontainers in Docker
+	$(GO) test -tags integration ./...
+
+.PHONY: vet
+vet: ## go vet, inklusive Integrationstests
+	$(GO) vet ./...
+	$(GO) vet -tags integration ./...
+
 # --- Datenbank ---------------------------------------------------------------
 
 .PHONY: db-generate
