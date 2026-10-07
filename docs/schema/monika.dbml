@@ -245,11 +245,8 @@ Table element {
     actions [type: gin]
   }
 
-  Note: '''
-  CHECK (in SQL zu ergänzen, DBML kann es nicht ausdrücken):
-
-  CONSTRAINT element_class_check CHECK (
-    (kind = 'device'
+  checks {
+    `(kind = 'device'
        AND device_id = id AND parent_id IS NULL
        AND source_id IS NULL AND external_id IS NULL)
     OR
@@ -259,9 +256,10 @@ Table element {
     OR
     (kind NOT IN ('device', 'group')
        AND device_id IS NOT NULL AND parent_id IS NOT NULL
-       AND source_id IS NOT NULL AND external_id IS NOT NULL)
-  )
+       AND source_id IS NOT NULL AND external_id IS NOT NULL)` [name: 'element_class_check']
+  }
 
+  Note: '''
   Hinweis: device_id = id beim Gerät erfordert, dass die id vor dem Insert
   vergeben wird (in Go erzeugen statt per Default).
   '''
@@ -290,7 +288,7 @@ Table device_source {
   driver     text    [not null, note: 'videoxlink, embrionix, directout-ravio, ipmi, ...']
   address    text    [note: 'Management-Host/IP']
   config     jsonb   [not null, default: `'{}'::jsonb`, note: 'treiberspezifische Verbindungsparameter, keine Geheimnisse']
-  secret_id  uuid    [ref: > secret.id, note: 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen; ON DELETE RESTRICT']
+  secret_id  uuid    [note: 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen']
   enabled    boolean [not null, default: true]
 
   created_at timestamptz [not null, default: `now()`]
@@ -304,14 +302,16 @@ Table device_source {
   Note: 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.'
 }
 
+Ref: device_source.secret_id > secret.id [delete: restrict]
+
 Table element_link {
   id         uuid      [pk, default: `uuidv7()`]
   type       link_type [not null]
   source_id  uuid      [ref: > device_source.id, note: 'meldende Quelle; NULL = vom User (member)']
 
-  from_id    uuid      [ref: > element.id]
+  from_id    uuid
   from_ref   text      [note: 'global_ref der Quelle, solange nicht aufgelöst']
-  to_id      uuid      [ref: > element.id]
+  to_id      uuid
   to_ref     text      [note: 'global_ref des Ziels, solange nicht aufgelöst']
 
   // nur für member
@@ -326,6 +326,14 @@ Table element_link {
     source_id
     from_ref
     to_ref
+    (`type`, `COALESCE(from_id::text, from_ref)`, `COALESCE(to_id::text, to_ref)`) [unique, name: 'element_link_uq']
+  }
+
+  checks {
+    `(from_id IS NOT NULL OR from_ref IS NOT NULL)
+    AND (to_id IS NOT NULL OR to_ref IS NOT NULL)` [name: 'element_link_endpoints_check']
+    `(type = 'member' AND source_id IS NULL)
+    OR (type <> 'member' AND source_id IS NOT NULL)` [name: 'element_link_owner_check']
   }
 
   Note: '''
@@ -335,27 +343,12 @@ Table element_link {
   - Ein Link über Gerätegrenzen wird von der Seite gemeldet, die ihn
     konfiguriert (bei XLink: der Decoder).
   - member-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung).
-  - Lösch-Verhalten: ON DELETE CASCADE auf from_id und to_id.
-
-  CHECK und eindeutiger Index (in SQL zu ergänzen):
-
-  CONSTRAINT element_link_endpoints_check CHECK (
-    (from_id IS NOT NULL OR from_ref IS NOT NULL)
-    AND (to_id IS NOT NULL OR to_ref IS NOT NULL)
-  )
-
-  CONSTRAINT element_link_owner_check CHECK (
-    (type = 'member' AND source_id IS NULL)
-    OR (type <> 'member' AND source_id IS NOT NULL)
-  )
-
-  CREATE UNIQUE INDEX element_link_uq ON element_link (
-    type,
-    COALESCE(from_id::text, from_ref),
-    COALESCE(to_id::text, to_ref)
-  );
+  - element_link_uq: keine doppelten Links, auch solange unaufgelöst.
   '''
 }
+
+Ref: element_link.from_id > element.id [delete: cascade]
+Ref: element_link.to_id > element.id [delete: cascade]
 
 // ---------------------------------------------------------------------------
 // Bewertung
@@ -395,18 +388,15 @@ Table rule {
     fact
   }
 
+  checks {
+    `(when_fact IS NULL AND when_op IS NULL AND when_value IS NULL)
+    OR (when_fact IS NOT NULL AND when_op IS NOT NULL AND when_value IS NOT NULL)` [name: 'rule_when_check']
+    `hold_seconds >= 0` [name: 'rule_hold_check']
+  }
+
   Note: '''
   Alle Regeln kommen vom User; es gibt keine mitgelieferten Standardregeln.
   Operator und Typ von value werden in Go beim Speichern geprüft.
-
-  CHECK (in SQL zu ergänzen):
-
-  CONSTRAINT rule_when_check CHECK (
-    (when_fact IS NULL AND when_op IS NULL AND when_value IS NULL)
-    OR (when_fact IS NOT NULL AND when_op IS NOT NULL AND when_value IS NOT NULL)
-  )
-
-  CONSTRAINT rule_hold_check CHECK (hold_seconds >= 0)
   '''
 }
 
@@ -414,7 +404,7 @@ Table finding {
   id           uuid           [pk, default: `uuidv7()`]
   element_id   uuid           [not null, ref: > element.id]
   origin       finding_origin [not null]
-  rule_id      uuid           [ref: > rule.id, note: 'bei origin = rule; ON DELETE SET NULL, damit die Historie bleibt']
+  rule_id      uuid           [note: 'bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt']
   code         text           [not null, note: 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, data.stale']
   severity     severity       [not null]
   message      text           [note: 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds']
@@ -434,15 +424,12 @@ Table finding {
   }
 
   Note: '''
-  Höchstens ein aktiver Befund pro Element, Code und Regel (in SQL zu ergänzen):
-
-  CREATE UNIQUE INDEX finding_active_uq ON finding (
-    element_id,
-    code,
-    COALESCE(rule_id, '00000000-0000-0000-0000-000000000000'::uuid)
-  ) WHERE cleared_at IS NULL;
+  Höchstens ein aktiver Befund pro Element, Code und Regel. DBML kennt keine
+  Teilindizes; finding_active_uq steht deshalb in migrations/00002_finding_active_uq.sql.
   '''
 }
+
+Ref: finding.rule_id > rule.id [delete: set null]
 
 // ---------------------------------------------------------------------------
 // Aktionen und Presets
@@ -461,11 +448,11 @@ Table preset {
 
 Table preset_step {
   id                uuid    [pk, default: `uuidv7()`]
-  preset_id         uuid    [not null, ref: > preset.id, note: 'ON DELETE CASCADE']
+  preset_id         uuid    [not null]
   stage             int     [not null, note: 'gleiche Stufe = parallel; Stufen nacheinander, jede wartet auf Endzustand aller Läufe der vorigen']
   position          int     [not null, note: 'Sortierung innerhalb der Stufe (nur Anzeige)']
   delay_ms          int     [not null, default: 0, note: 'Wartezeit ab Beginn der Stufe, bevor dieser Schritt startet']
-  element_id        uuid    [not null, ref: > element.id, note: 'Element, Gerät oder Gruppe (Verteilung auf Mitglieder); ON DELETE RESTRICT']
+  element_id        uuid    [not null, note: 'Element, Gerät oder Gruppe (Verteilung auf Mitglieder)']
   action            text    [not null, note: 'start, stop, set, reboot, trigger, vxl.*']
   params            jsonb   [note: 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides']
   continue_on_error boolean [not null, default: false, note: 'false = Fehler bricht das Preset ab']
@@ -475,18 +462,21 @@ Table preset_step {
     element_id
   }
 
-  Note: '''
-  CHECK (in SQL zu ergänzen):
+  checks {
+    `stage >= 1 AND delay_ms >= 0` [name: 'preset_step_check']
+  }
 
-  CONSTRAINT preset_step_check CHECK (stage >= 1 AND delay_ms >= 0)
-  '''
+  Note: 'Ein Element mit Preset-Schritten ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.'
 }
+
+Ref: preset_step.preset_id > preset.id [delete: cascade]
+Ref: preset_step.element_id > element.id [delete: restrict]
 
 Table action_run {
   id             uuid          [pk, default: `uuidv7()`]
   parent_id      uuid          [ref: > action_run.id, note: 'Hierarchie: Preset-Lauf → Schritt-Lauf → Element-Läufe (bei Gruppen/Geräten)']
-  preset_id      uuid          [ref: > preset.id, note: 'gesetzt am Wurzel-Lauf eines Presets; ON DELETE SET NULL']
-  preset_step_id uuid          [ref: > preset_step.id, note: 'ON DELETE SET NULL']
+  preset_id      uuid          [note: 'gesetzt am Wurzel-Lauf eines Presets']
+  preset_step_id uuid
 
   element_id     uuid          [ref: > element.id, note: 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf']
   source_id      uuid          [ref: > device_source.id, note: 'ausführende Quelle; NULL bei übergeordneten Läufen']
@@ -513,18 +503,20 @@ Table action_run {
     requested_by_id
   }
 
+  checks {
+    `element_id IS NOT NULL
+    OR (preset_id IS NOT NULL AND parent_id IS NULL)` [name: 'action_run_target_check']
+  }
+
   Note: '''
   Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
   Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
-
-  CHECK (in SQL zu ergänzen):
-
-  CONSTRAINT action_run_target_check CHECK (
-    element_id IS NOT NULL
-    OR (preset_id IS NOT NULL AND parent_id IS NULL)
-  )
+  Gelöschte Presets und Schritte lassen die Läufe stehen (preset_id, preset_step_id werden NULL).
   '''
 }
+
+Ref: action_run.preset_id > preset.id [delete: set null]
+Ref: action_run.preset_step_id > preset_step.id [delete: set null]
 
 // ---------------------------------------------------------------------------
 // Benutzer, Rollen und Rechte
@@ -568,7 +560,7 @@ Table role {
 }
 
 Table role_member {
-  role_id    uuid        [not null, ref: > role.id, note: 'ON DELETE CASCADE']
+  role_id    uuid        [not null]
   user_id    uuid        [not null, ref: > app_user.id]
   origin     text        [not null, default: 'manual', note: 'manual | idp; idp-Mitgliedschaften werden beim Login überschrieben']
   created_at timestamptz [not null, default: `now()`]
@@ -579,33 +571,29 @@ Table role_member {
   }
 }
 
+Ref: role_member.role_id > role.id [delete: cascade]
+
 Table permission_grant {
   id               uuid       [pk, default: `uuidv7()`]
-  role_id          uuid       [not null, ref: > role.id, note: 'ON DELETE CASCADE']
+  role_id          uuid       [not null]
   permission       permission [not null]
-  scope_element_id uuid       [ref: > element.id, note: 'Gerät oder Gruppe, rekursiv; NULL = überall; ON DELETE CASCADE']
+  scope_element_id uuid       [note: 'Gerät oder Gruppe, rekursiv; NULL = überall']
   created_at       timestamptz [not null, default: `now()`]
 
   indexes {
     role_id
     scope_element_id
+    (`role_id`, `permission`, `COALESCE(scope_element_id, '00000000-0000-0000-0000-000000000000'::uuid)`) [unique, name: 'permission_grant_uq']
   }
 
-  Note: '''
-  CHECK und eindeutiger Index (in SQL zu ergänzen):
-
-  CONSTRAINT permission_grant_global_check CHECK (
-    permission NOT IN ('preset_run', 'preset_edit', 'admin')
-    OR scope_element_id IS NULL
-  )
-
-  CREATE UNIQUE INDEX permission_grant_uq ON permission_grant (
-    role_id,
-    permission,
-    COALESCE(scope_element_id, '00000000-0000-0000-0000-000000000000'::uuid)
-  );
-  '''
+  checks {
+    `permission NOT IN ('preset_run', 'preset_edit', 'admin')
+    OR scope_element_id IS NULL` [name: 'permission_grant_global_check']
+  }
 }
+
+Ref: permission_grant.role_id > role.id [delete: cascade]
+Ref: permission_grant.scope_element_id > element.id [delete: cascade]
 
 Table api_token {
   id           uuid        [pk, default: `uuidv7()`]
@@ -651,7 +639,7 @@ Table forward_target {
   kind             forward_kind [not null]
   enabled          boolean      [not null, default: true]
   config           jsonb        [not null, default: `'{}'::jsonb`, note: 'syslog: host, port, protocol, facility · webhook: url, method, headers, body (Vorlage)']
-  secret_id        uuid         [ref: > secret.id, note: 'z.B. Token im Webhook-Header; ON DELETE RESTRICT']
+  secret_id        uuid         [note: 'z.B. Token im Webhook-Header']
 
   // Filter
   events           text[]       [not null, note: 'finding.raised, finding.cleared, finding.acked, action.finished']
@@ -666,6 +654,8 @@ Table forward_target {
 
   Note: 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox.'
 }
+
+Ref: forward_target.secret_id > secret.id [delete: restrict]
 
 // ---------------------------------------------------------------------------
 // Geheimnisse

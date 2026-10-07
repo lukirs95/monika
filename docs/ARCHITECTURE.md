@@ -728,9 +728,9 @@ erDiagram
   secret |o--o{ forward_target : "secret_id"
 ```
 
-### Constraints außerhalb von DBML
+### Constraints
 
-Diese Regeln stehen als SQL in den Tabellennotizen von `monika.dbml` und müssen in der Migration angelegt werden.
+Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `monika.dbml` und werden mit `make db-generate` in die Init-Migration übernommen. Einzige Ausnahme ist der Teilindex `finding_active_uq`: DBML kennt kein `WHERE` an Indizes, er steht deshalb handgeschrieben in `migrations/`.
 
 | Tabelle | Constraint | Zweck |
 |---|---|---|
