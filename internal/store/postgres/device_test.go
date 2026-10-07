@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/store/postgres"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
 )
@@ -29,7 +30,7 @@ func TestDeleteDevice(t *testing.T) {
 		t.Fatalf("AddGroupMember: %v", err)
 	}
 
-	if err := postgres.DeleteDevice(ctx, pool, device); err != nil {
+	if err := postgres.New(pool).DeleteDevice(ctx, device); err != nil {
 		t.Fatalf("DeleteDevice: %v", err)
 	}
 
@@ -54,7 +55,7 @@ func TestDeleteDevice(t *testing.T) {
 	if err != nil || n != 0 {
 		t.Fatalf("UpdateDeviceSource = %d, %v; want 0, nil", n, err)
 	}
-	if err := postgres.DeleteDevice(ctx, pool, device); err != nil {
+	if err := postgres.New(pool).DeleteDevice(ctx, device); err != nil {
 		t.Fatalf("DeleteDevice again: %v", err)
 	}
 }
@@ -80,8 +81,8 @@ func TestDeleteDeviceUsedByPreset(t *testing.T) {
 		t.Fatalf("insert preset_step: %v", err)
 	}
 
-	err = postgres.DeleteDevice(ctx, pool, device)
-	var inUse *postgres.DeviceInUseError
+	err = postgres.New(pool).DeleteDevice(ctx, device)
+	var inUse *inventory.DeviceInUseError
 	if !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
 		t.Fatalf("DeleteDevice = %v, want DeviceInUseError naming preset %s", err, preset)
 	}
@@ -94,7 +95,7 @@ func TestDeleteDeviceNotFound(t *testing.T) {
 	t.Parallel()
 	pool := server.NewDB(t)
 
-	if err := postgres.DeleteDevice(t.Context(), pool, uuid.Must(uuid.NewV7())); !errors.Is(err, postgres.ErrNotFound) {
+	if err := postgres.New(pool).DeleteDevice(t.Context(), uuid.Must(uuid.NewV7())); !errors.Is(err, inventory.ErrNotFound) {
 		t.Fatalf("DeleteDevice = %v, want ErrNotFound", err)
 	}
 }

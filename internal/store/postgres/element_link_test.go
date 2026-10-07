@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/store/postgres"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
 )
@@ -76,7 +77,7 @@ func newGroups(t *testing.T, q *db.Queries, n int) []uuid.UUID {
 }
 
 func addMember(ctx context.Context, pool *pgxpool.Pool, group, member uuid.UUID) error {
-	return postgres.AddGroupMember(ctx, pool, db.CreateMemberLinkParams{ID: newID(), GroupID: group, MemberID: member})
+	return postgres.New(pool).AddGroupMember(ctx, inventory.Link{ID: newID(), Type: inventory.LinkMember, FromID: group, ToID: member})
 }
 
 func TestMemberLinkWouldCycle(t *testing.T) {
@@ -123,7 +124,7 @@ func TestAddGroupMemberRejectsCycle(t *testing.T) {
 	if err := addMember(ctx, pool, g[0], g[1]); err != nil {
 		t.Fatalf("AddGroupMember: %v", err)
 	}
-	if err := addMember(ctx, pool, g[1], g[0]); !errors.Is(err, postgres.ErrMemberCycle) {
+	if err := addMember(ctx, pool, g[1], g[0]); !errors.Is(err, inventory.ErrMemberCycle) {
 		t.Fatalf("AddGroupMember = %v, want ErrMemberCycle", err)
 	}
 }
@@ -161,7 +162,7 @@ func TestAddGroupMemberWaitsForLock(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	if err := <-done; !errors.Is(err, postgres.ErrMemberCycle) {
+	if err := <-done; !errors.Is(err, inventory.ErrMemberCycle) {
 		t.Fatalf("AddGroupMember = %v, want ErrMemberCycle", err)
 	}
 }
