@@ -1,0 +1,722 @@
+Project monika {
+  database_type: 'PostgreSQL'
+  Note: '''
+  # Monika — Datenmodell (Stand: Schritt 1–8)
+
+  Geheimnisse: verschlüsselt in der Tabelle secret (AES-256-GCM, nur in Go).
+  Der Master-Key liegt nie in der Datenbank, sondern in MONIKA_MASTER_KEY
+  (Umgebung oder .env). Quellen und Weiterleitungen verweisen per secret_id.
+
+  IDs: UUIDv7 (zeitlich sortiert). DB-Default uuidv7() ab PostgreSQL 18;
+  im Normalfall erzeugt Go die ID vor dem Insert (uuid.NewV7()).
+  UUIDs immer als Typ uuid speichern, nie als text.
+
+  Grundregeln
+  - Das Gerät ist immer die Wahrheit. Monika speichert keine Soll-Konfiguration.
+  - Kein Kreuzschienen-Tool: Links werden beobachtet, nicht geschaltet.
+  - Treiber melden Fakten, der Core bewertet.
+  - Jedes Element hat genau einen Besitzer (eine Quelle oder der User).
+    Dasselbe reale Ding darf aus mehreren Perspektiven auftauchen,
+    verbunden über Links vom Typ represents.
+  - Spaltenregel: Was übergreifend abgefragt wird, bekommt eine Spalte.
+    Was nur angezeigt wird, kommt ins JSONB.
+  - Inventar (selten), Zustand (ständig) und Historie (InfluxDB) werden getrennt.
+  - Abgrenzung: Was ohne Wissen über Struktur und Topologie funktioniert,
+    gehört nicht in Monika (Zeitreihen-Abfragen → Grafana,
+    Benachrichtigungs-Routing → Webhook/Alertmanager).
+
+  Drei Klassen von Elementen
+  - Gerät:   kind = device. device_id = eigene id, kein parent, keine Quelle.
+  - Gruppe:  kind = group. Kein device, kein parent, keine Quelle, keine external_id.
+             Hierarchie nur über element_link (type = member).
+  - Treiber: alle anderen kinds. Gehören einer Quelle, haben device_id,
+             external_id und einen parent (mindestens das Gerät selbst).
+             Auch vom User vorab angelegte Elemente gehören dieser Klasse an
+             (source_id gesetzt, first_seen_at = NULL).
+
+  Bewertung
+  - Fakten: flache Map mit Punkt-Schlüsseln (running, signal_present,
+    format.rate, ptp_offset, vxl.cpu_temp). Vokabular in Go, drei Stufen:
+    Kern (Pflicht), bekannte Metriken, Rohwerte mit Namespace.
+  - Regeln beschreiben den Sollzustand: fact <op> value, optional when.
+    Fakt existiert nicht am Element oder when nicht erfüllt → Regel gilt dort nicht.
+  - Pro Element und Fakt gewinnt die spezifischste Regel:
+    Element > Gerät > Gruppe > global. Gleich spezifische Regeln gelten alle.
+  - Befunde entstehen aus Regeln (vom User), Gerätealarmen (automatisch)
+    und Systemzuständen (Quelle nicht erreichbar, Daten veraltet).
+  - Health = schlimmster aktiver Befund. Veraltete Daten → unknown, nie error.
+  - Ursache vs. Symptom über Links: feeds A→B wirkt auf B, uses A→B wirkt
+    auf A, parent wirkt auf Kinder; member und represents wirken nicht.
+  - Gruppen: Health = schlimmster Zustand der Mitglieder, keine Redundanzlogik.
+
+  Aktionen
+  - Aktionen sind einmalige Befehle mit "Übernehmen", nie Regler mit Live-Wirkung.
+  - Befehle (start, stop, reboot, vxl.*) stehen in element.actions.
+  - Einstellungen sind schreibbare Fakten: Aktion set mit {"schlüssel": wert}.
+    Schlüssel = Fakt-Schlüssel; Grenzen stehen in element.settings.
+    Prüfung automatisch: jeder gesetzte Schlüssel eq Wert.
+  - Erfolg = beobachteter Gerätezustand, nicht die Antwort auf den Befehl
+    (accepted ≠ confirmed).
+  - Eine Aktion läuft immer über die Quelle, die das Element besitzt
+    (auch an Stellvertretern, z.B. Remote-Encoder über das lokale X8).
+  - Kreuzschienen-Grenze: Aktionen dürfen uses-Links ändern
+    (z.B. Uplink-Interface), niemals feeds-Links (Sender ↔ Receiver).
+  - Läufe an einem Element werden vom Core nacheinander abgearbeitet (FIFO).
+  - Presets sind gespeicherte Befehlsfolgen, kein Sollzustand.
+    Monika gleicht nach dem Ausführen nichts ab.
+
+  Generische Aktionen (HTTP-Treiber)
+  - Ein externes System ist ein Gerät mit Treiber http. Jeder konfigurierte
+    Aufruf wird ein Element (kind = trigger, actions = {trigger}).
+  - Für diesen Treiber ist seine Konfiguration (device_source.config) das Gerät.
+  - Nur Sende-Aufrufe: Monika liest keinen Zustand vom Zielsystem.
+  - Konfiguration pro Aufruf: id (= external_id, vom User vergeben, stabil),
+    name, method, path, body (Vorlage), params (Typ, Grenzen, value).
+  - body und path sind Vorlagen und werden von keiner Aktion verändert.
+    Platzhalter stehen ohne Anführungszeichen und werden kontextgerecht
+    eingesetzt (JSON-Wert im Body, URL-Encoding in Pfad und Query).
+  - params werden zu element.settings; params.*.value wird als Fakt gemeldet.
+    Bedeutung: "Monika würde diesen Wert senden", nicht Zustand des Zielsystems.
+  - set ändert den gespeicherten Wert (params.*.value).
+    trigger {...} setzt Werte nur für diesen Aufruf (Overrides, gegen dieselben
+    Grenzen geprüft); in Presets bevorzugt, weil atomar.
+  - Ergebnis: 2xx → accepted, 4xx/5xx → rejected (Status und Body in response),
+    Timeout/keine Verbindung → failed.
+    Fakten pro Aufruf: last_status, last_called_at, last_duration_ms.
+  - Optionaler Health-Check pro Gerät (path, interval_s) → normale
+    Erreichbarkeits-Logik inkl. source.unreachable.
+  - Alle Aufrufe einer Quelle teilen sich config: set aktualisiert nur den
+    betroffenen Pfad (jsonb_set) bzw. wird pro Quelle serialisiert.
+  - Zugangsdaten nur über secret_id (Secret-Store), nie in config.
+  - Später möglich: weitere Treiber nach demselben Muster (osc, tcp).
+
+  Benutzer und Rechte
+  - Identität und Berechtigung sind getrennt: Anmeldung lokal oder später per
+    OIDC (user_identity), Rechte immer in Monika (role, permission_grant).
+  - Rechte werden an Rollen vergeben, nie direkt an Benutzer. Nur Erlauben,
+    kein Verbieten; Rechte aus mehreren Rollen addieren sich.
+  - Scope wie bei Regeln: Gerät oder Gruppe (rekursiv), NULL = überall.
+    preset_run, preset_edit und admin sind nur global.
+  - critical ist ein Zusatzrecht: kritische Aktionen brauchen das Grundrecht
+    (operate bzw. configure) UND critical im selben Bereich.
+    Kritisch ist, was bei einem Fehlgriff viel kaputt macht und lange zur
+    Behebung braucht. Das legt der Treiber fest: Kennzeichen an der
+    Aktionsdefinition (Go) bzw. "critical": true an einem Schlüssel in
+    element.settings. Ein set ist kritisch, sobald ein gesetzter Schlüssel
+    kritisch ist.
+  - Presets: Vor dem Start prüft der Core die Rechte für jeden Schritt am
+    jeweiligen Ziel; fehlt eines, startet das Preset nicht.
+  - Maschinen (Companion, Stream Deck, Node-RED) nutzen Dienstkonten
+    (app_user.is_service) mit API-Tokens; Rechte und Audit wie bei Menschen.
+  - Benutzer werden nie gelöscht, nur deaktiviert (Audit-Verweise bleiben gültig).
+  - Standorte und Produktionen sind Gruppen, kein eigenes Konzept.
+
+  Weiterleitung
+  - Die UI von Monika ist der Hauptadressat. Weiterleitung nur per syslog und
+    webhook (Body-Vorlage wie beim HTTP-Treiber; deckt Slack, Teams, Mail
+    über Node-RED ab).
+  - Filter: Ereignistyp, Mindest-Schweregrad, Scope-Element.
+  - Best effort: wenige Wiederholungen im Speicher, danach last_error.
+    Kein Routing, keine Eskalation, keine Outbox.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Enums — nur für kleine, stabile Wertemengen.
+// kind, transport und fact sind bewusst text: Das Vokabular lebt in Go und
+// wächst mit den Treibern, ohne dass jeder neue Wert eine Migration braucht.
+// ---------------------------------------------------------------------------
+
+Enum link_type {
+  feeds      [note: 'Signalfluss: from speist to (z.B. SDI-In → Encoder, Remote-E1 → D1)']
+  uses       [note: 'Ressourcenbindung ohne Signalrichtung (Unit → Port, Stream → Interface, D1 → Peer)']
+  member     [note: 'Gruppenmitgliedschaft: from = Gruppe, to = Mitglied']
+  represents [note: 'Perspektive: from ist Stellvertreter von to (Peer → Remote-Gerät)']
+}
+
+Enum port_direction {
+  in
+  out
+  bidir
+}
+
+Enum health {
+  ok
+  warning
+  error
+  unknown
+}
+
+Enum severity {
+  info
+  warning
+  error
+}
+
+Enum rule_op {
+  eq     [note: 'bool, number, string']
+  ne     [note: 'bool, number, string']
+  lt     [note: 'number']
+  lte    [note: 'number']
+  gt     [note: 'number']
+  gte    [note: 'number']
+  in     [note: 'value ist Liste']
+  not_in [note: 'value ist Liste']
+}
+
+Enum action_status {
+  pending     [note: 'angelegt, wartet auf Ausführung (ggf. in der Warteschlange des Elements)']
+  sent        [note: 'an den Treiber übergeben']
+  rejected    [note: 'Gerät hat abgelehnt']
+  failed      [note: 'Gerät nicht erreicht / Transportfehler / Ziel nicht vorhanden']
+  accepted    [note: 'Gerät hat angenommen; Endzustand, wenn keine Prüfbedingung']
+  confirmed   [note: 'Prüfbedingung im Gerätezustand erfüllt']
+  unconfirmed [note: 'Timeout: angenommen, aber keine Wirkung beobachtet']
+  cancelled
+}
+
+Enum permission {
+  view           [note: 'Scope: sehen']
+  acknowledge    [note: 'Scope: Befunde quittieren']
+  operate        [note: 'Scope: Befehle (start, stop, trigger, ...)']
+  configure      [note: 'Scope: Einstellungen (set)']
+  critical       [note: 'Scope: Zusatzrecht für kritische Befehle und Einstellungen']
+  inventory_edit [note: 'Scope: Labels, Gruppen, Geräte und Quellen']
+  rule_edit      [note: 'Scope: Regeln']
+  preset_run     [note: 'global: Presets ausführen (plus Rechte an allen Zielen)']
+  preset_edit    [note: 'global: Presets bearbeiten']
+  admin          [note: 'global: Benutzer, Rollen, Rechte, Weiterleitungen']
+}
+
+Enum forward_kind {
+  syslog
+  webhook
+}
+
+Enum finding_origin {
+  rule   [note: 'vom User definierte Regel verletzt']
+  device [note: 'vom Gerät selbst gemeldeter Alarm']
+  system [note: 'Monika selbst: Quelle nicht erreichbar, Daten veraltet']
+}
+
+// ---------------------------------------------------------------------------
+// Inventar
+// ---------------------------------------------------------------------------
+
+Table element {
+  id            uuid        [pk, default: `uuidv7()`]
+  kind          text        [not null, note: 'device, group, module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger']
+  parent_id     uuid        [ref: > element.id, note: 'nur physische/strukturelle Hierarchie']
+  device_id     uuid        [ref: > device.element_id, note: 'zugehöriges Gerät; beim Gerät selbst = eigene id; NULL bei Gruppen']
+  source_id     uuid        [ref: > device_source.id, note: 'besitzende Quelle; NULL bei Gerät und Gruppe']
+
+  // --- Identität, vom Treiber ---
+  external_id   text        [note: 'stabile ID innerhalb des Geräts, z.B. Slot-Pfad oder UnitID']
+  global_ref    text        [unique, note: 'global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern']
+
+  // --- Beschreibung, vom Treiber ---
+  transport     text        [note: 'sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...']
+  direction     port_direction [note: 'Fähigkeit des Anschlusses; die aktuelle Richtung steht in den Fakten']
+  name          text        [note: 'Name, wie das Gerät ihn meldet']
+  attributes    jsonb       [not null, default: `'{}'::jsonb`, note: 'statische Treiber-Attribute, nur zur Anzeige']
+  position      int         [note: 'Sortierung innerhalb des Parents']
+  actions       text[]      [not null, default: `'{}'`, note: 'unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}']
+  settings      jsonb       [note: 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}']
+
+  // --- Lebenszyklus, vom Core ---
+  present       boolean     [not null, default: true, note: 'false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten']
+  first_seen_at timestamptz [note: 'NULL = vom User vorab angelegt, vom Treiber noch nie gesehen']
+  last_seen_at  timestamptz
+
+  // --- vom User gepflegt, nie vom Treiber überschrieben ---
+  label         text
+  notes         text
+  monitored     boolean     [not null, default: true, note: 'false = von allen Regeln ausgenommen (unbenutzt)']
+
+  created_at    timestamptz [not null, default: `now()`]
+  updated_at    timestamptz [not null, default: `now()`]
+
+  indexes {
+    (device_id, external_id) [unique, name: 'element_device_external_uq']
+    parent_id
+    device_id
+    source_id
+    (kind, transport)
+    actions [type: gin]
+  }
+
+  Note: '''
+  CHECK (in SQL zu ergänzen, DBML kann es nicht ausdrücken):
+
+  CONSTRAINT element_class_check CHECK (
+    (kind = 'device'
+       AND device_id = id AND parent_id IS NULL
+       AND source_id IS NULL AND external_id IS NULL)
+    OR
+    (kind = 'group'
+       AND device_id IS NULL AND parent_id IS NULL
+       AND source_id IS NULL AND external_id IS NULL)
+    OR
+    (kind NOT IN ('device', 'group')
+       AND device_id IS NOT NULL AND parent_id IS NOT NULL
+       AND source_id IS NOT NULL AND external_id IS NOT NULL)
+  )
+
+  Hinweis: device_id = id beim Gerät erfordert, dass die id vor dem Insert
+  vergeben wird (in Go erzeugen statt per Default).
+  '''
+}
+
+Table device {
+  element_id uuid [pk, ref: - element.id]
+
+  // Identität, von einer Quelle gemeldet
+  vendor     text
+  model      text
+  serial     text
+  firmware   text
+
+  indexes {
+    (vendor, model)
+    firmware
+  }
+
+  Note: '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source.'
+}
+
+Table device_source {
+  id         uuid    [pk, default: `uuidv7()`]
+  device_id  uuid    [not null, ref: > device.element_id]
+  driver     text    [not null, note: 'videoxlink, embrionix, directout-ravio, ipmi, ...']
+  address    text    [note: 'Management-Host/IP']
+  config     jsonb   [not null, default: `'{}'::jsonb`, note: 'treiberspezifische Verbindungsparameter, keine Geheimnisse']
+  secret_id  uuid    [ref: > secret.id, note: 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen; ON DELETE RESTRICT']
+  enabled    boolean [not null, default: true]
+
+  created_at timestamptz [not null, default: `now()`]
+  updated_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (device_id, driver) [unique]
+    secret_id
+  }
+
+  Note: 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.'
+}
+
+Table element_link {
+  id         uuid      [pk, default: `uuidv7()`]
+  type       link_type [not null]
+  source_id  uuid      [ref: > device_source.id, note: 'meldende Quelle; NULL = vom User (member)']
+
+  from_id    uuid      [ref: > element.id]
+  from_ref   text      [note: 'global_ref der Quelle, solange nicht aufgelöst']
+  to_id      uuid      [ref: > element.id]
+  to_ref     text      [note: 'global_ref des Ziels, solange nicht aufgelöst']
+
+  // nur für member
+  position   int       [note: 'Position in der Gruppe, z.B. Stagebox-Kanal 5']
+  label      text      [note: 'Label in diesem Kontext']
+
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    from_id
+    to_id
+    source_id
+    from_ref
+    to_ref
+  }
+
+  Note: '''
+  Regeln:
+  - Treiber-Links (feeds, uses, represents) werden bei Wegfall gelöscht,
+    nicht weich markiert; ihre Historie gehört nach InfluxDB/Audit.
+  - Ein Link über Gerätegrenzen wird von der Seite gemeldet, die ihn
+    konfiguriert (bei XLink: der Decoder).
+  - member-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung).
+  - Lösch-Verhalten: ON DELETE CASCADE auf from_id und to_id.
+
+  CHECK und eindeutiger Index (in SQL zu ergänzen):
+
+  CONSTRAINT element_link_endpoints_check CHECK (
+    (from_id IS NOT NULL OR from_ref IS NOT NULL)
+    AND (to_id IS NOT NULL OR to_ref IS NOT NULL)
+  )
+
+  CONSTRAINT element_link_owner_check CHECK (
+    (type = 'member' AND source_id IS NULL)
+    OR (type <> 'member' AND source_id IS NOT NULL)
+  )
+
+  CREATE UNIQUE INDEX element_link_uq ON element_link (
+    type,
+    COALESCE(from_id::text, from_ref),
+    COALESCE(to_id::text, to_ref)
+  );
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Bewertung
+// ---------------------------------------------------------------------------
+
+Table rule {
+  id               uuid     [pk, default: `uuidv7()`]
+  name             text     [not null]
+  enabled          boolean  [not null, default: true]
+  severity         severity [not null, default: 'error']
+
+  // Geltungsbereich — alle NULL = global
+  scope_element_id uuid     [ref: > element.id, note: 'Element, Gerät (inkl. Kinder) oder Gruppe (inkl. Mitglieder, rekursiv)']
+  match_kind       text
+  match_transport  text
+  match_driver     text
+
+  // Sollzustand: fact <op> value
+  fact             text     [not null, note: 'running, signal_present, format.rate, ptp_offset, vxl.cpu_temp, ...']
+  op               rule_op  [not null]
+  value            jsonb    [not null, note: 'true | 50 | "i" | [50, 59.94]']
+
+  // Vorbedingung: Regel gilt nur, wenn when_fact <when_op> when_value erfüllt ist
+  when_fact        text
+  when_op          rule_op
+  when_value       jsonb
+
+  // Entprellung
+  clear_value      jsonb    [note: 'Hysterese, nur numerisch: Befund endet erst, wenn dieser Wert erreicht ist']
+  hold_seconds     int      [not null, default: 0, note: 'Verletzung muss so lange anliegen, bevor ein Befund entsteht']
+
+  created_at       timestamptz [not null, default: `now()`]
+  updated_at       timestamptz [not null, default: `now()`]
+
+  indexes {
+    scope_element_id
+    fact
+  }
+
+  Note: '''
+  Alle Regeln kommen vom User; es gibt keine mitgelieferten Standardregeln.
+  Operator und Typ von value werden in Go beim Speichern geprüft.
+
+  CHECK (in SQL zu ergänzen):
+
+  CONSTRAINT rule_when_check CHECK (
+    (when_fact IS NULL AND when_op IS NULL AND when_value IS NULL)
+    OR (when_fact IS NOT NULL AND when_op IS NOT NULL AND when_value IS NOT NULL)
+  )
+
+  CONSTRAINT rule_hold_check CHECK (hold_seconds >= 0)
+  '''
+}
+
+Table finding {
+  id           uuid           [pk, default: `uuidv7()`]
+  element_id   uuid           [not null, ref: > element.id]
+  origin       finding_origin [not null]
+  rule_id      uuid           [ref: > rule.id, note: 'bei origin = rule; ON DELETE SET NULL, damit die Historie bleibt']
+  code         text           [not null, note: 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, data.stale']
+  severity     severity       [not null]
+  message      text           [note: 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds']
+  details      jsonb          [note: 'Sollwert, Istwert, Regel-Snapshot']
+  caused_by_id uuid           [ref: > finding.id, note: 'NULL = Ursache, sonst Symptom']
+
+  raised_at    timestamptz    [not null]
+  cleared_at   timestamptz    [note: 'NULL = aktiv']
+  acked_at     timestamptz    [note: 'Quittierung ändert nicht die Health, nur Anzeige und Meldung']
+  acked_by_id  uuid           [ref: > app_user.id]
+
+  indexes {
+    element_id
+    rule_id
+    caused_by_id
+    raised_at
+  }
+
+  Note: '''
+  Höchstens ein aktiver Befund pro Element, Code und Regel (in SQL zu ergänzen):
+
+  CREATE UNIQUE INDEX finding_active_uq ON finding (
+    element_id,
+    code,
+    COALESCE(rule_id, '00000000-0000-0000-0000-000000000000'::uuid)
+  ) WHERE cleared_at IS NULL;
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Aktionen und Presets
+// ---------------------------------------------------------------------------
+
+Table preset {
+  id          uuid        [pk, default: `uuidv7()`]
+  name        text        [not null]
+  description   text
+  created_by_id uuid        [ref: > app_user.id]
+  created_at    timestamptz [not null, default: `now()`]
+  updated_at  timestamptz [not null, default: `now()`]
+
+  Note: 'Gespeicherte Befehlsfolge, kein Sollzustand. Stufen laufen nacheinander, Schritte einer Stufe parallel.'
+}
+
+Table preset_step {
+  id                uuid    [pk, default: `uuidv7()`]
+  preset_id         uuid    [not null, ref: > preset.id, note: 'ON DELETE CASCADE']
+  stage             int     [not null, note: 'gleiche Stufe = parallel; Stufen nacheinander, jede wartet auf Endzustand aller Läufe der vorigen']
+  position          int     [not null, note: 'Sortierung innerhalb der Stufe (nur Anzeige)']
+  delay_ms          int     [not null, default: 0, note: 'Wartezeit ab Beginn der Stufe, bevor dieser Schritt startet']
+  element_id        uuid    [not null, ref: > element.id, note: 'Element, Gerät oder Gruppe (Verteilung auf Mitglieder); ON DELETE RESTRICT']
+  action            text    [not null, note: 'start, stop, set, reboot, trigger, vxl.*']
+  params            jsonb   [note: 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides']
+  continue_on_error boolean [not null, default: false, note: 'false = Fehler bricht das Preset ab']
+
+  indexes {
+    (preset_id, stage, position)
+    element_id
+  }
+
+  Note: '''
+  CHECK (in SQL zu ergänzen):
+
+  CONSTRAINT preset_step_check CHECK (stage >= 1 AND delay_ms >= 0)
+  '''
+}
+
+Table action_run {
+  id             uuid          [pk, default: `uuidv7()`]
+  parent_id      uuid          [ref: > action_run.id, note: 'Hierarchie: Preset-Lauf → Schritt-Lauf → Element-Läufe (bei Gruppen/Geräten)']
+  preset_id      uuid          [ref: > preset.id, note: 'gesetzt am Wurzel-Lauf eines Presets; ON DELETE SET NULL']
+  preset_step_id uuid          [ref: > preset_step.id, note: 'ON DELETE SET NULL']
+
+  element_id     uuid          [ref: > element.id, note: 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf']
+  source_id      uuid          [ref: > device_source.id, note: 'ausführende Quelle; NULL bei übergeordneten Läufen']
+  action         text          [not null, note: 'start, stop, set, reboot, vxl.*; am Preset-Wurzel-Lauf: preset']
+  params         jsonb         [note: 'bei set: zu setzende Werte; bei trigger: Overrides nur für diesen Aufruf']
+  status         action_status [not null, default: 'pending']
+  critical       boolean       [not null, default: false, note: 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)']
+
+  verify         jsonb         [note: 'Snapshot der Prüfbedingung, z.B. [{"fact": "bitrate", "op": "eq", "value": 20}] mit timeout_s']
+  response       jsonb         [note: 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern']
+
+  requested_by_id uuid         [not null, ref: > app_user.id, note: 'Mensch oder Dienstkonto (API-Token)']
+  requested_at   timestamptz   [not null, default: `now()`]
+  sent_at        timestamptz
+  responded_at   timestamptz
+  finished_at    timestamptz
+
+  indexes {
+    element_id
+    parent_id
+    preset_id
+    requested_at
+    status
+    requested_by_id
+  }
+
+  Note: '''
+  Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
+  Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
+
+  CHECK (in SQL zu ergänzen):
+
+  CONSTRAINT action_run_target_check CHECK (
+    element_id IS NOT NULL
+    OR (preset_id IS NOT NULL AND parent_id IS NULL)
+  )
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Benutzer, Rollen und Rechte
+// ---------------------------------------------------------------------------
+
+Table app_user {
+  id            uuid        [pk, default: `uuidv7()`]
+  username      text        [not null, unique, note: 'in Go auf Kleinschreibung normalisiert']
+  display_name  text
+  email         text
+  password_hash text        [note: 'lokale Anmeldung (argon2id); NULL = nur externe Anmeldung']
+  is_service    boolean     [not null, default: false, note: 'Dienstkonto: nur API-Tokens, keine interaktive Anmeldung']
+  disabled      boolean     [not null, default: false, note: 'Benutzer werden nie gelöscht, nur deaktiviert']
+  created_at    timestamptz [not null, default: `now()`]
+  last_login_at timestamptz
+
+  Note: '"user" ist in PostgreSQL reserviert, daher app_user.'
+}
+
+Table user_identity {
+  id           uuid        [pk, default: `uuidv7()`]
+  user_id      uuid        [not null, ref: > app_user.id]
+  issuer       text        [not null, note: 'OIDC-Issuer-URL des Identity Providers']
+  subject      text        [not null, note: 'sub-Claim']
+  created_at   timestamptz [not null, default: `now()`]
+  last_used_at timestamptz
+
+  indexes {
+    (issuer, subject) [unique]
+    user_id
+  }
+
+  Note: 'Externe Anmeldewege (OIDC). Kommt ein IdP dazu, entstehen nur neue Zeilen.'
+}
+
+Table role {
+  id           uuid [pk, default: `uuidv7()`]
+  name         text [not null, unique]
+  description  text
+  external_ref text [unique, note: 'Wert im Groups-Claim des IdP; Mitgliedschaft wird beim Login synchronisiert']
+}
+
+Table role_member {
+  role_id    uuid        [not null, ref: > role.id, note: 'ON DELETE CASCADE']
+  user_id    uuid        [not null, ref: > app_user.id]
+  origin     text        [not null, default: 'manual', note: 'manual | idp; idp-Mitgliedschaften werden beim Login überschrieben']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    (role_id, user_id) [pk]
+    user_id
+  }
+}
+
+Table permission_grant {
+  id               uuid       [pk, default: `uuidv7()`]
+  role_id          uuid       [not null, ref: > role.id, note: 'ON DELETE CASCADE']
+  permission       permission [not null]
+  scope_element_id uuid       [ref: > element.id, note: 'Gerät oder Gruppe, rekursiv; NULL = überall; ON DELETE CASCADE']
+  created_at       timestamptz [not null, default: `now()`]
+
+  indexes {
+    role_id
+    scope_element_id
+  }
+
+  Note: '''
+  CHECK und eindeutiger Index (in SQL zu ergänzen):
+
+  CONSTRAINT permission_grant_global_check CHECK (
+    permission NOT IN ('preset_run', 'preset_edit', 'admin')
+    OR scope_element_id IS NULL
+  )
+
+  CREATE UNIQUE INDEX permission_grant_uq ON permission_grant (
+    role_id,
+    permission,
+    COALESCE(scope_element_id, '00000000-0000-0000-0000-000000000000'::uuid)
+  );
+  '''
+}
+
+Table api_token {
+  id           uuid        [pk, default: `uuidv7()`]
+  user_id      uuid        [not null, ref: > app_user.id, note: 'meist ein Dienstkonto']
+  name         text        [not null]
+  token_hash   text        [not null, unique, note: 'SHA-256 eines zufälligen Tokens; Klartext nur einmal bei Erstellung angezeigt']
+  expires_at   timestamptz
+  revoked_at   timestamptz
+  last_used_at timestamptz
+  created_at   timestamptz [not null, default: `now()`]
+
+  indexes {
+    user_id
+  }
+}
+
+Table audit_log {
+  id          uuid        [pk, default: `uuidv7()`]
+  actor_id    uuid        [ref: > app_user.id, note: 'NULL = Monika selbst']
+  at          timestamptz [not null, default: `now()`]
+  verb        text        [not null, note: 'create | update | delete | login | login_failed']
+  object_type text        [not null, note: 'rule, preset, device_source, role, permission_grant, forward_target, ...']
+  object_id   uuid
+  before      jsonb       [note: 'Geheimnisse geschwärzt']
+  after       jsonb       [note: 'Geheimnisse geschwärzt']
+
+  indexes {
+    (object_type, object_id)
+    actor_id
+    at
+  }
+
+  Note: 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run.'
+}
+
+// ---------------------------------------------------------------------------
+// Weiterleitung
+// ---------------------------------------------------------------------------
+
+Table forward_target {
+  id               uuid         [pk, default: `uuidv7()`]
+  name             text         [not null]
+  kind             forward_kind [not null]
+  enabled          boolean      [not null, default: true]
+  config           jsonb        [not null, default: `'{}'::jsonb`, note: 'syslog: host, port, protocol, facility · webhook: url, method, headers, body (Vorlage)']
+  secret_id        uuid         [ref: > secret.id, note: 'z.B. Token im Webhook-Header; ON DELETE RESTRICT']
+
+  // Filter
+  events           text[]       [not null, note: 'finding.raised, finding.cleared, finding.acked, action.finished']
+  min_severity     severity     [note: 'nur für finding.*; NULL = alle']
+  scope_element_id uuid         [ref: > element.id, note: 'Gerät oder Gruppe, rekursiv; NULL = alles']
+
+  // Zustand (best effort)
+  last_sent_at     timestamptz
+  last_error       text
+  created_at       timestamptz  [not null, default: `now()`]
+  updated_at       timestamptz  [not null, default: `now()`]
+
+  Note: 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox.'
+}
+
+// ---------------------------------------------------------------------------
+// Geheimnisse
+// ---------------------------------------------------------------------------
+
+Table secret {
+  id            uuid        [pk, default: `uuidv7()`]
+  name          text        [not null, unique, note: 'z.B. xlink-admin; in der UI auswählbar']
+  description   text
+  ciphertext    bytea       [not null, note: 'AES-256-GCM; Klartext ist JSON, Format legt der Treiber fest']
+  nonce         bytea       [not null, note: '12 Byte, pro Verschlüsselung zufällig']
+  key_id        text        [not null, note: 'Version des Master-Keys, mit dem verschlüsselt wurde']
+  created_by_id uuid        [ref: > app_user.id]
+  updated_by_id uuid        [ref: > app_user.id]
+  created_at    timestamptz [not null, default: `now()`]
+  updated_at    timestamptz [not null, default: `now()`]
+
+  Note: '''
+  Ver- und Entschlüsselung nur in Go, nie per pgcrypto (Schlüssel würde im SQL landen).
+  Associated Data = id, damit Werte nicht zwischen Zeilen vertauscht werden können.
+  Werte werden nie angezeigt, geloggt oder ins Audit geschrieben.
+  Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: inventory_edit.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Zustand — wird ständig überschrieben, Historie liegt in InfluxDB.
+// Der Core hält den Zustand im Speicher und schreibt nur bei Änderung.
+// ---------------------------------------------------------------------------
+
+Table element_state {
+  element_id  uuid        [pk, ref: - element.id]
+  facts       jsonb       [not null, default: `'{}'::jsonb`, note: 'flache Map aller aktuellen Werte, z.B. {"running": true, "format.rate": 50}']
+  alarms      jsonb       [note: 'vom Gerät gemeldete Alarme → automatisch Befunde']
+  health      health      [not null, default: 'unknown', note: 'vom Core: schlimmster aktiver Befund am Element']
+  rollup      jsonb       [note: 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3}']
+  reported_at timestamptz [note: 'Zeitpunkt der Messung am Gerät']
+  updated_at  timestamptz [not null, default: `now()`, note: 'Zeitpunkt des Schreibens']
+
+  indexes {
+    health
+  }
+}
+
+Table device_source_state {
+  source_id       uuid        [pk, ref: - device_source.id]
+  connected       boolean     [not null, default: false]
+  last_contact_at timestamptz
+  last_sync_at    timestamptz [note: 'letztes vollständiges Discovery']
+  last_error      text
+  updated_at      timestamptz [not null, default: `now()`]
+
+  Note: 'Verbindungszustand von Monika zur Quelle. Getrennt von device_source, weil er sich ständig ändert.'
+}
