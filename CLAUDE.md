@@ -5,6 +5,7 @@ Arbeitsregeln für Claude in diesem Repository.
 ## Projektstand
 
 - Verbindlich sind `docs/ARCHITECTURE.md` (Verhalten, Architekturentscheidungen) und `docs/schema/monika.dbml` (Datenbankschema).
+- Aktueller Arbeitsstand, nächste Schritte und bekannte Lücken stehen in `docs/STATUS.md`. Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 - Die Go-Architektur entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen. Bereits festgelegt ist das Muster für die Persistenz (siehe unten).
 - Abhängigkeiten zeigen nur nach innen: `drivers/*` importiert nur `sdk/` (und die jeweilige Gerätelibrary), nie `internal/`.
 
