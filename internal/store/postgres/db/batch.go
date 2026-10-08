@@ -86,7 +86,7 @@ INSERT INTO element (
   transport, direction, name, attributes, position, actions, critical_actions, settings,
   present, first_seen_at, last_seen_at
 ) VALUES (
-  $1, $2, $3::uuid, $4::uuid, $5::uuid, $6::text, $7,
+  $1, $2, $3::uuid, $4::uuid, $5::uuid, NULLIF($6::text, ''), $7,
   $8, $9, $10, $11, $12, $13, $14, $15,
   true, now(), now()
 )
@@ -135,6 +135,7 @@ type UpsertDriverElementParams struct {
 
 // Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 // Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
+// Eine leere external_id meint das Zugangs-Element der Quelle (gespeichert als NULL).
 func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverElementParams) *UpsertDriverElementBatchResults {
 	batch := &pgx.Batch{}
 	for _, a := range arg {

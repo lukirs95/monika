@@ -30,32 +30,47 @@ func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) erro
 	return err
 }
 
-const createDeviceSource = `-- name: CreateDeviceSource :exec
-INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+const createDeviceSource = `-- name: CreateDeviceSource :execrows
+WITH src AS (
+  INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
+  SELECT $2::uuid, e.id, $3::text, $4, $5::jsonb, $6, $7::boolean
+  FROM element e
+  WHERE e.id = $8::uuid AND e.kind = 'device' AND e.deleted_at IS NULL
+  RETURNING id, device_id, driver
+)
+INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
+SELECT $1::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
+FROM src
 `
 
 type CreateDeviceSourceParams struct {
+	AccessID uuid.UUID
 	ID       uuid.UUID
-	DeviceID uuid.UUID
 	Driver   string
 	Address  *string
 	Config   json.RawMessage
 	SecretID *uuid.UUID
 	Enabled  bool
+	DeviceID uuid.UUID
 }
 
-func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSourceParams) error {
-	_, err := q.db.Exec(ctx, createDeviceSource,
+// Legt die Quelle und ihr Zugangs-Element (kind = access) in einem Statement an.
+// Ist das Gerät unbekannt oder gelöscht, wird nichts angelegt (0 Zeilen).
+func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createDeviceSource,
+		arg.AccessID,
 		arg.ID,
-		arg.DeviceID,
 		arg.Driver,
 		arg.Address,
 		arg.Config,
 		arg.SecretID,
 		arg.Enabled,
+		arg.DeviceID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteDevice = `-- name: DeleteDevice :exec

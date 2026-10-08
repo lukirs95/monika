@@ -6,12 +6,13 @@ ORDER BY id;
 -- name: UpsertDriverElement :batchone
 -- Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 -- Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
+-- Eine leere external_id meint das Zugangs-Element der Quelle (gespeichert als NULL).
 INSERT INTO element (
   id, kind, parent_id, device_id, source_id, external_id, global_ref,
   transport, direction, name, attributes, position, actions, critical_actions, settings,
   present, first_seen_at, last_seen_at
 ) VALUES (
-  @id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, @external_id::text, @global_ref,
+  @id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, NULLIF(@external_id::text, ''), @global_ref,
   @transport, @direction, @name, @attributes, @position, @actions, @critical_actions, @settings,
   true, now(), now()
 )
@@ -36,16 +37,24 @@ RETURNING id;
 -- name: FinishDiscovery :many
 -- Abschluss einer Discovery, ein Statement pro Lauf und Quelle: gemeldete Elemente sind
 -- gesehen (last_seen_at), alle übrigen der Quelle verschwinden (present = false).
+-- Das Zugangs-Element (external_id NULL) gilt immer als gesehen; sein last_seen_at zeigt
+-- die letzte vollständige Discovery.
 -- Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
 -- Liefert die IDs der in diesem Lauf verschwundenen Elemente.
-WITH updated AS (
+WITH seen AS (
+  SELECT e.id, (e.external_id IS NULL OR e.id = ANY (COALESCE(@seen_ids::uuid[], '{}'))) AS seen
+  FROM element e
+  WHERE e.source_id = @source_id::uuid
+), updated AS (
   UPDATE element
-  SET present      = id = ANY (COALESCE(@seen_ids::uuid[], '{}')),
-      last_seen_at = CASE WHEN id = ANY (COALESCE(@seen_ids::uuid[], '{}')) THEN now() ELSE last_seen_at END,
-      updated_at   = CASE WHEN id = ANY (COALESCE(@seen_ids::uuid[], '{}')) THEN updated_at ELSE now() END
-  WHERE source_id = @source_id::uuid
-    AND (present OR id = ANY (COALESCE(@seen_ids::uuid[], '{}')))
-  RETURNING id, present
+  SET present       = seen.seen,
+      first_seen_at = CASE WHEN element.external_id IS NULL THEN COALESCE(first_seen_at, now()) ELSE first_seen_at END,
+      last_seen_at  = CASE WHEN seen.seen THEN now() ELSE last_seen_at END,
+      updated_at    = CASE WHEN seen.seen THEN updated_at ELSE now() END
+  FROM seen
+  WHERE element.id = seen.id
+    AND (element.present OR seen.seen)
+  RETURNING element.id, element.present
 )
 SELECT id FROM updated
 WHERE NOT present;

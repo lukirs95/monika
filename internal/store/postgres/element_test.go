@@ -28,15 +28,16 @@ func newDeviceWithSource(t *testing.T, q *db.Queries, driver string) (device, so
 
 func newSource(t *testing.T, q *db.Queries, device, source uuid.UUID, driver string) {
 	t.Helper()
-	err := q.CreateDeviceSource(t.Context(), db.CreateDeviceSourceParams{
+	n, err := q.CreateDeviceSource(t.Context(), db.CreateDeviceSourceParams{
 		ID:       source,
+		AccessID: newID(),
 		DeviceID: device,
 		Driver:   driver,
 		Config:   json.RawMessage(`{}`),
 		Enabled:  true,
 	})
-	if err != nil {
-		t.Fatalf("CreateDeviceSource: %v", err)
+	if err != nil || n != 1 {
+		t.Fatalf("CreateDeviceSource = %d, %v; want 1, nil", n, err)
 	}
 }
 

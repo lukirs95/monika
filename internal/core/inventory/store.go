@@ -22,7 +22,9 @@ type Store interface {
 	// DeleteDevice löscht ein Gerät weich. Solange Presets es verwenden: *DeviceInUseError.
 	DeleteDevice(ctx context.Context, id uuid.UUID) error
 
-	CreateSource(ctx context.Context, s Source) error
+	// CreateSource legt eine Quelle samt Zugangs-Element (ID accessID) an. Ist das Gerät
+	// unbekannt oder gelöscht: ErrNotFound.
+	CreateSource(ctx context.Context, s Source, accessID uuid.UUID) error
 	// UpdateSource ändert Adresse, Konfiguration, Secret und Aktivierung einer Quelle.
 	UpdateSource(ctx context.Context, s Source) error
 

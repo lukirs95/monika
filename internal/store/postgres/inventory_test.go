@@ -24,7 +24,7 @@ func TestStoreApplyDiscovery(t *testing.T) {
 	if err := s.CreateDevice(ctx, inventory.Element{ID: device, Label: "Lokal 1"}); err != nil {
 		t.Fatalf("CreateDevice: %v", err)
 	}
-	if err := s.CreateSource(ctx, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink", Enabled: true}); err != nil {
+	if err := s.CreateSource(ctx, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink", Enabled: true}, newID()); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
 

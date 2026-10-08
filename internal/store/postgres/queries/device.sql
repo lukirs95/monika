@@ -13,9 +13,19 @@ SET vendor     = @vendor,
     updated_at = now()
 WHERE id = @id;
 
--- name: CreateDeviceSource :exec
-INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
-VALUES (@id, @device_id, @driver, @address, @config, @secret_id, @enabled);
+-- name: CreateDeviceSource :execrows
+-- Legt die Quelle und ihr Zugangs-Element (kind = access) in einem Statement an.
+-- Ist das Gerät unbekannt oder gelöscht, wird nichts angelegt (0 Zeilen).
+WITH src AS (
+  INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
+  SELECT @id::uuid, e.id, @driver::text, @address, @config::jsonb, @secret_id, @enabled::boolean
+  FROM element e
+  WHERE e.id = @device_id::uuid AND e.kind = 'device' AND e.deleted_at IS NULL
+  RETURNING id, device_id, driver
+)
+INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
+SELECT @access_id::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
+FROM src;
 
 -- name: UpdateDeviceSource :execrows
 -- Treiber und Gerät einer Quelle stehen fest; sonst würden ihre Elemente den Besitzer wechseln.

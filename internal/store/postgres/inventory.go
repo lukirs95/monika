@@ -166,9 +166,10 @@ func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-func (s *Store) CreateSource(ctx context.Context, src inventory.Source) error {
-	return s.q.CreateDeviceSource(ctx, db.CreateDeviceSourceParams{
+func (s *Store) CreateSource(ctx context.Context, src inventory.Source, accessID uuid.UUID) error {
+	n, err := s.q.CreateDeviceSource(ctx, db.CreateDeviceSourceParams{
 		ID:       src.ID,
+		AccessID: accessID,
 		DeviceID: src.DeviceID,
 		Driver:   src.Driver,
 		Address:  nullable(src.Address),
@@ -176,6 +177,7 @@ func (s *Store) CreateSource(ctx context.Context, src inventory.Source) error {
 		SecretID: nullable(src.SecretID),
 		Enabled:  src.Enabled,
 	})
+	return rowsAffected(n, err)
 }
 
 func (s *Store) UpdateSource(ctx context.Context, src inventory.Source) error {

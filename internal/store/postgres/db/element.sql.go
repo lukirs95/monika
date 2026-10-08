@@ -59,14 +59,20 @@ func (q *Queries) CreatePlannedElement(ctx context.Context, arg CreatePlannedEle
 }
 
 const finishDiscovery = `-- name: FinishDiscovery :many
-WITH updated AS (
+WITH seen AS (
+  SELECT e.id, (e.external_id IS NULL OR e.id = ANY (COALESCE($1::uuid[], '{}'))) AS seen
+  FROM element e
+  WHERE e.source_id = $2::uuid
+), updated AS (
   UPDATE element
-  SET present      = id = ANY (COALESCE($1::uuid[], '{}')),
-      last_seen_at = CASE WHEN id = ANY (COALESCE($1::uuid[], '{}')) THEN now() ELSE last_seen_at END,
-      updated_at   = CASE WHEN id = ANY (COALESCE($1::uuid[], '{}')) THEN updated_at ELSE now() END
-  WHERE source_id = $2::uuid
-    AND (present OR id = ANY (COALESCE($1::uuid[], '{}')))
-  RETURNING id, present
+  SET present       = seen.seen,
+      first_seen_at = CASE WHEN element.external_id IS NULL THEN COALESCE(first_seen_at, now()) ELSE first_seen_at END,
+      last_seen_at  = CASE WHEN seen.seen THEN now() ELSE last_seen_at END,
+      updated_at    = CASE WHEN seen.seen THEN updated_at ELSE now() END
+  FROM seen
+  WHERE element.id = seen.id
+    AND (element.present OR seen.seen)
+  RETURNING element.id, element.present
 )
 SELECT id FROM updated
 WHERE NOT present
@@ -79,6 +85,8 @@ type FinishDiscoveryParams struct {
 
 // Abschluss einer Discovery, ein Statement pro Lauf und Quelle: gemeldete Elemente sind
 // gesehen (last_seen_at), alle übrigen der Quelle verschwinden (present = false).
+// Das Zugangs-Element (external_id NULL) gilt immer als gesehen; sein last_seen_at zeigt
+// die letzte vollständige Discovery.
 // Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
 // Liefert die IDs der in diesem Lauf verschwundenen Elemente.
 func (q *Queries) FinishDiscovery(ctx context.Context, arg FinishDiscoveryParams) ([]uuid.UUID, error) {
