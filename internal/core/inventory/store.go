@@ -19,7 +19,7 @@ type Store interface {
 
 	// CreateDevice legt ein Gerät an; verwendet ID, Label und Notes.
 	CreateDevice(ctx context.Context, e Element) error
-	// DeleteDevice löscht ein Gerät weich. Solange Presets es verwenden: *DeviceInUseError.
+	// DeleteDevice löscht ein Gerät weich. Solange Presets es verwenden: *InUseError.
 	DeleteDevice(ctx context.Context, id uuid.UUID) error
 
 	// CreateSource legt eine Quelle samt Zugangs-Element (ID accessID) an. Ist das Gerät
@@ -30,6 +30,8 @@ type Store interface {
 
 	// CreateGroup legt eine Gruppe an; verwendet ID, Label und Notes.
 	CreateGroup(ctx context.Context, e Element) error
+	// DeleteGroup löscht eine Gruppe weich. Solange Presets sie verwenden: *InUseError.
+	DeleteGroup(ctx context.Context, id uuid.UUID) error
 	// CreatePlannedElement legt ein Treiber-Element an, das der Treiber noch nie gesehen hat.
 	CreatePlannedElement(ctx context.Context, e Element) error
 	UpdateUserFields(ctx context.Context, id uuid.UUID, f UserFields) error
@@ -55,11 +57,11 @@ type PresetRef struct {
 	Name string
 }
 
-// DeviceInUseError bedeutet, dass Presets noch Schritte mit Zielen am Gerät haben.
-type DeviceInUseError struct {
+// InUseError bedeutet, dass Presets noch Schritte mit Zielen am Gerät bzw. an der Gruppe haben.
+type InUseError struct {
 	Presets []PresetRef
 }
 
-func (e *DeviceInUseError) Error() string {
-	return fmt.Sprintf("device is used by %d preset(s)", len(e.Presets))
+func (e *InUseError) Error() string {
+	return fmt.Sprintf("used by %d preset(s)", len(e.Presets))
 }

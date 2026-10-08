@@ -82,9 +82,9 @@ func TestDeleteDeviceUsedByPreset(t *testing.T) {
 	}
 
 	err = postgres.New(pool).DeleteDevice(ctx, device)
-	var inUse *inventory.DeviceInUseError
+	var inUse *inventory.InUseError
 	if !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
-		t.Fatalf("DeleteDevice = %v, want DeviceInUseError naming preset %s", err, preset)
+		t.Fatalf("DeleteDevice = %v, want InUseError naming preset %s", err, preset)
 	}
 	if e := element(t, q, port); !e.Monitored {
 		t.Fatalf("element %s no longer monitored after refused delete", port)

@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -55,6 +56,30 @@ func (q *Queries) CreatePlannedElement(ctx context.Context, arg CreatePlannedEle
 		arg.Label,
 		arg.Notes,
 	)
+	return err
+}
+
+const deleteGroup = `-- name: DeleteGroup :exec
+WITH rules AS (
+  DELETE FROM rule WHERE scope_element_id = $1::uuid
+), grants AS (
+  DELETE FROM permission_grant WHERE scope_element_id = $1::uuid
+), forwards AS (
+  DELETE FROM forward_target WHERE scope_element_id = $1::uuid
+), memberships AS (
+  DELETE FROM element_link
+  WHERE type = 'member' AND (from_id = $1::uuid OR to_id = $1::uuid)
+)
+UPDATE element
+SET deleted_at = now(), updated_at = now()
+WHERE id = $1::uuid
+`
+
+// Weiches Löschen: Regeln, Rechte und Weiterleitungen mit dem Geltungsbereich der Gruppe und
+// alle Mitgliedschaften in beide Richtungen entfernen. Vorher die Befunde zurückziehen.
+// Nur über postgres.Store.DeleteGroup aufrufen (Sperre und Prüfung der Presets).
+func (q *Queries) DeleteGroup(ctx context.Context, groupID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteGroup, groupID)
 	return err
 }
 
@@ -160,6 +185,55 @@ func (q *Queries) ListElements(ctx context.Context) ([]Element, error) {
 	return items, nil
 }
 
+const listPresetsUsingGroup = `-- name: ListPresetsUsingGroup :many
+SELECT DISTINCT p.id, p.name
+FROM preset p
+JOIN preset_step s ON s.preset_id = p.id
+WHERE s.element_id = $1::uuid
+ORDER BY p.name, p.id
+`
+
+type ListPresetsUsingGroupRow struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// Presets mit Schritten, die auf die Gruppe zielen; sie blockieren das Löschen.
+func (q *Queries) ListPresetsUsingGroup(ctx context.Context, groupID uuid.UUID) ([]ListPresetsUsingGroupRow, error) {
+	rows, err := q.db.Query(ctx, listPresetsUsingGroup, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPresetsUsingGroupRow
+	for rows.Next() {
+		var i ListPresetsUsingGroupRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockGroup = `-- name: LockGroup :one
+SELECT deleted_at
+FROM element
+WHERE id = $1 AND kind = 'group'
+FOR UPDATE
+`
+
+// Sperrt das Gruppen-Element bis zum Ende der Transaktion; liefert deleted_at.
+func (q *Queries) LockGroup(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, lockGroup, id)
+	var deleted_at *time.Time
+	err := row.Scan(&deleted_at)
+	return deleted_at, err
+}
+
 const updateElementUserFields = `-- name: UpdateElementUserFields :execrows
 UPDATE element
 SET label      = $1,
@@ -183,6 +257,24 @@ func (q *Queries) UpdateElementUserFields(ctx context.Context, arg UpdateElement
 		arg.Monitored,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const withdrawGroupRuleFindings = `-- name: WithdrawGroupRuleFindings :execrows
+UPDATE finding
+SET cleared_at = now(),
+    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "rule_deleted"}'::jsonb
+WHERE cleared_at IS NULL
+  AND rule_id IN (SELECT r.id FROM rule r WHERE r.scope_element_id = $1::uuid)
+`
+
+// Zieht die aktiven Befunde der Regeln mit dem Geltungsbereich der Gruppe zurück
+// (cleared_reason rule_deleted). Diese Befunde hängen an den Mitgliedern.
+func (q *Queries) WithdrawGroupRuleFindings(ctx context.Context, groupID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, withdrawGroupRuleFindings, groupID)
 	if err != nil {
 		return 0, err
 	}

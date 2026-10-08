@@ -156,7 +156,7 @@ func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 			return fmt.Errorf("list presets using device: %w", err)
 		}
 		if len(presets) > 0 {
-			return &inventory.DeviceInUseError{Presets: mapSlice(presets, func(p db.ListPresetsUsingDeviceRow) inventory.PresetRef {
+			return &inventory.InUseError{Presets: mapSlice(presets, func(p db.ListPresetsUsingDeviceRow) inventory.PresetRef {
 				return inventory.PresetRef{ID: p.ID, Name: p.Name}
 			})}
 		}
@@ -169,6 +169,42 @@ func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 		}
 		if err := q.DeleteDevice(ctx, id); err != nil {
 			return fmt.Errorf("delete device: %w", err)
+		}
+		return nil
+	})
+}
+
+// DeleteGroup arbeitet wie DeleteDevice: Sperre, Prüfung der Presets, Befunde der Regeln mit
+// diesem Geltungsbereich zurückziehen, dann weich löschen.
+func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := db.New(tx)
+		deletedAt, err := q.LockGroup(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return inventory.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock group: %w", err)
+		}
+		if deletedAt != nil {
+			return nil
+		}
+
+		presets, err := q.ListPresetsUsingGroup(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list presets using group: %w", err)
+		}
+		if len(presets) > 0 {
+			return &inventory.InUseError{Presets: mapSlice(presets, func(p db.ListPresetsUsingGroupRow) inventory.PresetRef {
+				return inventory.PresetRef{ID: p.ID, Name: p.Name}
+			})}
+		}
+
+		if _, err := q.WithdrawGroupRuleFindings(ctx, id); err != nil {
+			return fmt.Errorf("withdraw rule findings: %w", err)
+		}
+		if err := q.DeleteGroup(ctx, id); err != nil {
+			return fmt.Errorf("delete group: %w", err)
 		}
 		return nil
 	})

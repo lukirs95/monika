@@ -75,3 +75,45 @@ SET label      = @label,
     monitored  = @monitored,
     updated_at = now()
 WHERE id = @id;
+
+-- name: LockGroup :one
+-- Sperrt das Gruppen-Element bis zum Ende der Transaktion; liefert deleted_at.
+SELECT deleted_at
+FROM element
+WHERE id = @id AND kind = 'group'
+FOR UPDATE;
+
+-- name: ListPresetsUsingGroup :many
+-- Presets mit Schritten, die auf die Gruppe zielen; sie blockieren das Löschen.
+SELECT DISTINCT p.id, p.name
+FROM preset p
+JOIN preset_step s ON s.preset_id = p.id
+WHERE s.element_id = @group_id::uuid
+ORDER BY p.name, p.id;
+
+-- name: WithdrawGroupRuleFindings :execrows
+-- Zieht die aktiven Befunde der Regeln mit dem Geltungsbereich der Gruppe zurück
+-- (cleared_reason rule_deleted). Diese Befunde hängen an den Mitgliedern.
+UPDATE finding
+SET cleared_at = now(),
+    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "rule_deleted"}'::jsonb
+WHERE cleared_at IS NULL
+  AND rule_id IN (SELECT r.id FROM rule r WHERE r.scope_element_id = @group_id::uuid);
+
+-- name: DeleteGroup :exec
+-- Weiches Löschen: Regeln, Rechte und Weiterleitungen mit dem Geltungsbereich der Gruppe und
+-- alle Mitgliedschaften in beide Richtungen entfernen. Vorher die Befunde zurückziehen.
+-- Nur über postgres.Store.DeleteGroup aufrufen (Sperre und Prüfung der Presets).
+WITH rules AS (
+  DELETE FROM rule WHERE scope_element_id = @group_id::uuid
+), grants AS (
+  DELETE FROM permission_grant WHERE scope_element_id = @group_id::uuid
+), forwards AS (
+  DELETE FROM forward_target WHERE scope_element_id = @group_id::uuid
+), memberships AS (
+  DELETE FROM element_link
+  WHERE type = 'member' AND (from_id = @group_id::uuid OR to_id = @group_id::uuid)
+)
+UPDATE element
+SET deleted_at = now(), updated_at = now()
+WHERE id = @group_id::uuid;
