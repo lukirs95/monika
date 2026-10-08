@@ -82,21 +82,33 @@ WHERE cleared_at IS NULL
 -- name: DeleteDeviceScopedConfig :exec
 -- Löscht Regeln, Rechte und Weiterleitungen, deren Geltungsbereich das Gerät oder eines seiner
 -- Elemente ist; ohne ihr Ziel sind sie bedeutungslos. Vorher die Befunde zurückziehen.
+-- Jedes gelöschte Objekt bekommt einen eigenen Audit-Eintrag.
 WITH device_elements AS (
   SELECT e.id FROM element e WHERE e.device_id = @device_id::uuid
 ), rules AS (
-  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements)
+  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING *
 ), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements)
+  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING *
+), forwards AS (
+  DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING *
 )
-DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements);
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'rule', rules.id, to_jsonb(rules) FROM rules
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants) FROM grants
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards) FROM forwards;
 
 -- name: DeleteDevice :exec
 -- Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
 -- das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.
 -- Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
+-- Audit: ein Eintrag für das Gerät (Folgen wie present = false stehen nur dort) und je einer
+-- pro entfernter Mitgliedschaft.
 -- Nur über postgres.Store.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
-WITH sources AS (
+WITH before AS (
+  SELECT * FROM element WHERE id = @device_id::uuid
+), sources AS (
   UPDATE device_source
   SET enabled = false, updated_at = now()
   WHERE device_id = @device_id::uuid
@@ -104,13 +116,22 @@ WITH sources AS (
   DELETE FROM element_link l
   USING element e
   WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = @device_id::uuid
+  RETURNING l.*
+), upd AS (
+  UPDATE element
+  SET present    = false,
+      monitored  = CASE WHEN element.id = @device_id::uuid THEN false ELSE element.monitored END,
+      deleted_at = CASE WHEN element.id = @device_id::uuid THEN now() ELSE element.deleted_at END,
+      updated_at = now()
+  WHERE element.device_id = @device_id::uuid
+  RETURNING element.*
 )
-UPDATE element
-SET present    = false,
-    monitored  = CASE WHEN id = @device_id::uuid THEN false ELSE monitored END,
-    deleted_at = CASE WHEN id = @device_id::uuid THEN now() ELSE deleted_at END,
-    updated_at = now()
-WHERE device_id = @device_id::uuid;
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL
+FROM memberships;
 
 -- name: ListDeviceSources :many
 SELECT * FROM device_source

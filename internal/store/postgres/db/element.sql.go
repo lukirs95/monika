@@ -78,26 +78,48 @@ func (q *Queries) CreatePlannedElement(ctx context.Context, arg CreatePlannedEle
 }
 
 const deleteGroup = `-- name: DeleteGroup :exec
-WITH rules AS (
-  DELETE FROM rule WHERE scope_element_id = $1::uuid
+WITH before AS (
+  SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element WHERE id = $2::uuid
+), rules AS (
+  DELETE FROM rule WHERE scope_element_id = $2::uuid RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
 ), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id = $1::uuid
+  DELETE FROM permission_grant WHERE scope_element_id = $2::uuid RETURNING id, role_id, permission, scope_element_id, created_at
 ), forwards AS (
-  DELETE FROM forward_target WHERE scope_element_id = $1::uuid
+  DELETE FROM forward_target WHERE scope_element_id = $2::uuid RETURNING id, name, kind, enabled, config, secret_id, events, min_severity, scope_element_id, last_sent_at, last_error, created_at, updated_at
 ), memberships AS (
   DELETE FROM element_link
-  WHERE type = 'member' AND (from_id = $1::uuid OR to_id = $1::uuid)
+  WHERE type = 'member' AND (from_id = $2::uuid OR to_id = $2::uuid)
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+), upd AS (
+  UPDATE element
+  SET deleted_at = now(), updated_at = now()
+  WHERE element.id = $2::uuid
+  RETURNING element.id, element.kind, element.parent_id, element.device_id, element.source_id, element.external_id, element.global_ref, element.transport, element.direction, element.name, element.attributes, element.position, element.actions, element.critical_actions, element.settings, element.present, element.first_seen_at, element.last_seen_at, element.label, element.notes, element.monitored, element.deleted_at, element.created_at, element.updated_at
 )
-UPDATE element
-SET deleted_at = now(), updated_at = now()
-WHERE id = $1::uuid
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT $1::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
+UNION ALL
+SELECT $1::uuid, 'delete', 'rule', rules.id, to_jsonb(rules), NULL FROM rules
+UNION ALL
+SELECT $1::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants), NULL FROM grants
+UNION ALL
+SELECT $1::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards), NULL FROM forwards
+UNION ALL
+SELECT $1::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL FROM memberships
 `
+
+type DeleteGroupParams struct {
+	ActorID *uuid.UUID
+	GroupID uuid.UUID
+}
 
 // Weiches Löschen: Regeln, Rechte und Weiterleitungen mit dem Geltungsbereich der Gruppe und
 // alle Mitgliedschaften in beide Richtungen entfernen. Vorher die Befunde zurückziehen.
 // Nur über postgres.Store.DeleteGroup aufrufen (Sperre und Prüfung der Presets).
-func (q *Queries) DeleteGroup(ctx context.Context, groupID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteGroup, groupID)
+// Audit: ein Eintrag für die Gruppe und je einer pro mitgelöschtem Objekt.
+func (q *Queries) DeleteGroup(ctx context.Context, arg DeleteGroupParams) error {
+	_, err := q.db.Exec(ctx, deleteGroup, arg.ActorID, arg.GroupID)
 	return err
 }
 

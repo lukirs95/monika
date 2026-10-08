@@ -123,16 +123,33 @@ WHERE cleared_at IS NULL
 -- Weiches Löschen: Regeln, Rechte und Weiterleitungen mit dem Geltungsbereich der Gruppe und
 -- alle Mitgliedschaften in beide Richtungen entfernen. Vorher die Befunde zurückziehen.
 -- Nur über postgres.Store.DeleteGroup aufrufen (Sperre und Prüfung der Presets).
-WITH rules AS (
-  DELETE FROM rule WHERE scope_element_id = @group_id::uuid
+-- Audit: ein Eintrag für die Gruppe und je einer pro mitgelöschtem Objekt.
+WITH before AS (
+  SELECT * FROM element WHERE id = @group_id::uuid
+), rules AS (
+  DELETE FROM rule WHERE scope_element_id = @group_id::uuid RETURNING *
 ), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id = @group_id::uuid
+  DELETE FROM permission_grant WHERE scope_element_id = @group_id::uuid RETURNING *
 ), forwards AS (
-  DELETE FROM forward_target WHERE scope_element_id = @group_id::uuid
+  DELETE FROM forward_target WHERE scope_element_id = @group_id::uuid RETURNING *
 ), memberships AS (
   DELETE FROM element_link
   WHERE type = 'member' AND (from_id = @group_id::uuid OR to_id = @group_id::uuid)
+  RETURNING *
+), upd AS (
+  UPDATE element
+  SET deleted_at = now(), updated_at = now()
+  WHERE element.id = @group_id::uuid
+  RETURNING element.*
 )
-UPDATE element
-SET deleted_at = now(), updated_at = now()
-WHERE id = @group_id::uuid;
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'rule', rules.id, to_jsonb(rules), NULL FROM rules
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants), NULL FROM grants
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards), NULL FROM forwards
+UNION ALL
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL FROM memberships;

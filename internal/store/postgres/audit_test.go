@@ -121,3 +121,68 @@ func TestAuditUserChanges(t *testing.T) {
 		t.Errorf("rename after = %s, %v; want label Lokal 2", rename.After, err)
 	}
 }
+
+func TestAuditDelete(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	s := postgres.New(pool)
+	user := newUser(t, pool)
+
+	device, source, port, group := newID(), newID(), newID(), newID()
+	if err := s.CreateDevice(ctx, uuid.Nil, inventory.Element{ID: device}); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink"}, newID()); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	if _, err := s.ApplyDiscovery(ctx, inventory.Discovery{SourceID: source, Upsert: []inventory.Element{{
+		ID: port, Kind: "port", ParentID: device, DeviceID: device, SourceID: source, ExternalID: "sdi/1",
+	}}, Seen: []uuid.UUID{port}}); err != nil {
+		t.Fatalf("ApplyDiscovery: %v", err)
+	}
+	if err := s.CreateGroup(ctx, uuid.Nil, inventory.Element{ID: group}); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	membership := newID()
+	if err := s.AddGroupMember(ctx, uuid.Nil, inventory.Link{ID: membership, Type: inventory.LinkMember, FromID: group, ToID: port}); err != nil {
+		t.Fatalf("AddGroupMember: %v", err)
+	}
+	deviceRule, groupRule := newID(), newID()
+	for _, r := range [][2]uuid.UUID{{deviceRule, port}, {groupRule, group}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO rule (id, name, fact, op, value, scope_element_id) VALUES ($1, 'r', 'running', 'eq', 'true', $2)`, r[0], r[1]); err != nil {
+			t.Fatalf("insert rule: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `TRUNCATE audit_log`); err != nil {
+		t.Fatalf("truncate audit_log: %v", err)
+	}
+
+	if err := s.DeleteDevice(ctx, user, device); err != nil {
+		t.Fatalf("DeleteDevice: %v", err)
+	}
+	if err := s.DeleteGroup(ctx, user, group); err != nil {
+		t.Fatalf("DeleteGroup: %v", err)
+	}
+
+	got := []string{}
+	for _, e := range auditLog(t, pool) {
+		if e.Actor == nil || *e.Actor != user || e.Verb != "delete" {
+			t.Errorf("entry %+v, want delete by %s", e, user)
+		}
+		got = append(got, e.ObjectType+" "+e.ObjectID.String())
+	}
+	// Ein Eintrag pro Gerät bzw. Gruppe, nicht pro Element; Mitgelöschtes je mit eigenem Eintrag.
+	want := []string{
+		"element " + device.String(),
+		"element_link " + membership.String(),
+		"rule " + deviceRule.String(),
+		"element " + group.String(),
+		"rule " + groupRule.String(),
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("audit entries:\n got  %v\n want %v", got, want)
+	}
+}

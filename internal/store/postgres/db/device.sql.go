@@ -90,47 +90,78 @@ func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSource
 }
 
 const deleteDevice = `-- name: DeleteDevice :exec
-WITH sources AS (
+WITH before AS (
+  SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element WHERE id = $2::uuid
+), sources AS (
   UPDATE device_source
   SET enabled = false, updated_at = now()
-  WHERE device_id = $1::uuid
+  WHERE device_id = $2::uuid
 ), memberships AS (
   DELETE FROM element_link l
   USING element e
-  WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = $1::uuid
+  WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = $2::uuid
+  RETURNING l.id, l.type, l.source_id, l.from_id, l.from_ref, l.to_id, l.to_ref, l.position, l.label, l.created_at
+), upd AS (
+  UPDATE element
+  SET present    = false,
+      monitored  = CASE WHEN element.id = $2::uuid THEN false ELSE element.monitored END,
+      deleted_at = CASE WHEN element.id = $2::uuid THEN now() ELSE element.deleted_at END,
+      updated_at = now()
+  WHERE element.device_id = $2::uuid
+  RETURNING element.id, element.kind, element.parent_id, element.device_id, element.source_id, element.external_id, element.global_ref, element.transport, element.direction, element.name, element.attributes, element.position, element.actions, element.critical_actions, element.settings, element.present, element.first_seen_at, element.last_seen_at, element.label, element.notes, element.monitored, element.deleted_at, element.created_at, element.updated_at
 )
-UPDATE element
-SET present    = false,
-    monitored  = CASE WHEN id = $1::uuid THEN false ELSE monitored END,
-    deleted_at = CASE WHEN id = $1::uuid THEN now() ELSE deleted_at END,
-    updated_at = now()
-WHERE device_id = $1::uuid
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT $1::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
+UNION ALL
+SELECT $1::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL
+FROM memberships
 `
+
+type DeleteDeviceParams struct {
+	ActorID  *uuid.UUID
+	DeviceID uuid.UUID
+}
 
 // Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
 // das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.
 // Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
+// Audit: ein Eintrag für das Gerät (Folgen wie present = false stehen nur dort) und je einer
+// pro entfernter Mitgliedschaft.
 // Nur über postgres.Store.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
-func (q *Queries) DeleteDevice(ctx context.Context, deviceID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDevice, deviceID)
+func (q *Queries) DeleteDevice(ctx context.Context, arg DeleteDeviceParams) error {
+	_, err := q.db.Exec(ctx, deleteDevice, arg.ActorID, arg.DeviceID)
 	return err
 }
 
 const deleteDeviceScopedConfig = `-- name: DeleteDeviceScopedConfig :exec
 WITH device_elements AS (
-  SELECT e.id FROM element e WHERE e.device_id = $1::uuid
+  SELECT e.id FROM element e WHERE e.device_id = $2::uuid
 ), rules AS (
-  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements)
+  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
 ), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements)
+  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, role_id, permission, scope_element_id, created_at
+), forwards AS (
+  DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, name, kind, enabled, config, secret_id, events, min_severity, scope_element_id, last_sent_at, last_error, created_at, updated_at
 )
-DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'rule', rules.id, to_jsonb(rules) FROM rules
+UNION ALL
+SELECT $1::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants) FROM grants
+UNION ALL
+SELECT $1::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards) FROM forwards
 `
+
+type DeleteDeviceScopedConfigParams struct {
+	ActorID  *uuid.UUID
+	DeviceID uuid.UUID
+}
 
 // Löscht Regeln, Rechte und Weiterleitungen, deren Geltungsbereich das Gerät oder eines seiner
 // Elemente ist; ohne ihr Ziel sind sie bedeutungslos. Vorher die Befunde zurückziehen.
-func (q *Queries) DeleteDeviceScopedConfig(ctx context.Context, deviceID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDeviceScopedConfig, deviceID)
+// Jedes gelöschte Objekt bekommt einen eigenen Audit-Eintrag.
+func (q *Queries) DeleteDeviceScopedConfig(ctx context.Context, arg DeleteDeviceScopedConfigParams) error {
+	_, err := q.db.Exec(ctx, deleteDeviceScopedConfig, arg.ActorID, arg.DeviceID)
 	return err
 }
 

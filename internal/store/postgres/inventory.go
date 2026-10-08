@@ -164,10 +164,10 @@ func (s *Store) DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID)
 		if _, err := q.WithdrawDeviceFindings(ctx, id); err != nil {
 			return fmt.Errorf("withdraw findings: %w", err)
 		}
-		if err := q.DeleteDeviceScopedConfig(ctx, id); err != nil {
+		if err := q.DeleteDeviceScopedConfig(ctx, db.DeleteDeviceScopedConfigParams{ActorID: nullable(actor), DeviceID: id}); err != nil {
 			return fmt.Errorf("delete scoped config: %w", err)
 		}
-		if err := q.DeleteDevice(ctx, id); err != nil {
+		if err := q.DeleteDevice(ctx, db.DeleteDeviceParams{ActorID: nullable(actor), DeviceID: id}); err != nil {
 			return fmt.Errorf("delete device: %w", err)
 		}
 		return nil
@@ -203,7 +203,7 @@ func (s *Store) DeleteGroup(ctx context.Context, actor uuid.UUID, id uuid.UUID) 
 		if _, err := q.WithdrawGroupRuleFindings(ctx, id); err != nil {
 			return fmt.Errorf("withdraw rule findings: %w", err)
 		}
-		if err := q.DeleteGroup(ctx, id); err != nil {
+		if err := q.DeleteGroup(ctx, db.DeleteGroupParams{ActorID: nullable(actor), GroupID: id}); err != nil {
 			return fmt.Errorf("delete group: %w", err)
 		}
 		return nil
