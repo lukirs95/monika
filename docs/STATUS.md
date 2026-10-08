@@ -21,6 +21,7 @@ Stand: 2026-10-08
 - **Schema und Store an die Durchsicht angepasst** (2026-10-08): Tabelle `device` entfernt, Identität pro Quelle, `element.deleted_at`, `external_id` pro Quelle (Teilindex mit `NULLS NOT DISTINCT`, Migration `00003`), Zugangs-Element mit jeder Quelle, `FinishDiscovery` mit Zugangs-Element, `DeleteDevice` und `DeleteGroup` vollständig (Befunde zurückziehen, Konfiguration mit Geltungsbereich löschen, Mitgliedschaften entfernen, Presets blockieren).
 - **Audit des Inventars** (2026-10-08): Store-Methoden, die der User auslöst, bekommen den Akteur als expliziten Parameter (`uuid.Nil` = Monika). Änderung und Audit-Eintrag laufen im selben SQL-Statement. Discovery protokolliert neue Elemente, Wechsel von `present` und Links mit `actor_id = NULL`; Löschen schreibt einen Eintrag pro Gerät/Gruppe und je einen pro Mitgelöschtem.
 - **Secret-Store** (2026-10-08): `secret.Store` in `postgres.Store` mit Audit ohne Werte; `secret.Key` (AES-256-GCM, `key_id` = Fingerabdruck, nie geloggt); `secret.Service` mit `VerifyAndRotate` beim Start. Erste Unit-Tests mit In-Memory-Attrappe (`internal/secret`).
+- **Zustand** (2026-10-08): `evaluation.Store` mit `LoadHealth`/`SaveHealth` für `element_state`; unveränderte Werte lassen die Zeile unberührt.
 - **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
 
 ## Architektur-Durchsicht (2026-10-08)
@@ -41,11 +42,10 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 
 ## Nächste Schritte
 
-1. **Zustand:** Queries und Store für `element_state` (Health und Rollup, nur bei Änderung).
-2. **Bewertung:** Queries und Store für Regeln und Befunde (aktive laden, anlegen, aufheben, quittieren).
-3. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
-4. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env` (`MONIKA_MASTER_KEY` per `secret.ParseKey`), `postgres.Open`, `postgres.Migrate`, `secret.Service.VerifyAndRotate` (bei Fehler kein Start), Verdrahtung.
-5. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
+1. **Bewertung:** Queries und Store für Regeln und Befunde, als Erweiterung von `evaluation.Store` (aktive laden, anlegen, aufheben, quittieren).
+2. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
+3. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env` (`MONIKA_MASTER_KEY` per `secret.ParseKey`), `postgres.Open`, `postgres.Migrate`, `secret.Service.VerifyAndRotate` (bei Fehler kein Start), Verdrahtung.
+4. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
 
 ## Bekannte Lücken
 

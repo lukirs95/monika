@@ -207,3 +207,63 @@ func (b *UpsertDriverElementBatchResults) Close() error {
 	b.closed = true
 	return b.br.Close()
 }
+
+const upsertElementHealth = `-- name: UpsertElementHealth :batchexec
+INSERT INTO element_state (element_id, health, rollup, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (element_id) DO UPDATE
+SET health     = excluded.health,
+    rollup     = excluded.rollup,
+    updated_at = now()
+WHERE element_state.health IS DISTINCT FROM excluded.health
+   OR element_state.rollup IS DISTINCT FROM excluded.rollup
+`
+
+type UpsertElementHealthBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertElementHealthParams struct {
+	ElementID uuid.UUID
+	Health    *Health
+	Rollup    json.RawMessage
+}
+
+// Schreibt Health und Rollup eines Elements. Ohne echte Änderung bleibt die Zeile unberührt,
+// auch updated_at.
+func (q *Queries) UpsertElementHealth(ctx context.Context, arg []UpsertElementHealthParams) *UpsertElementHealthBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ElementID,
+			a.Health,
+			a.Rollup,
+		}
+		batch.Queue(upsertElementHealth, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertElementHealthBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertElementHealthBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertElementHealthBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
