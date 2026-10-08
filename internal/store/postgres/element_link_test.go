@@ -77,7 +77,7 @@ func newGroups(t *testing.T, q *db.Queries, n int) []uuid.UUID {
 }
 
 func addMember(ctx context.Context, pool *pgxpool.Pool, group, member uuid.UUID) error {
-	return postgres.New(pool).AddGroupMember(ctx, inventory.Link{ID: newID(), Type: inventory.LinkMember, FromID: group, ToID: member})
+	return postgres.New(pool).AddGroupMember(ctx, uuid.Nil, inventory.Link{ID: newID(), Type: inventory.LinkMember, FromID: group, ToID: member})
 }
 
 func TestMemberLinkWouldCycle(t *testing.T) {

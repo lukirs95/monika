@@ -30,7 +30,7 @@ func TestDeleteDevice(t *testing.T) {
 		t.Fatalf("AddGroupMember: %v", err)
 	}
 
-	if err := postgres.New(pool).DeleteDevice(ctx, device); err != nil {
+	if err := postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device); err != nil {
 		t.Fatalf("DeleteDevice: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestDeleteDevice(t *testing.T) {
 	if err != nil || n != 0 {
 		t.Fatalf("UpdateDeviceSource = %d, %v; want 0, nil", n, err)
 	}
-	if err := postgres.New(pool).DeleteDevice(ctx, device); err != nil {
+	if err := postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device); err != nil {
 		t.Fatalf("DeleteDevice again: %v", err)
 	}
 }
@@ -81,7 +81,7 @@ func TestDeleteDeviceUsedByPreset(t *testing.T) {
 		t.Fatalf("insert preset_step: %v", err)
 	}
 
-	err = postgres.New(pool).DeleteDevice(ctx, device)
+	err = postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device)
 	var inUse *inventory.InUseError
 	if !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
 		t.Fatalf("DeleteDevice = %v, want InUseError naming preset %s", err, preset)
@@ -95,7 +95,7 @@ func TestDeleteDeviceNotFound(t *testing.T) {
 	t.Parallel()
 	pool := server.NewDB(t)
 
-	if err := postgres.New(pool).DeleteDevice(t.Context(), uuid.Must(uuid.NewV7())); !errors.Is(err, inventory.ErrNotFound) {
+	if err := postgres.New(pool).DeleteDevice(t.Context(), uuid.Nil, uuid.Must(uuid.NewV7())); !errors.Is(err, inventory.ErrNotFound) {
 		t.Fatalf("DeleteDevice = %v, want ErrNotFound", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestDeleteDeviceRemovesScopedConfig(t *testing.T) {
 		}
 	}
 
-	if err := postgres.New(pool).DeleteDevice(ctx, device); err != nil {
+	if err := postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device); err != nil {
 		t.Fatalf("DeleteDevice: %v", err)
 	}
 

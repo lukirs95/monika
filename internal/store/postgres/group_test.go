@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/store/postgres"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
@@ -49,7 +51,7 @@ func TestDeleteGroup(t *testing.T) {
 		}
 	}
 
-	if err := s.DeleteGroup(ctx, box); err != nil {
+	if err := s.DeleteGroup(ctx, uuid.Nil, box); err != nil {
 		t.Fatalf("DeleteGroup: %v", err)
 	}
 
@@ -75,7 +77,7 @@ func TestDeleteGroup(t *testing.T) {
 			t.Errorf("%s: count = %d, %v; want %d", c.name, got, err, c.want)
 		}
 	}
-	if err := s.DeleteGroup(ctx, box); err != nil {
+	if err := s.DeleteGroup(ctx, uuid.Nil, box); err != nil {
 		t.Fatalf("DeleteGroup again: %v", err)
 	}
 }
@@ -98,12 +100,12 @@ func TestDeleteGroupRefused(t *testing.T) {
 		t.Fatalf("insert preset_step: %v", err)
 	}
 	var inUse *inventory.InUseError
-	if err := s.DeleteGroup(ctx, group); !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
+	if err := s.DeleteGroup(ctx, uuid.Nil, group); !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
 		t.Fatalf("DeleteGroup = %v, want InUseError naming preset %s", err, preset)
 	}
 
 	device, _ := newDeviceWithSource(t, q, "videoxlink")
-	if err := s.DeleteGroup(ctx, device); !errors.Is(err, inventory.ErrNotFound) {
+	if err := s.DeleteGroup(ctx, uuid.Nil, device); !errors.Is(err, inventory.ErrNotFound) {
 		t.Fatalf("DeleteGroup on a device = %v, want ErrNotFound", err)
 	}
 }

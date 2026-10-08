@@ -1,7 +1,12 @@
 -- name: CreateDevice :exec
 -- Ein Gerät ist ein Element mit kind = device; device_id verweist auf sich selbst.
-INSERT INTO element (id, kind, device_id, label, notes)
-VALUES (@id, 'device', @id, @label, @notes);
+WITH e AS (
+  INSERT INTO element (id, kind, device_id, label, notes)
+  VALUES (@id::uuid, 'device', @id::uuid, @label, @notes)
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT sqlc.narg(actor_id)::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e;
 
 -- name: UpdateSourceIdentity :execrows
 -- Identität des Geräts, wie diese Quelle sie meldet.
@@ -21,23 +26,34 @@ WITH src AS (
   SELECT @id::uuid, e.id, @driver::text, @address, @config::jsonb, @secret_id, @enabled::boolean
   FROM element e
   WHERE e.id = @device_id::uuid AND e.kind = 'device' AND e.deleted_at IS NULL
-  RETURNING id, device_id, driver
+  RETURNING *
+), access AS (
+  INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
+  SELECT @access_id::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
+  FROM src
 )
-INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
-SELECT @access_id::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
-FROM src;
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT sqlc.narg(actor_id)::uuid, 'create', 'device_source', src.id, to_jsonb(src) FROM src;
 
 -- name: UpdateDeviceSource :execrows
 -- Treiber und Gerät einer Quelle stehen fest; sonst würden ihre Elemente den Besitzer wechseln.
 -- Quellen gelöschter Geräte bleiben unverändert (0 Zeilen).
-UPDATE device_source
-SET address    = @address,
-    config     = @config,
-    secret_id  = @secret_id,
-    enabled    = @enabled,
-    updated_at = now()
-WHERE device_source.id = @id
-  AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL);
+WITH before AS (
+  SELECT * FROM device_source WHERE id = @id::uuid
+), upd AS (
+  UPDATE device_source
+  SET address    = @address,
+      config     = @config,
+      secret_id  = @secret_id,
+      enabled    = @enabled,
+      updated_at = now()
+  WHERE device_source.id = @id::uuid
+    AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL)
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT sqlc.narg(actor_id)::uuid, 'update', 'device_source', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id;
 
 -- name: LockDevice :one
 -- Sperrt das Geräte-Element bis zum Ende der Transaktion; liefert deleted_at.

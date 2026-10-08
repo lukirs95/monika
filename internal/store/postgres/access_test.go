@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/store/postgres"
 )
@@ -17,10 +19,10 @@ func TestAccessElement(t *testing.T) {
 	s := postgres.New(server.NewDB(t))
 
 	device, source, access := newID(), newID(), newID()
-	if err := s.CreateDevice(ctx, inventory.Element{ID: device, Label: "Lokal 1"}); err != nil {
+	if err := s.CreateDevice(ctx, uuid.Nil, inventory.Element{ID: device, Label: "Lokal 1"}); err != nil {
 		t.Fatalf("CreateDevice: %v", err)
 	}
-	if err := s.CreateSource(ctx, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink", Enabled: true}, access); err != nil {
+	if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink", Enabled: true}, access); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
 	snap := load(t, s)
@@ -51,13 +53,13 @@ func TestAccessElement(t *testing.T) {
 	})
 
 	t.Run("refused for unknown and deleted devices", func(t *testing.T) {
-		if err := s.CreateSource(ctx, inventory.Source{ID: newID(), DeviceID: newID(), Driver: "ipmi"}, newID()); !errors.Is(err, inventory.ErrNotFound) {
+		if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: newID(), DeviceID: newID(), Driver: "ipmi"}, newID()); !errors.Is(err, inventory.ErrNotFound) {
 			t.Fatalf("CreateSource on unknown device = %v, want ErrNotFound", err)
 		}
-		if err := s.DeleteDevice(ctx, device); err != nil {
+		if err := s.DeleteDevice(ctx, uuid.Nil, device); err != nil {
 			t.Fatalf("DeleteDevice: %v", err)
 		}
-		if err := s.CreateSource(ctx, inventory.Source{ID: newID(), DeviceID: device, Driver: "ipmi"}, newID()); !errors.Is(err, inventory.ErrNotFound) {
+		if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: newID(), DeviceID: device, Driver: "ipmi"}, newID()); !errors.Is(err, inventory.ErrNotFound) {
 			t.Fatalf("CreateSource on deleted device = %v, want ErrNotFound", err)
 		}
 	})

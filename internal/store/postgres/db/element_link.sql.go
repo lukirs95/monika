@@ -12,11 +12,17 @@ import (
 )
 
 const createMemberLink = `-- name: CreateMemberLink :exec
-INSERT INTO element_link (id, type, from_id, to_id, position, label)
-VALUES ($1, 'member', $2::uuid, $3::uuid, $4, $5)
+WITH l AS (
+  INSERT INTO element_link (id, type, from_id, to_id, position, label)
+  VALUES ($2::uuid, 'member', $3::uuid, $4::uuid, $5, $6)
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'element_link', l.id, to_jsonb(l) FROM l
 `
 
 type CreateMemberLinkParams struct {
+	ActorID  *uuid.UUID
 	ID       uuid.UUID
 	GroupID  uuid.UUID
 	MemberID uuid.UUID
@@ -27,6 +33,7 @@ type CreateMemberLinkParams struct {
 // Gruppenmitgliedschaft (vom User). Nur über AddGroupMember aufrufen (Lock und Zyklenprüfung).
 func (q *Queries) CreateMemberLink(ctx context.Context, arg CreateMemberLinkParams) error {
 	_, err := q.db.Exec(ctx, createMemberLink,
+		arg.ActorID,
 		arg.ID,
 		arg.GroupID,
 		arg.MemberID,
@@ -57,12 +64,22 @@ func (q *Queries) DeleteDriverLinks(ctx context.Context, arg DeleteDriverLinksPa
 }
 
 const deleteMemberLink = `-- name: DeleteMemberLink :execrows
-DELETE FROM element_link
-WHERE id = $1 AND type = 'member'
+WITH l AS (
+  DELETE FROM element_link
+  WHERE id = $2::uuid AND type = 'member'
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'element_link', l.id, to_jsonb(l) FROM l
 `
 
-func (q *Queries) DeleteMemberLink(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteMemberLink, id)
+type DeleteMemberLinkParams struct {
+	ActorID *uuid.UUID
+	ID      uuid.UUID
+}
+
+func (q *Queries) DeleteMemberLink(ctx context.Context, arg DeleteMemberLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteMemberLink, arg.ActorID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -166,20 +183,34 @@ func (q *Queries) ResolveLinkRef(ctx context.Context, arg ResolveLinkRefParams) 
 }
 
 const updateMemberLink = `-- name: UpdateMemberLink :execrows
-UPDATE element_link
-SET position = $1,
-    label    = $2
-WHERE id = $3 AND type = 'member'
+WITH before AS (
+  SELECT id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at FROM element_link WHERE id = $2::uuid
+), upd AS (
+  UPDATE element_link
+  SET position = $3,
+      label    = $4
+  WHERE element_link.id = $2::uuid AND element_link.type = 'member'
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT $1::uuid, 'update', 'element_link', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
 `
 
 type UpdateMemberLinkParams struct {
+	ActorID  *uuid.UUID
+	ID       uuid.UUID
 	Position *int32
 	Label    *string
-	ID       uuid.UUID
 }
 
 func (q *Queries) UpdateMemberLink(ctx context.Context, arg UpdateMemberLinkParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateMemberLink, arg.Position, arg.Label, arg.ID)
+	result, err := q.db.Exec(ctx, updateMemberLink,
+		arg.ActorID,
+		arg.ID,
+		arg.Position,
+		arg.Label,
+	)
 	if err != nil {
 		return 0, err
 	}

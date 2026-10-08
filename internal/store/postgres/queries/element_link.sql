@@ -32,18 +32,36 @@ SELECT pg_advisory_xact_lock(hashtext('element_link.member'));
 
 -- name: CreateMemberLink :exec
 -- Gruppenmitgliedschaft (vom User). Nur über AddGroupMember aufrufen (Lock und Zyklenprüfung).
-INSERT INTO element_link (id, type, from_id, to_id, position, label)
-VALUES (@id, 'member', @group_id::uuid, @member_id::uuid, @position, @label);
+WITH l AS (
+  INSERT INTO element_link (id, type, from_id, to_id, position, label)
+  VALUES (@id::uuid, 'member', @group_id::uuid, @member_id::uuid, @position, @label)
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT sqlc.narg(actor_id)::uuid, 'create', 'element_link', l.id, to_jsonb(l) FROM l;
 
 -- name: UpdateMemberLink :execrows
-UPDATE element_link
-SET position = @position,
-    label    = @label
-WHERE id = @id AND type = 'member';
+WITH before AS (
+  SELECT * FROM element_link WHERE id = @id::uuid
+), upd AS (
+  UPDATE element_link
+  SET position = @position,
+      label    = @label
+  WHERE element_link.id = @id::uuid AND element_link.type = 'member'
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT sqlc.narg(actor_id)::uuid, 'update', 'element_link', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id;
 
 -- name: DeleteMemberLink :execrows
-DELETE FROM element_link
-WHERE id = @id AND type = 'member';
+WITH l AS (
+  DELETE FROM element_link
+  WHERE id = @id::uuid AND type = 'member'
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT sqlc.narg(actor_id)::uuid, 'delete', 'element_link', l.id, to_jsonb(l) FROM l;
 
 -- name: MemberLinkWouldCycle :one
 -- true, wenn group_id gleich member_id ist oder bereits (rekursiv) Mitglied von member_id.

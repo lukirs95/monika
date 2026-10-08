@@ -129,15 +129,15 @@ func insertLinks(ctx context.Context, q *db.Queries, links []inventory.Link) err
 	return err
 }
 
-func (s *Store) CreateDevice(ctx context.Context, e inventory.Element) error {
-	return s.q.CreateDevice(ctx, db.CreateDeviceParams{ID: e.ID, Label: nullable(e.Label), Notes: nullable(e.Notes)})
+func (s *Store) CreateDevice(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
+	return s.q.CreateDevice(ctx, db.CreateDeviceParams{ActorID: nullable(actor), ID: e.ID, Label: nullable(e.Label), Notes: nullable(e.Notes)})
 }
 
 // DeleteDevice sperrt das Gerät und prüft die Presets in derselben Transaktion, damit
 // zwischen Prüfung und Löschen kein Preset-Schritt entstehen kann. Danach werden die aktiven
 // Befunde zurückgezogen, die Konfiguration mit diesem Geltungsbereich gelöscht und das Gerät
 // weich gelöscht.
-func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		deletedAt, err := q.LockDevice(ctx, id)
@@ -176,7 +176,7 @@ func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 
 // DeleteGroup arbeitet wie DeleteDevice: Sperre, Prüfung der Presets, Befunde der Regeln mit
 // diesem Geltungsbereich zurückziehen, dann weich löschen.
-func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteGroup(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		deletedAt, err := q.LockGroup(ctx, id)
@@ -210,8 +210,9 @@ func (s *Store) DeleteGroup(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-func (s *Store) CreateSource(ctx context.Context, src inventory.Source, accessID uuid.UUID) error {
+func (s *Store) CreateSource(ctx context.Context, actor uuid.UUID, src inventory.Source, accessID uuid.UUID) error {
 	n, err := s.q.CreateDeviceSource(ctx, db.CreateDeviceSourceParams{
+		ActorID:  nullable(actor),
 		ID:       src.ID,
 		AccessID: accessID,
 		DeviceID: src.DeviceID,
@@ -224,8 +225,9 @@ func (s *Store) CreateSource(ctx context.Context, src inventory.Source, accessID
 	return rowsAffected(n, err)
 }
 
-func (s *Store) UpdateSource(ctx context.Context, src inventory.Source) error {
+func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory.Source) error {
 	n, err := s.q.UpdateDeviceSource(ctx, db.UpdateDeviceSourceParams{
+		ActorID:  nullable(actor),
 		ID:       src.ID,
 		Address:  nullable(src.Address),
 		Config:   jsonObject(src.Config),
@@ -235,12 +237,13 @@ func (s *Store) UpdateSource(ctx context.Context, src inventory.Source) error {
 	return rowsAffected(n, err)
 }
 
-func (s *Store) CreateGroup(ctx context.Context, e inventory.Element) error {
-	return s.q.CreateGroup(ctx, db.CreateGroupParams{ID: e.ID, Label: nullable(e.Label), Notes: nullable(e.Notes)})
+func (s *Store) CreateGroup(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
+	return s.q.CreateGroup(ctx, db.CreateGroupParams{ActorID: nullable(actor), ID: e.ID, Label: nullable(e.Label), Notes: nullable(e.Notes)})
 }
 
-func (s *Store) CreatePlannedElement(ctx context.Context, e inventory.Element) error {
+func (s *Store) CreatePlannedElement(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
 	return s.q.CreatePlannedElement(ctx, db.CreatePlannedElementParams{
+		ActorID:    nullable(actor),
 		ID:         e.ID,
 		Kind:       string(e.Kind),
 		ParentID:   e.ParentID,
@@ -252,8 +255,9 @@ func (s *Store) CreatePlannedElement(ctx context.Context, e inventory.Element) e
 	})
 }
 
-func (s *Store) UpdateUserFields(ctx context.Context, id uuid.UUID, f inventory.UserFields) error {
+func (s *Store) UpdateUserFields(ctx context.Context, actor uuid.UUID, id uuid.UUID, f inventory.UserFields) error {
 	n, err := s.q.UpdateElementUserFields(ctx, db.UpdateElementUserFieldsParams{
+		ActorID:   nullable(actor),
 		ID:        id,
 		Label:     nullable(f.Label),
 		Notes:     nullable(f.Notes),
@@ -264,7 +268,7 @@ func (s *Store) UpdateUserFields(ctx context.Context, id uuid.UUID, f inventory.
 
 // AddGroupMember nimmt Lock, Zyklenprüfung und Insert in einer Transaktion vor, damit
 // parallele Änderungen keinen Zyklus erzeugen können.
-func (s *Store) AddGroupMember(ctx context.Context, l inventory.Link) error {
+func (s *Store) AddGroupMember(ctx context.Context, actor uuid.UUID, l inventory.Link) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		if err := q.LockMemberLinks(ctx); err != nil {
@@ -278,6 +282,7 @@ func (s *Store) AddGroupMember(ctx context.Context, l inventory.Link) error {
 			return inventory.ErrMemberCycle
 		}
 		if err := q.CreateMemberLink(ctx, db.CreateMemberLinkParams{
+			ActorID:  nullable(actor),
 			ID:       l.ID,
 			GroupID:  l.FromID,
 			MemberID: l.ToID,
@@ -290,8 +295,9 @@ func (s *Store) AddGroupMember(ctx context.Context, l inventory.Link) error {
 	})
 }
 
-func (s *Store) UpdateGroupMember(ctx context.Context, l inventory.Link) error {
+func (s *Store) UpdateGroupMember(ctx context.Context, actor uuid.UUID, l inventory.Link) error {
 	n, err := s.q.UpdateMemberLink(ctx, db.UpdateMemberLinkParams{
+		ActorID:  nullable(actor),
 		ID:       l.ID,
 		Position: convert(l.Position, toInt32),
 		Label:    nullable(l.Label),
@@ -299,8 +305,8 @@ func (s *Store) UpdateGroupMember(ctx context.Context, l inventory.Link) error {
 	return rowsAffected(n, err)
 }
 
-func (s *Store) RemoveGroupMember(ctx context.Context, id uuid.UUID) error {
-	n, err := s.q.DeleteMemberLink(ctx, id)
+func (s *Store) RemoveGroupMember(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
+	n, err := s.q.DeleteMemberLink(ctx, db.DeleteMemberLinkParams{ActorID: nullable(actor), ID: id})
 	return rowsAffected(n, err)
 }
 

@@ -13,27 +13,44 @@ import (
 )
 
 const createGroup = `-- name: CreateGroup :exec
-INSERT INTO element (id, kind, label, notes)
-VALUES ($1, 'group', $2, $3)
+WITH e AS (
+  INSERT INTO element (id, kind, label, notes)
+  VALUES ($2::uuid, 'group', $3, $4)
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
 `
 
 type CreateGroupParams struct {
-	ID    uuid.UUID
-	Label *string
-	Notes *string
+	ActorID *uuid.UUID
+	ID      uuid.UUID
+	Label   *string
+	Notes   *string
 }
 
 func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) error {
-	_, err := q.db.Exec(ctx, createGroup, arg.ID, arg.Label, arg.Notes)
+	_, err := q.db.Exec(ctx, createGroup,
+		arg.ActorID,
+		arg.ID,
+		arg.Label,
+		arg.Notes,
+	)
 	return err
 }
 
 const createPlannedElement = `-- name: CreatePlannedElement :exec
-INSERT INTO element (id, kind, parent_id, device_id, source_id, external_id, label, notes, present)
-VALUES ($1, $2, $3::uuid, $4::uuid, $5::uuid, $6::text, $7, $8, false)
+WITH e AS (
+  INSERT INTO element (id, kind, parent_id, device_id, source_id, external_id, label, notes, present)
+  VALUES ($2::uuid, $3::text, $4::uuid, $5::uuid, $6::uuid, $7::text, $8, $9, false)
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
 `
 
 type CreatePlannedElementParams struct {
+	ActorID    *uuid.UUID
 	ID         uuid.UUID
 	Kind       string
 	ParentID   uuid.UUID
@@ -47,6 +64,7 @@ type CreatePlannedElementParams struct {
 // Vom User vorab angelegtes Treiber-Element, das der Treiber noch nie gesehen hat.
 func (q *Queries) CreatePlannedElement(ctx context.Context, arg CreatePlannedElementParams) error {
 	_, err := q.db.Exec(ctx, createPlannedElement,
+		arg.ActorID,
 		arg.ID,
 		arg.Kind,
 		arg.ParentID,
@@ -235,27 +253,38 @@ func (q *Queries) LockGroup(ctx context.Context, id uuid.UUID) (*time.Time, erro
 }
 
 const updateElementUserFields = `-- name: UpdateElementUserFields :execrows
-UPDATE element
-SET label      = $1,
-    notes      = $2,
-    monitored  = $3,
-    updated_at = now()
-WHERE id = $4
+WITH before AS (
+  SELECT id, label, notes, monitored FROM element WHERE id = $2::uuid
+), upd AS (
+  UPDATE element
+  SET label      = $3,
+      notes      = $4,
+      monitored  = $5,
+      updated_at = now()
+  WHERE element.id = $2::uuid
+  RETURNING element.id, element.label, element.notes, element.monitored
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT $1::uuid, 'update', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
 `
 
 type UpdateElementUserFieldsParams struct {
+	ActorID   *uuid.UUID
+	ID        uuid.UUID
 	Label     *string
 	Notes     *string
 	Monitored bool
-	ID        uuid.UUID
 }
 
+// Protokolliert nur die User-Spalten, nicht die ganze Zeile.
 func (q *Queries) UpdateElementUserFields(ctx context.Context, arg UpdateElementUserFieldsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateElementUserFields,
+		arg.ActorID,
+		arg.ID,
 		arg.Label,
 		arg.Notes,
 		arg.Monitored,
-		arg.ID,
 	)
 	if err != nil {
 		return 0, err

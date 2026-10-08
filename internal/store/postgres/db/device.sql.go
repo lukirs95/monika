@@ -14,19 +14,30 @@ import (
 )
 
 const createDevice = `-- name: CreateDevice :exec
-INSERT INTO element (id, kind, device_id, label, notes)
-VALUES ($1, 'device', $1, $2, $3)
+WITH e AS (
+  INSERT INTO element (id, kind, device_id, label, notes)
+  VALUES ($2::uuid, 'device', $2::uuid, $3, $4)
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
 `
 
 type CreateDeviceParams struct {
-	ID    uuid.UUID
-	Label *string
-	Notes *string
+	ActorID *uuid.UUID
+	ID      uuid.UUID
+	Label   *string
+	Notes   *string
 }
 
 // Ein Gerät ist ein Element mit kind = device; device_id verweist auf sich selbst.
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) error {
-	_, err := q.db.Exec(ctx, createDevice, arg.ID, arg.Label, arg.Notes)
+	_, err := q.db.Exec(ctx, createDevice,
+		arg.ActorID,
+		arg.ID,
+		arg.Label,
+		arg.Notes,
+	)
 	return err
 }
 
@@ -36,15 +47,18 @@ WITH src AS (
   SELECT $2::uuid, e.id, $3::text, $4, $5::jsonb, $6, $7::boolean
   FROM element e
   WHERE e.id = $8::uuid AND e.kind = 'device' AND e.deleted_at IS NULL
-  RETURNING id, device_id, driver
+  RETURNING id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at
+), access AS (
+  INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
+  SELECT $9::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
+  FROM src
 )
-INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
-SELECT $1::uuid, 'access', src.device_id, src.device_id, src.id, src.driver
-FROM src
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'device_source', src.id, to_jsonb(src) FROM src
 `
 
 type CreateDeviceSourceParams struct {
-	AccessID uuid.UUID
+	ActorID  *uuid.UUID
 	ID       uuid.UUID
 	Driver   string
 	Address  *string
@@ -52,13 +66,14 @@ type CreateDeviceSourceParams struct {
 	SecretID *uuid.UUID
 	Enabled  bool
 	DeviceID uuid.UUID
+	AccessID uuid.UUID
 }
 
 // Legt die Quelle und ihr Zugangs-Element (kind = access) in einem Statement an.
 // Ist das Gerät unbekannt oder gelöscht, wird nichts angelegt (0 Zeilen).
 func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createDeviceSource,
-		arg.AccessID,
+		arg.ActorID,
 		arg.ID,
 		arg.Driver,
 		arg.Address,
@@ -66,6 +81,7 @@ func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSource
 		arg.SecretID,
 		arg.Enabled,
 		arg.DeviceID,
+		arg.AccessID,
 	)
 	if err != nil {
 		return 0, err
@@ -208,33 +224,43 @@ func (q *Queries) LockDevice(ctx context.Context, id uuid.UUID) (*time.Time, err
 }
 
 const updateDeviceSource = `-- name: UpdateDeviceSource :execrows
-UPDATE device_source
-SET address    = $1,
-    config     = $2,
-    secret_id  = $3,
-    enabled    = $4,
-    updated_at = now()
-WHERE device_source.id = $5
-  AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL)
+WITH before AS (
+  SELECT id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at FROM device_source WHERE id = $2::uuid
+), upd AS (
+  UPDATE device_source
+  SET address    = $3,
+      config     = $4,
+      secret_id  = $5,
+      enabled    = $6,
+      updated_at = now()
+  WHERE device_source.id = $2::uuid
+    AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL)
+  RETURNING id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT $1::uuid, 'update', 'device_source', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id
 `
 
 type UpdateDeviceSourceParams struct {
+	ActorID  *uuid.UUID
+	ID       uuid.UUID
 	Address  *string
 	Config   json.RawMessage
 	SecretID *uuid.UUID
 	Enabled  bool
-	ID       uuid.UUID
 }
 
 // Treiber und Gerät einer Quelle stehen fest; sonst würden ihre Elemente den Besitzer wechseln.
 // Quellen gelöschter Geräte bleiben unverändert (0 Zeilen).
 func (q *Queries) UpdateDeviceSource(ctx context.Context, arg UpdateDeviceSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateDeviceSource,
+		arg.ActorID,
+		arg.ID,
 		arg.Address,
 		arg.Config,
 		arg.SecretID,
 		arg.Enabled,
-		arg.ID,
 	)
 	if err != nil {
 		return 0, err

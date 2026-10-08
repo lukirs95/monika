@@ -61,20 +61,39 @@ WHERE NOT present;
 
 -- name: CreatePlannedElement :exec
 -- Vom User vorab angelegtes Treiber-Element, das der Treiber noch nie gesehen hat.
-INSERT INTO element (id, kind, parent_id, device_id, source_id, external_id, label, notes, present)
-VALUES (@id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, @external_id::text, @label, @notes, false);
+WITH e AS (
+  INSERT INTO element (id, kind, parent_id, device_id, source_id, external_id, label, notes, present)
+  VALUES (@id::uuid, @kind::text, @parent_id::uuid, @device_id::uuid, @source_id::uuid, @external_id::text, @label, @notes, false)
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT sqlc.narg(actor_id)::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e;
 
 -- name: CreateGroup :exec
-INSERT INTO element (id, kind, label, notes)
-VALUES (@id, 'group', @label, @notes);
+WITH e AS (
+  INSERT INTO element (id, kind, label, notes)
+  VALUES (@id::uuid, 'group', @label, @notes)
+  RETURNING *
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT sqlc.narg(actor_id)::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e;
 
 -- name: UpdateElementUserFields :execrows
-UPDATE element
-SET label      = @label,
-    notes      = @notes,
-    monitored  = @monitored,
-    updated_at = now()
-WHERE id = @id;
+-- Protokolliert nur die User-Spalten, nicht die ganze Zeile.
+WITH before AS (
+  SELECT id, label, notes, monitored FROM element WHERE id = @id::uuid
+), upd AS (
+  UPDATE element
+  SET label      = @label,
+      notes      = @notes,
+      monitored  = @monitored,
+      updated_at = now()
+  WHERE element.id = @id::uuid
+  RETURNING element.id, element.label, element.notes, element.monitored
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
+SELECT sqlc.narg(actor_id)::uuid, 'update', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
+FROM upd JOIN before ON before.id = upd.id;
 
 -- name: LockGroup :one
 -- Sperrt das Gruppen-Element bis zum Ende der Transaktion; liefert deleted_at.
