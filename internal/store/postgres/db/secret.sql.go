@@ -13,41 +13,58 @@ import (
 )
 
 const createSecret = `-- name: CreateSecret :exec
-INSERT INTO secret (id, name, description, ciphertext, nonce, key_id, created_by_id, updated_by_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+WITH s AS (
+  INSERT INTO secret (id, name, description, ciphertext, nonce, key_id, created_by_id, updated_by_id)
+  VALUES ($2::uuid, $3::text, $4, $5::bytea, $6::bytea, $7::text,
+          $1::uuid, $1::uuid)
+  RETURNING id, name, description
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'create', 'secret', s.id, to_jsonb(s) FROM s
 `
 
 type CreateSecretParams struct {
+	ActorID     *uuid.UUID
 	ID          uuid.UUID
 	Name        string
 	Description *string
 	Ciphertext  []byte
 	Nonce       []byte
 	KeyID       string
-	CreatedByID *uuid.UUID
 }
 
+// Audit nur mit Name und Beschreibung, nie mit dem Wert.
 func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) error {
 	_, err := q.db.Exec(ctx, createSecret,
+		arg.ActorID,
 		arg.ID,
 		arg.Name,
 		arg.Description,
 		arg.Ciphertext,
 		arg.Nonce,
 		arg.KeyID,
-		arg.CreatedByID,
 	)
 	return err
 }
 
 const deleteSecret = `-- name: DeleteSecret :execrows
-DELETE FROM secret
-WHERE id = $1
+WITH s AS (
+  DELETE FROM secret
+  WHERE secret.id = $2::uuid
+  RETURNING secret.id, secret.name, secret.description
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'secret', s.id, to_jsonb(s) FROM s
 `
 
+type DeleteSecretParams struct {
+	ActorID *uuid.UUID
+	ID      uuid.UUID
+}
+
 // Schlägt mit 23001 (restrict_violation) fehl, solange eine Quelle oder Weiterleitung das Secret verwendet.
-func (q *Queries) DeleteSecret(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSecret, id)
+func (q *Queries) DeleteSecret(ctx context.Context, arg DeleteSecretParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecret, arg.ActorID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -189,29 +206,37 @@ func (q *Queries) ReencryptSecret(ctx context.Context, arg ReencryptSecretParams
 }
 
 const replaceSecretValue = `-- name: ReplaceSecretValue :execrows
-UPDATE secret
-SET ciphertext    = $1,
-    nonce         = $2,
-    key_id        = $3,
-    updated_by_id = $4,
-    updated_at    = now()
-WHERE id = $5
+WITH s AS (
+  UPDATE secret
+  SET ciphertext    = $2,
+      nonce         = $3,
+      key_id        = $4,
+      updated_by_id = $1::uuid,
+      updated_at    = now()
+  WHERE secret.id = $5::uuid
+  RETURNING secret.id, secret.name
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
+SELECT $1::uuid, 'update', 'secret', s.id,
+       jsonb_build_object('name', s.name, 'value', 'replaced')
+FROM s
 `
 
 type ReplaceSecretValueParams struct {
-	Ciphertext  []byte
-	Nonce       []byte
-	KeyID       string
-	UpdatedByID *uuid.UUID
-	ID          uuid.UUID
+	ActorID    *uuid.UUID
+	Ciphertext []byte
+	Nonce      []byte
+	KeyID      string
+	ID         uuid.UUID
 }
 
+// Audit vermerkt nur, dass der Wert ersetzt wurde.
 func (q *Queries) ReplaceSecretValue(ctx context.Context, arg ReplaceSecretValueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, replaceSecretValue,
+		arg.ActorID,
 		arg.Ciphertext,
 		arg.Nonce,
 		arg.KeyID,
-		arg.UpdatedByID,
 		arg.ID,
 	)
 	if err != nil {
