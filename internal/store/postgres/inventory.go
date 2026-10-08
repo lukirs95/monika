@@ -134,7 +134,9 @@ func (s *Store) CreateDevice(ctx context.Context, e inventory.Element) error {
 }
 
 // DeleteDevice sperrt das Gerät und prüft die Presets in derselben Transaktion, damit
-// zwischen Prüfung und Löschen kein Preset-Schritt entstehen kann.
+// zwischen Prüfung und Löschen kein Preset-Schritt entstehen kann. Danach werden die aktiven
+// Befunde zurückgezogen, die Konfiguration mit diesem Geltungsbereich gelöscht und das Gerät
+// weich gelöscht.
 func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
@@ -159,6 +161,12 @@ func (s *Store) DeleteDevice(ctx context.Context, id uuid.UUID) error {
 			})}
 		}
 
+		if _, err := q.WithdrawDeviceFindings(ctx, id); err != nil {
+			return fmt.Errorf("withdraw findings: %w", err)
+		}
+		if err := q.DeleteDeviceScopedConfig(ctx, id); err != nil {
+			return fmt.Errorf("delete scoped config: %w", err)
+		}
 		if err := q.DeleteDevice(ctx, id); err != nil {
 			return fmt.Errorf("delete device: %w", err)
 		}

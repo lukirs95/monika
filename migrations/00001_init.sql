@@ -421,12 +421,14 @@ COMMENT ON TABLE "element" IS 'Hinweis: device_id = id beim Gerät erfordert, da
 vergeben wird (in Go erzeugen statt per Default).
 
 Eindeutigkeit der external_id pro Quelle, mit genau einem Zugangs-Element
-(external_id NULL) pro Quelle. DBML kennt kein NULLS NOT DISTINCT; der Index
-steht deshalb handgeschrieben in migrations/ und deckt auch Abfragen nach
-source_id ab:
+(external_id NULL) pro Quelle. Teilindex, weil Geräte und Gruppen weder Quelle
+noch external_id haben. DBML kennt weder WHERE noch NULLS NOT DISTINCT; der
+Index steht deshalb handgeschrieben in migrations/ und deckt auch Abfragen
+nach source_id ab:
 
 CREATE UNIQUE INDEX element_source_external_uq
-  ON element (source_id, external_id) NULLS NOT DISTINCT;
+  ON element (source_id, external_id) NULLS NOT DISTINCT
+  WHERE source_id IS NOT NULL;
 ';
 
 COMMENT ON COLUMN "element"."kind" IS 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger';
@@ -601,7 +603,7 @@ COMMENT ON COLUMN "role"."external_ref" IS 'Wert im Groups-Claim des IdP; Mitgli
 
 COMMENT ON COLUMN "role_member"."origin" IS 'manual | idp; idp-Mitgliedschaften werden beim Login überschrieben';
 
-COMMENT ON COLUMN "permission_grant"."scope_element_id" IS 'Gerät oder Gruppe, rekursiv; NULL = überall';
+COMMENT ON COLUMN "permission_grant"."scope_element_id" IS 'Gruppe (Mitglieder rekursiv), Gerät (alle Elemente) oder Element (mit Kindern); NULL = überall';
 
 COMMENT ON COLUMN "api_token"."user_id" IS 'meist ein Dienstkonto';
 

@@ -100,6 +100,24 @@ func (q *Queries) DeleteDevice(ctx context.Context, deviceID uuid.UUID) error {
 	return err
 }
 
+const deleteDeviceScopedConfig = `-- name: DeleteDeviceScopedConfig :exec
+WITH device_elements AS (
+  SELECT e.id FROM element e WHERE e.device_id = $1::uuid
+), rules AS (
+  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements)
+), grants AS (
+  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements)
+)
+DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements)
+`
+
+// Löscht Regeln, Rechte und Weiterleitungen, deren Geltungsbereich das Gerät oder eines seiner
+// Elemente ist; ohne ihr Ziel sind sie bedeutungslos. Vorher die Befunde zurückziehen.
+func (q *Queries) DeleteDeviceScopedConfig(ctx context.Context, deviceID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDeviceScopedConfig, deviceID)
+	return err
+}
+
 const listDeviceSources = `-- name: ListDeviceSources :many
 SELECT id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at FROM device_source
 ORDER BY id
@@ -251,6 +269,23 @@ func (q *Queries) UpdateSourceIdentity(ctx context.Context, arg UpdateSourceIden
 		arg.Firmware,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const withdrawDeviceFindings = `-- name: WithdrawDeviceFindings :execrows
+UPDATE finding
+SET cleared_at = now(),
+    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "device_deleted"}'::jsonb
+WHERE cleared_at IS NULL
+  AND element_id IN (SELECT e.id FROM element e WHERE e.device_id = $1::uuid)
+`
+
+// Zieht alle aktiven Befunde an Elementen des Geräts zurück (cleared_reason device_deleted).
+func (q *Queries) WithdrawDeviceFindings(ctx context.Context, deviceID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, withdrawDeviceFindings, deviceID)
 	if err != nil {
 		return 0, err
 	}

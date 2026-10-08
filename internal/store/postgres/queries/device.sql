@@ -55,6 +55,26 @@ JOIN element e ON e.id = s.element_id
 WHERE e.device_id = @device_id::uuid
 ORDER BY p.name, p.id;
 
+-- name: WithdrawDeviceFindings :execrows
+-- Zieht alle aktiven Befunde an Elementen des Geräts zurück (cleared_reason device_deleted).
+UPDATE finding
+SET cleared_at = now(),
+    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "device_deleted"}'::jsonb
+WHERE cleared_at IS NULL
+  AND element_id IN (SELECT e.id FROM element e WHERE e.device_id = @device_id::uuid);
+
+-- name: DeleteDeviceScopedConfig :exec
+-- Löscht Regeln, Rechte und Weiterleitungen, deren Geltungsbereich das Gerät oder eines seiner
+-- Elemente ist; ohne ihr Ziel sind sie bedeutungslos. Vorher die Befunde zurückziehen.
+WITH device_elements AS (
+  SELECT e.id FROM element e WHERE e.device_id = @device_id::uuid
+), rules AS (
+  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements)
+), grants AS (
+  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements)
+)
+DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements);
+
 -- name: DeleteDevice :exec
 -- Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
 -- das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.

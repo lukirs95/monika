@@ -613,7 +613,7 @@ Table permission_grant {
   id               uuid       [pk, default: `uuidv7()`]
   role_id          uuid       [not null]
   permission       permission [not null]
-  scope_element_id uuid       [note: 'Gerät oder Gruppe, rekursiv; NULL = überall']
+  scope_element_id uuid       [note: 'Gruppe (Mitglieder rekursiv), Gerät (alle Elemente) oder Element (mit Kindern); NULL = überall']
   created_at       timestamptz [not null, default: `now()`]
 
   indexes {
