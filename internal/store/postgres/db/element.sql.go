@@ -125,7 +125,8 @@ func (q *Queries) DeleteGroup(ctx context.Context, arg DeleteGroupParams) error 
 
 const finishDiscovery = `-- name: FinishDiscovery :many
 WITH seen AS (
-  SELECT e.id, (e.external_id IS NULL OR e.id = ANY (COALESCE($1::uuid[], '{}'))) AS seen
+  SELECT e.id, e.present AS was_present,
+         (e.external_id IS NULL OR e.id = ANY (COALESCE($1::uuid[], '{}'))) AS seen
   FROM element e
   WHERE e.source_id = $2::uuid
 ), updated AS (
@@ -137,10 +138,16 @@ WITH seen AS (
   FROM seen
   WHERE element.id = seen.id
     AND (element.present OR seen.seen)
-  RETURNING element.id, element.present
+  RETURNING element.id, element.present, seen.was_present
+), audit AS (
+  INSERT INTO audit_log (verb, object_type, object_id, before, after)
+  SELECT 'update', 'element', updated.id,
+         jsonb_build_object('present', updated.was_present), jsonb_build_object('present', updated.present)
+  FROM updated
+  WHERE updated.present IS DISTINCT FROM updated.was_present
 )
-SELECT id FROM updated
-WHERE NOT present
+SELECT updated.id FROM updated
+WHERE NOT updated.present
 `
 
 type FinishDiscoveryParams struct {
@@ -153,6 +160,7 @@ type FinishDiscoveryParams struct {
 // Das Zugangs-Element (external_id NULL) gilt immer als gesehen; sein last_seen_at zeigt
 // die letzte vollständige Discovery.
 // Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
+// Audit (actor NULL): jeder Wechsel von present, in beide Richtungen.
 // Liefert die IDs der in diesem Lauf verschwundenen Elemente.
 func (q *Queries) FinishDiscovery(ctx context.Context, arg FinishDiscoveryParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, finishDiscovery, arg.SeenIds, arg.SourceID)

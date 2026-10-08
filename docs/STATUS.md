@@ -19,6 +19,7 @@ Stand: 2026-10-08
   - `internal/core/inventory`: Domänentypen, `inventory.Store`, Fehler (`ErrNotFound`, `ErrMemberCycle`, `DeviceInUseError`).
   - `postgres.Store` implementiert `inventory.Store` (`Load`, `ApplyDiscovery`, Geräte, Quellen, Gruppen).
 - **Schema und Store an die Durchsicht angepasst** (2026-10-08): Tabelle `device` entfernt, Identität pro Quelle, `element.deleted_at`, `external_id` pro Quelle (Teilindex mit `NULLS NOT DISTINCT`, Migration `00003`), Zugangs-Element mit jeder Quelle, `FinishDiscovery` mit Zugangs-Element, `DeleteDevice` und `DeleteGroup` vollständig (Befunde zurückziehen, Konfiguration mit Geltungsbereich löschen, Mitgliedschaften entfernen, Presets blockieren).
+- **Audit des Inventars** (2026-10-08): Store-Methoden, die der User auslöst, bekommen den Akteur als expliziten Parameter (`uuid.Nil` = Monika). Änderung und Audit-Eintrag laufen im selben SQL-Statement. Discovery protokolliert neue Elemente, Wechsel von `present` und Links mit `actor_id = NULL`; Löschen schreibt einen Eintrag pro Gerät/Gruppe und je einen pro Mitgelöschtem.
 - **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
 
 ## Architektur-Durchsicht (2026-10-08)
@@ -39,13 +40,12 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 
 ## Nächste Schritte
 
-1. **Audit:** Store-Methoden für `audit_log`; Discovery (Links, `present`-Wechsel, `actor_id = NULL`) und Löschen (Gerät, Gruppe, Mitgelöschtes) schreiben Einträge. Dafür brauchen die Store-Methoden den handelnden User.
-2. **`secret` auf das Store-Muster umstellen:** `secret.Store`-Interface und Typen in `internal/secret`, Methoden in `postgres.Store`. Fehlercode `23001` (`restrict_violation`, Secret noch in Verwendung) auf einen fachlichen Fehler abbilden. Danach Verschlüsselung (AES-256-GCM), Master-Key aus der Umgebung, Rotation, Startprüfung.
-3. **Zustand:** Queries und Store für `element_state` (Health und Rollup, nur bei Änderung).
-4. **Bewertung:** Queries und Store für Regeln und Befunde (aktive laden, anlegen, aufheben, quittieren).
-5. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
-6. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env`, `postgres.Open`, `postgres.Migrate`, Verdrahtung.
-7. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
+1. **`secret` auf das Store-Muster umstellen:** `secret.Store`-Interface und Typen in `internal/secret`, Methoden in `postgres.Store`. Fehlercode `23001` (`restrict_violation`, Secret noch in Verwendung) auf einen fachlichen Fehler abbilden. Danach Verschlüsselung (AES-256-GCM), Master-Key aus der Umgebung, Rotation, Startprüfung.
+2. **Zustand:** Queries und Store für `element_state` (Health und Rollup, nur bei Änderung).
+3. **Bewertung:** Queries und Store für Regeln und Befunde (aktive laden, anlegen, aufheben, quittieren).
+4. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
+5. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env`, `postgres.Open`, `postgres.Migrate`, Verdrahtung.
+6. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
 
 ## Bekannte Lücken
 

@@ -19,8 +19,13 @@ var (
 )
 
 const insertDriverLink = `-- name: InsertDriverLink :batchexec
-INSERT INTO element_link (id, type, source_id, from_id, from_ref, to_id, to_ref)
-VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)
+WITH l AS (
+  INSERT INTO element_link (id, type, source_id, from_id, from_ref, to_id, to_ref)
+  VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+)
+INSERT INTO audit_log (verb, object_type, object_id, after)
+SELECT 'create', 'element_link', l.id, to_jsonb(l) FROM l
 `
 
 type InsertDriverLinkBatchResults struct {
@@ -41,6 +46,7 @@ type InsertDriverLinkParams struct {
 
 // Discovery: neuer Link einer Quelle (feeds, uses, represents). Ein noch unbekannter
 // Endpunkt steht als global_ref in from_ref bzw. to_ref.
+// Audit (actor NULL): create.
 func (q *Queries) InsertDriverLink(ctx context.Context, arg []InsertDriverLinkParams) *InsertDriverLinkBatchResults {
 	batch := &pgx.Batch{}
 	for _, a := range arg {
@@ -81,32 +87,47 @@ func (b *InsertDriverLinkBatchResults) Close() error {
 }
 
 const upsertDriverElement = `-- name: UpsertDriverElement :batchone
-INSERT INTO element (
-  id, kind, parent_id, device_id, source_id, external_id, global_ref,
-  transport, direction, name, attributes, position, actions, critical_actions, settings,
-  present, first_seen_at, last_seen_at
-) VALUES (
-  $1, $2, $3::uuid, $4::uuid, $5::uuid, NULLIF($6::text, ''), $7,
-  $8, $9, $10, $11, $12, $13, $14, $15,
-  true, now(), now()
+WITH prev AS (
+  SELECT p.present
+  FROM element p
+  WHERE p.source_id = $1::uuid
+    AND p.external_id IS NOT DISTINCT FROM NULLIF($2::text, '')
+), up AS (
+  INSERT INTO element (
+    id, kind, parent_id, device_id, source_id, external_id, global_ref,
+    transport, direction, name, attributes, position, actions, critical_actions, settings,
+    present, first_seen_at, last_seen_at
+  ) VALUES (
+    $3, $4, $5::uuid, $6::uuid, $1::uuid, NULLIF($2::text, ''), $7,
+    $8, $9, $10, $11, $12, $13, $14, $15,
+    true, now(), now()
+  )
+  ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
+  SET kind             = excluded.kind,
+      parent_id        = excluded.parent_id,
+      global_ref       = excluded.global_ref,
+      transport        = excluded.transport,
+      direction        = excluded.direction,
+      name             = excluded.name,
+      attributes       = excluded.attributes,
+      position         = excluded.position,
+      actions          = excluded.actions,
+      critical_actions = excluded.critical_actions,
+      settings         = excluded.settings,
+      present          = true,
+      first_seen_at    = COALESCE(element.first_seen_at, now()),
+      last_seen_at     = now(),
+      updated_at       = now()
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+), audit AS (
+  INSERT INTO audit_log (verb, object_type, object_id, before, after)
+  SELECT 'create', 'element', up.id, NULL, to_jsonb(up)
+  FROM up WHERE NOT EXISTS (SELECT 1 FROM prev)
+  UNION ALL
+  SELECT 'update', 'element', up.id, '{"present": false}'::jsonb, '{"present": true}'::jsonb
+  FROM up, prev WHERE NOT prev.present
 )
-ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
-SET kind          = excluded.kind,
-    parent_id     = excluded.parent_id,
-    global_ref    = excluded.global_ref,
-    transport     = excluded.transport,
-    direction     = excluded.direction,
-    name          = excluded.name,
-    attributes    = excluded.attributes,
-    position      = excluded.position,
-    actions       = excluded.actions,
-    critical_actions = excluded.critical_actions,
-    settings      = excluded.settings,
-    present       = true,
-    first_seen_at = COALESCE(element.first_seen_at, now()),
-    last_seen_at  = now(),
-    updated_at    = now()
-RETURNING id
+SELECT up.id FROM up
 `
 
 type UpsertDriverElementBatchResults struct {
@@ -116,12 +137,12 @@ type UpsertDriverElementBatchResults struct {
 }
 
 type UpsertDriverElementParams struct {
+	SourceID        uuid.UUID
+	ExternalID      string
 	ID              uuid.UUID
 	Kind            string
 	ParentID        uuid.UUID
 	DeviceID        uuid.UUID
-	SourceID        uuid.UUID
-	ExternalID      string
 	GlobalRef       *string
 	Transport       *string
 	Direction       *PortDirection
@@ -136,16 +157,18 @@ type UpsertDriverElementParams struct {
 // Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 // Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
 // Eine leere external_id meint das Zugangs-Element der Quelle (gespeichert als NULL).
+// Audit (actor NULL): create für neue Elemente, update present false → true für zurückkehrende
+// und übernommene; Änderungen an Attributen werden nicht protokolliert.
 func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverElementParams) *UpsertDriverElementBatchResults {
 	batch := &pgx.Batch{}
 	for _, a := range arg {
 		vals := []interface{}{
+			a.SourceID,
+			a.ExternalID,
 			a.ID,
 			a.Kind,
 			a.ParentID,
 			a.DeviceID,
-			a.SourceID,
-			a.ExternalID,
 			a.GlobalRef,
 			a.Transport,
 			a.Direction,

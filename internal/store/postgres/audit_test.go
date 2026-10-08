@@ -186,3 +186,66 @@ func TestAuditDelete(t *testing.T) {
 		t.Fatalf("audit entries:\n got  %v\n want %v", got, want)
 	}
 }
+
+func TestAuditDiscovery(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	s := postgres.New(pool)
+
+	device, source, port, peer := newID(), newID(), newID(), newID()
+	if err := s.CreateDevice(ctx, uuid.Nil, inventory.Element{ID: device}); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink"}, newID()); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	element := func(id uuid.UUID, kind inventory.Kind, ext string) inventory.Element {
+		return inventory.Element{ID: id, Kind: kind, ParentID: device, DeviceID: device, SourceID: source, ExternalID: ext}
+	}
+	if err := s.CreatePlannedElement(ctx, uuid.Nil, element(peer, "peer", "peer/X8A9001")); err != nil {
+		t.Fatalf("CreatePlannedElement: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `TRUNCATE audit_log`); err != nil {
+		t.Fatalf("truncate audit_log: %v", err)
+	}
+
+	link := inventory.Link{ID: newID(), Type: inventory.LinkUses, SourceID: source, FromID: port, ToID: peer}
+	runs := []inventory.Discovery{
+		// Lauf 1: Port ist neu, der vorab angelegte Peer erscheint, ein Link entsteht.
+		{SourceID: source, Upsert: []inventory.Element{element(port, "port", "sdi/1"), element(peer, "peer", "peer/X8A9001")},
+			Seen: []uuid.UUID{port, peer}, AddLinks: []inventory.Link{link}},
+		// Lauf 2: Peer verschwindet, der Link fällt weg.
+		{SourceID: source, Seen: []uuid.UUID{port}, RemoveLinks: []uuid.UUID{link.ID}},
+		// Lauf 3: Peer kehrt zurück, ohne geändert zu sein (nur in Seen).
+		{SourceID: source, Seen: []uuid.UUID{port, peer}},
+	}
+	for i, d := range runs {
+		if _, err := s.ApplyDiscovery(ctx, d); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+	}
+
+	got := []string{}
+	for _, e := range auditLog(t, pool) {
+		if e.Actor != nil {
+			t.Errorf("entry %+v has actor, want Monika (NULL)", e)
+		}
+		entry := e.Verb + " " + e.ObjectType + " " + e.ObjectID.String()
+		if e.Verb == "update" {
+			entry += " " + string(e.Before) + "→" + string(e.After)
+		}
+		got = append(got, entry)
+	}
+	want := []string{
+		"create element " + port.String(),
+		`update element ` + peer.String() + ` {"present": false}→{"present": true}`,
+		"create element_link " + link.ID.String(),
+		"delete element_link " + link.ID.String(),
+		`update element ` + peer.String() + ` {"present": true}→{"present": false}`,
+		`update element ` + peer.String() + ` {"present": false}→{"present": true}`,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("audit entries:\n got  %q\n want %q", got, want)
+	}
+}

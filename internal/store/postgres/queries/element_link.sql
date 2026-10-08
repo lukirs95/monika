@@ -6,14 +6,26 @@ ORDER BY id;
 -- name: InsertDriverLink :batchexec
 -- Discovery: neuer Link einer Quelle (feeds, uses, represents). Ein noch unbekannter
 -- Endpunkt steht als global_ref in from_ref bzw. to_ref.
-INSERT INTO element_link (id, type, source_id, from_id, from_ref, to_id, to_ref)
-VALUES (@id, @type, @source_id::uuid, @from_id, @from_ref, @to_id, @to_ref);
+-- Audit (actor NULL): create.
+WITH l AS (
+  INSERT INTO element_link (id, type, source_id, from_id, from_ref, to_id, to_ref)
+  VALUES (@id, @type, @source_id::uuid, @from_id, @from_ref, @to_id, @to_ref)
+  RETURNING *
+)
+INSERT INTO audit_log (verb, object_type, object_id, after)
+SELECT 'create', 'element_link', l.id, to_jsonb(l) FROM l;
 
 -- name: DeleteDriverLinks :execrows
 -- Discovery: weggefallene Links einer Quelle werden gelöscht, nicht weich markiert.
-DELETE FROM element_link
-WHERE source_id = @source_id::uuid
-  AND id = ANY (@ids::uuid[]);
+-- Audit (actor NULL): delete mit der gelöschten Zeile.
+WITH l AS (
+  DELETE FROM element_link
+  WHERE source_id = @source_id::uuid
+    AND id = ANY (@ids::uuid[])
+  RETURNING *
+)
+INSERT INTO audit_log (verb, object_type, object_id, before)
+SELECT 'delete', 'element_link', l.id, to_jsonb(l) FROM l;
 
 -- name: ResolveLinkRef :execrows
 -- Löst unaufgelöste Endpunkte auf, sobald ein Element mit dieser global_ref bekannt ist.

@@ -7,32 +7,49 @@ ORDER BY id;
 -- Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 -- Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
 -- Eine leere external_id meint das Zugangs-Element der Quelle (gespeichert als NULL).
-INSERT INTO element (
-  id, kind, parent_id, device_id, source_id, external_id, global_ref,
-  transport, direction, name, attributes, position, actions, critical_actions, settings,
-  present, first_seen_at, last_seen_at
-) VALUES (
-  @id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, NULLIF(@external_id::text, ''), @global_ref,
-  @transport, @direction, @name, @attributes, @position, @actions, @critical_actions, @settings,
-  true, now(), now()
+-- Audit (actor NULL): create für neue Elemente, update present false → true für zurückkehrende
+-- und übernommene; Änderungen an Attributen werden nicht protokolliert.
+WITH prev AS (
+  SELECT p.present
+  FROM element p
+  WHERE p.source_id = @source_id::uuid
+    AND p.external_id IS NOT DISTINCT FROM NULLIF(@external_id::text, '')
+), up AS (
+  INSERT INTO element (
+    id, kind, parent_id, device_id, source_id, external_id, global_ref,
+    transport, direction, name, attributes, position, actions, critical_actions, settings,
+    present, first_seen_at, last_seen_at
+  ) VALUES (
+    @id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, NULLIF(@external_id::text, ''), @global_ref,
+    @transport, @direction, @name, @attributes, @position, @actions, @critical_actions, @settings,
+    true, now(), now()
+  )
+  ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
+  SET kind             = excluded.kind,
+      parent_id        = excluded.parent_id,
+      global_ref       = excluded.global_ref,
+      transport        = excluded.transport,
+      direction        = excluded.direction,
+      name             = excluded.name,
+      attributes       = excluded.attributes,
+      position         = excluded.position,
+      actions          = excluded.actions,
+      critical_actions = excluded.critical_actions,
+      settings         = excluded.settings,
+      present          = true,
+      first_seen_at    = COALESCE(element.first_seen_at, now()),
+      last_seen_at     = now(),
+      updated_at       = now()
+  RETURNING *
+), audit AS (
+  INSERT INTO audit_log (verb, object_type, object_id, before, after)
+  SELECT 'create', 'element', up.id, NULL, to_jsonb(up)
+  FROM up WHERE NOT EXISTS (SELECT 1 FROM prev)
+  UNION ALL
+  SELECT 'update', 'element', up.id, '{"present": false}'::jsonb, '{"present": true}'::jsonb
+  FROM up, prev WHERE NOT prev.present
 )
-ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
-SET kind          = excluded.kind,
-    parent_id     = excluded.parent_id,
-    global_ref    = excluded.global_ref,
-    transport     = excluded.transport,
-    direction     = excluded.direction,
-    name          = excluded.name,
-    attributes    = excluded.attributes,
-    position      = excluded.position,
-    actions       = excluded.actions,
-    critical_actions = excluded.critical_actions,
-    settings      = excluded.settings,
-    present       = true,
-    first_seen_at = COALESCE(element.first_seen_at, now()),
-    last_seen_at  = now(),
-    updated_at    = now()
-RETURNING id;
+SELECT up.id FROM up;
 
 -- name: FinishDiscovery :many
 -- Abschluss einer Discovery, ein Statement pro Lauf und Quelle: gemeldete Elemente sind
@@ -40,9 +57,11 @@ RETURNING id;
 -- Das Zugangs-Element (external_id NULL) gilt immer als gesehen; sein last_seen_at zeigt
 -- die letzte vollständige Discovery.
 -- Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
+-- Audit (actor NULL): jeder Wechsel von present, in beide Richtungen.
 -- Liefert die IDs der in diesem Lauf verschwundenen Elemente.
 WITH seen AS (
-  SELECT e.id, (e.external_id IS NULL OR e.id = ANY (COALESCE(@seen_ids::uuid[], '{}'))) AS seen
+  SELECT e.id, e.present AS was_present,
+         (e.external_id IS NULL OR e.id = ANY (COALESCE(@seen_ids::uuid[], '{}'))) AS seen
   FROM element e
   WHERE e.source_id = @source_id::uuid
 ), updated AS (
@@ -54,10 +73,16 @@ WITH seen AS (
   FROM seen
   WHERE element.id = seen.id
     AND (element.present OR seen.seen)
-  RETURNING element.id, element.present
+  RETURNING element.id, element.present, seen.was_present
+), audit AS (
+  INSERT INTO audit_log (verb, object_type, object_id, before, after)
+  SELECT 'update', 'element', updated.id,
+         jsonb_build_object('present', updated.was_present), jsonb_build_object('present', updated.present)
+  FROM updated
+  WHERE updated.present IS DISTINCT FROM updated.was_present
 )
-SELECT id FROM updated
-WHERE NOT present;
+SELECT updated.id FROM updated
+WHERE NOT updated.present;
 
 -- name: CreatePlannedElement :exec
 -- Vom User vorab angelegtes Treiber-Element, das der Treiber noch nie gesehen hat.

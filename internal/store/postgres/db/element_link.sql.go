@@ -44,9 +44,14 @@ func (q *Queries) CreateMemberLink(ctx context.Context, arg CreateMemberLinkPara
 }
 
 const deleteDriverLinks = `-- name: DeleteDriverLinks :execrows
-DELETE FROM element_link
-WHERE source_id = $1::uuid
-  AND id = ANY ($2::uuid[])
+WITH l AS (
+  DELETE FROM element_link
+  WHERE source_id = $1::uuid
+    AND id = ANY ($2::uuid[])
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
+)
+INSERT INTO audit_log (verb, object_type, object_id, before)
+SELECT 'delete', 'element_link', l.id, to_jsonb(l) FROM l
 `
 
 type DeleteDriverLinksParams struct {
@@ -55,6 +60,7 @@ type DeleteDriverLinksParams struct {
 }
 
 // Discovery: weggefallene Links einer Quelle werden gelöscht, nicht weich markiert.
+// Audit (actor NULL): delete mit der gelöschten Zeile.
 func (q *Queries) DeleteDriverLinks(ctx context.Context, arg DeleteDriverLinksParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteDriverLinks, arg.SourceID, arg.Ids)
 	if err != nil {
