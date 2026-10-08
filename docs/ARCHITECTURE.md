@@ -1,6 +1,6 @@
 # Monika – Architektur
 
-**Stand:** 2026-10-07 · **Status:** verbindlich für alle folgenden Arbeiten
+**Stand:** 2026-10-08 · **Status:** verbindlich für alle folgenden Arbeiten
 **Schema-Referenz:** [`schema/monika.dbml`](schema/monika.dbml) (PostgreSQL). Dieses Dokument erklärt das *Warum* und die Regeln; das DBML ist die exakte Definition der Tabellen.
 
 ---
@@ -17,7 +17,7 @@
 8. [Zustand und Bewertung](#8-zustand-und-bewertung)
 9. [Aktionen und Einstellungen](#9-aktionen-und-einstellungen)
 10. [Presets](#10-presets)
-11. [Generische Aktionen: der HTTP-Treiber](#11-generische-aktionen-der-http-treiber)
+11. [Sende-Ziele](#11-sende-ziele)
 12. [Benutzer, Rollen und Rechte](#12-benutzer-rollen-und-rechte)
 13. [Weiterleitung](#13-weiterleitung)
 14. [Datenhaltung](#14-datenhaltung)
@@ -71,7 +71,7 @@ Die erste Treiber-Generation:
 7. **Spaltenregel:** Was übergreifend abgefragt wird, bekommt eine Spalte. Was nur angezeigt wird, kommt ins JSONB.
 8. **Inventar, Zustand und Historie werden getrennt** (selten / ständig / wächst endlos).
 9. **Vokabular lebt in Go.** `kind`, `transport`, Fakt-Schlüssel und Aktionsnamen sind kontrollierte Listen im Code, in der Datenbank `text`. Neue Werte brauchen keine Migration.
-10. **Unbekannt ist nicht Fehler.** Fehlen aktuelle Daten, ist der Zustand `unknown`, nie ein eingefrorenes Grün und nie ein falsches Rot.
+10. **Unbekannt ist nicht Fehler.** Liefert eine Quelle keine Daten, ist der Zustand ihrer Elemente `unknown`, nie ein eingefrorenes Grün und nie ein falsches Rot. Wo Monika nichts prüft, zeigt sie auch kein Grün.
 
 ---
 
@@ -141,16 +141,16 @@ flowchart LR
 
 ```
 Treiber ──Inventar, Fakten, Alarme, Links──▶ Core
-                                              ├─ 1. Inventar synchronisieren   → element, element_link (nur eigene Quelle)
-                                              ├─ 2. Fakten übernehmen          → element_state (nur bei Änderung)
-                                              │                                → InfluxDB (jeder Wert)
-                                              ├─ 3. Befunde erzeugen/aufheben  Regeln · Gerätealarme · System
+                                              ├─ 1. Inventar synchronisieren   → element, element_link (nur eigene Quelle), audit_log
+                                              ├─ 2. Fakten übernehmen          → Speicher des Core
+                                              │                                → InfluxDB (fester Takt)
+                                              ├─ 3. Befunde erzeugen/beenden   Regeln · Gerätealarme · System → finding
                                               ├─ 4. Ursache vs. Symptom        über feeds / uses / parent
-                                              ├─ 5. Health und Rollup          Element, Gerät, Gruppe
+                                              ├─ 5. Health und Rollup          Element, Gerät, Gruppe → element_state (nur bei Änderung)
                                               └─ 6. Push                       UI (live), Weiterleitung (gefiltert)
 ```
 
-Der Core hält Inventar, Zustand und Link-Graph **im Speicher** und bewertet dort. PostgreSQL dient der Persistenz (Neustart, SQL-Abfragen, Historie von Befunden und Läufen), nicht der Bewertungslogik.
+Der Core hält Inventar, Fakten und Link-Graph **im Speicher** und bewertet dort. **Aktuelle Fakten liegen nur im Speicher**; nach einem Neustart liefern die Treiber den vollständigen Stand neu, bis dahin sind die Elemente `unknown`. PostgreSQL dient der Persistenz (Inventar, Health, Historie von Befunden und Läufen), nicht der Bewertungslogik.
 
 ### Datenfluss: Handeln
 
@@ -191,14 +191,16 @@ Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separa
 
 | Bereich | Pflicht |
 |---|---|
-| **Discovery** | Meldet den Elementbaum des Geräts: `kind`, `transport`, `direction`, `name`, `attributes`, Position. |
-| **Identität** | Jedes Element hat eine **stabile `external_id`** (Slot-/Index-Pfad oder geräteeigene ID, nie eine laufende Nummer aus der Discovery-Reihenfolge). Wo vorhanden, zusätzlich eine global eindeutige `global_ref` (XLink-UnitID, NMOS-UUID). |
-| **Fakten** | Meldet Zustandswerte als flache Map mit Punkt-Schlüsseln aus dem Go-Vokabular. Keine Bewertung. |
+| **Discovery** | Meldet den Elementbaum des Geräts aus Sicht seiner Quelle: `kind`, `transport`, `direction`, `name`, `attributes`, Position. Dazu die Identität des Geräts, wie die Quelle sie sieht (Hersteller, Modell, Seriennummer, Firmware). |
+| **Identität** | Jedes Element hat eine **stabile `external_id`**, eindeutig innerhalb der Quelle (Slot-/Index-Pfad oder geräteeigene ID, nie eine laufende Nummer aus der Discovery-Reihenfolge). Wo vorhanden, zusätzlich eine global eindeutige `global_ref` (XLink-UnitID, NMOS-UUID). Das Zugangs-Element der Quelle (siehe Abschnitt 5) wird ohne `external_id` angesprochen. |
+| **Fakten** | Meldet Zustandswerte als flache Map mit Punkt-Schlüsseln aus dem Go-Vokabular. Keine Bewertung. Fakten, die das ganze Gerät betreffen, gehören an das Zugangs-Element. |
+| **Vollständiger Stand** | Meldet beim Verbinden und bei jedem Wiederverbinden den **vollständigen** aktuellen Stand aller seiner Elemente, nicht nur Änderungen. |
+| **Lebenszeichen** | Gibt regelmäßig Lebenszeichen (jede erfolgreiche Abfrage, Keepalive eines Event-Streams) und nennt den erwarteten Abstand. Bleiben sie aus, gilt die Quelle als nicht erreichbar. |
 | **Alarme** | Reicht vom Gerät selbst gemeldete Alarme weiter. |
 | **Links** | Meldet `feeds`, `uses` und `represents`. Ein Link über Gerätegrenzen wird von der Seite gemeldet, die ihn konfiguriert (bei XLink: der Decoder). |
-| **Fähigkeiten** | Meldet pro Element die unterstützten Befehle (`actions`) und die schreibbaren Einstellungen (`settings`) mit Typ, Grenzen und ggf. `critical`. |
+| **Fähigkeiten** | Meldet pro Element die unterstützten Befehle (`actions`), die dort zusätzlich kritischen Befehle (`critical_actions`) und die schreibbaren Einstellungen (`settings`) mit Typ, Grenzen und ggf. `critical`. |
 | **Ausführung** | Führt Befehle und `set` aus und liefert die Antwort des Geräts (inkl. abgelehnter Felder). |
-| **Aktionsdefinitionen** | Bringt pro Befehl in Go mit: Parameter-Schema, Prüfbedingung mit Timeout, Kennzeichen `critical`. |
+| **Aktionsdefinitionen** | Bringt pro Befehl in Go mit: Parameter-Schema, Prüfbedingung mit Timeout, Kennzeichen `critical`. Ausnahme Sende-Ziele: Das Parameter-Schema steht pro Element (siehe Abschnitt 11). |
 | **Konfigurationsschema** | Bringt ein JSON-Schema für seine `device_source.config` mit; die UI erzeugt daraus das Formular. |
 
 ### Verbote
@@ -206,6 +208,8 @@ Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separa
 - Ein Treiber fasst **nur Elemente und Links seiner eigenen Quelle** an.
 - Ein Treiber bietet **keine Aktion an, die `feeds`-Links erzeugt oder ändert** (z. B. XLink `DecoderSender`). `uses`-Links dürfen geändert werden (z. B. Uplink-Interface eines Decoders).
 - Ein Treiber bewertet nicht. Er meldet `signal_present: false`, nicht „Fehler“.
+- Ein Treiber meldet nie Elemente mit den reservierten `kind`-Werten `device`, `group` und `access` und nie den reservierten Fakt `present`.
+- Ein Treiber verändert nie seine eigene Konfiguration (`device_source.config`); sie gehört dem User.
 - Zugangsdaten stehen nie in `config`, sondern werden über `secret_id` aus dem Secret-Store bezogen. Der Core entschlüsselt und übergibt dem Treiber den Klartext.
 
 ### Vokabular in drei Stufen
@@ -214,11 +218,15 @@ Für Fakten und Aktionen gilt dasselbe Muster:
 
 | Stufe | Fakten | Aktionen | Verwendung |
 |---|---|---|---|
-| **Kern** (einheitliche Bedeutung) | `reachable`, `running`, `signal_present`, `connected`, `format.*` | `start`, `stop`, `reboot`, `set`, `trigger` | generische UI, Sammelaktionen, herstellerübergreifende Regeln |
-| **Bekannt** (benannt, optional) | `bitrate`, `packet_loss`, `ptp_offset`, `crc_errors` | – | Regeln und Dashboards über Hersteller hinweg |
-| **Roh** (mit Namespace) | `vxl.cpu_temp`, `emb.sfp_rx_power` | `vxl.reset_video_buffer`, `vxl.flush_audio` | Detailseite, InfluxDB |
+| **Kern** (einheitliche Bedeutung) | `reachable`, `running`, `signal_present`, `connected`, `format.*`, `last_ok`, `last_called_at`, `last_duration_ms` (Sende-Ziele) | `start`, `stop`, `reboot`, `set`, `trigger` | generische UI, Sammelaktionen, herstellerübergreifende Regeln |
+| **Bekannt** (benannt, optional) | `bitrate`, `packet_loss`, `ptp_offset`, `crc_errors`, `crc_errors.rate` | – | Regeln und Dashboards über Hersteller hinweg |
+| **Roh** (mit Namespace) | `vxl.cpu_temp`, `emb.sfp_rx_power`, `http.status` | `vxl.reset_video_buffer`, `vxl.flush_audio` | Detailseite, InfluxDB |
 
-Ein Rohwert wird zum bekannten Wert, sobald ein zweiter Treiber denselben Wert liefert. Zeitliche Ableitungen (z. B. Paketverlust pro Sekunde) berechnet der Treiber, nicht die Regel.
+Ein Rohwert wird zum bekannten Wert, sobald ein zweiter Treiber denselben Wert liefert.
+
+`present` ist ein **reservierter Fakt**: Ihn setzt kein Treiber, sondern der Core blendet bei der Bewertung die Spalte `element.present` ein. So lässt sich das Verschwinden eines Elements per Regel überwachen (Abschnitt 8).
+
+**Zähler und zeitliche Ableitungen** berechnet der Treiber, nicht die Regel. Das SDK stellt dafür einen Zähler-Helfer bereit: Er bekommt Rohwerte und liefert die Rate pro Sekunde, erkennt Resets (Aktion, Reboot) und Überläufe (bei angegebener Breite) und liefert nach dem Start erst ab dem zweiten Wert eine Rate. Abgeleitete Fakten heißen `<fakt>.rate` und sind **pro Sekunde** angegeben, damit ihre Bedeutung nicht vom Abfragetakt abhängt.
 
 ---
 
@@ -226,19 +234,22 @@ Ein Rohwert wird zum bekannten Wert, sobald ein zweiter Treiber denselben Wert l
 
 Alles, was Monika kennt, ist ein **Element**: Geräte, Ports, Units, Streams, Interfaces, Peers, Trigger und Gruppen. Status, Labels, Regeln, Rechte und Aktionen hängen dadurch an einer einzigen Tabelle.
 
-### Drei Klassen
+### Vier Klassen
 
 | Klasse | `kind` | `device_id` | `parent_id` | `source_id` | `external_id` |
 |---|---|---|---|---|---|
 | **Gerät** | `device` | = eigene `id` | NULL | NULL | NULL |
 | **Gruppe** | `group` | NULL | NULL | NULL | NULL |
+| **Zugang** | `access` | gesetzt | = `device_id` | gesetzt | NULL |
 | **Treiber-Element** | alle anderen | gesetzt | gesetzt | gesetzt | gesetzt |
 
-Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es mehrere Quellen haben kann (z. B. XLink-API und IPMI).
+Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es mehrere Quellen haben kann (z. B. XLink-API und IPMI). `device_id` zeigt immer auf ein Element mit `kind = device`; das sichert die Anwendung, nicht die Datenbank.
 
 ### `kind`-Vokabular
 
-`device`, `group`, `module`, `port`, `network_interface`, `clock`, `sender`, `receiver`, `peer`, `tunnel`, `processing`, `sensor`, `trigger`
+`device`, `group`, `access`, `module`, `port`, `network_interface`, `clock`, `sender`, `receiver`, `peer`, `tunnel`, `processing`, `sensor`, `trigger`
+
+- **`device`, `group` und `access` sind reserviert:** Diese Elemente legt nur der Core an. Treiber melden sie nie, und vorab angelegte Elemente können sie nicht haben.
 
 - **`kind` beschreibt die Rolle, `transport` den Weg** (`sdi`, `madi`, `analog`, `aes3`, `st2110-20`, `st2110-30`, `st2110-40`, `aes67`, `xlink`, `srt`, `ndi`, …). Ein Gateway ist kein Typ, sondern ein Gerät mit `port`/`sdi` und `sender`/`st2110-20`.
 - **`direction`** (`in`, `out`, `bidir`) ist die *Fähigkeit* eines Anschlusses. Die *aktuelle* Richtung eines bidirektionalen Ports ist ein Fakt.
@@ -246,17 +257,32 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 
 ### Gerät und Quellen
 
-- `device` ist eine 1:1-Erweiterung von `element` mit der Identität des Geräts (`vendor`, `model`, `serial`, `firmware`), gemeldet von einer Quelle.
+- **Ein Gerät ist ein Element mit `kind = device`.** Geräte legt immer der User an; ihr Name ist das `label`. Kein Treiber schreibt in das Gerät-Element, es trägt keine Fakten, nur Health und Rollup.
 - `device_source` beschreibt, **wie** ein Gerät erreicht wird: Treiber, Adresse, Konfiguration, Verweis auf ein Secret (`secret_id`). Ein Gerät kann mehrere Quellen haben, höchstens eine pro Treiber.
-- Jede Quelle besitzt ihre eigenen Elemente und Links. Ein Re-Discovery fasst nur diese an.
-- `device_source_state` hält den Verbindungszustand von Monika zur Quelle (getrennt, weil er sich ständig ändert).
+- **Die Identität des Geräts steht pro Quelle** in `device_source` (`vendor`, `model`, `serial`, `firmware`): so, wie diese Quelle das Gerät sieht. Zwei Quellen beschreiben oft Verschiedenes (XLink das Produkt X8, IPMI die Server-Hardware darunter); die UI zeigt alle.
+- Jede Quelle besitzt ihre eigenen Elemente und Links. Ein Re-Discovery fasst nur diese an. Eine zweite Quelle liefert also keine Fakten zu Elementen der ersten, sondern eigene Elemente im selben Gerät (z. B. IPMI: Lüfter, Netzteile, BMC-Schnittstelle). Sehen zwei Quellen dasselbe reale Ding, entstehen zwei Elemente, verbunden über `represents`.
+
+**Das Zugangs-Element (`kind = access`)** ist die Wurzel einer Quelle im Gerät:
+
+- Der Core legt es an, wenn eine Quelle angelegt wird; es lebt so lange wie die Quelle und verschwindet nie (`present` bleibt `true`, `last_seen_at` zeigt die letzte vollständige Discovery).
+- Es hat keine `external_id`; Treiber sprechen es mit leerer ID an. Pro Quelle gibt es genau eines.
+- Hier hängen Fakten, die das ganze Gerät betreffen (`vxl.cpu_temp`, `NeedsReboot`, Hostname des Geräts), Aktionen für das ganze Gerät (`reboot`) und der Befund `source.unreachable`.
+- Sein Name ist standardmäßig der Treibername (z. B. „XLink-API“). Die UI zeigt das Element nicht als eigene Zeile, sondern seine Fakten, Aktionen und Befunde beim Gerät, gruppiert nach Quelle.
 
 ### Lebenszyklus
 
 - **Elemente werden nicht gelöscht, sondern verschwinden:** `present = false`. Kommt dasselbe Element mit derselben `external_id` zurück, sind Label, Notizen und Gruppen wieder da.
-- **Geräte werden weich gelöscht.** Läufe, Befunde und Audit verweisen auf sie; ohne Gerät wären alte Einträge nicht mehr lesbar. Löschen setzt `device.deleted_at`, deaktiviert alle Quellen, setzt alle Elemente auf `monitored = false` und entfernt sie aus allen Gruppen. Die UI blendet gelöschte Geräte aus; ihre Quellen lassen sich nicht wieder aktivieren. Solange ein Preset-Schritt auf ein Element des Geräts zielt, wird das Löschen abgelehnt.
+- **Geräte und Gruppen werden weich gelöscht** (`element.deleted_at`). Läufe, Befunde und Audit verweisen auf sie; ohne sie wären alte Einträge nicht mehr lesbar. Löschen
+  - entfernt alle Mitgliedschaften in beide Richtungen (Mitglieder einer Gruppe, das Objekt bzw. seine Elemente als Mitglied anderer Gruppen),
+  - löscht Konfiguration, die nur diesem Objekt oder seinen Elementen galt: Regeln, Rechte und Weiterleitungen mit diesem Geltungsbereich (mit Eintrag in `audit_log`),
+  - beendet die aktiven Befunde (Abschnitt 8),
+  - beim Gerät zusätzlich: deaktiviert alle Quellen, setzt das Gerät-Element auf `monitored = false` und alle Elemente des Geräts auf `present = false`.
+- Gelöschte Geräte und Gruppen blendet die UI aus; Quellen gelöschter Geräte lassen sich nicht wieder aktivieren, und an gelöschten Geräten lassen sich keine Quellen anlegen.
+- **Solange ein Preset-Schritt auf das Objekt zielt** (beim Gerät: auf eines seiner Elemente), wird das Löschen abgelehnt; die UI nennt die Presets.
+- Löschen und Anlegen von Geräten und Gruppen erfordert `inventory_edit` global (Abschnitt 12). Was dabei mitgelöscht wird, braucht keine zusätzlichen Rechte.
 - Eine einzelne Quelle wird nicht gelöscht, sondern deaktiviert (`enabled = false`).
-- **Abschluss jeder Discovery:** ein Statement pro Lauf und Quelle setzt `last_seen_at` aller gemeldeten Elemente und `present = false` für alle übrigen. `last_seen_at` stimmt damit auch dann, wenn sich am Inventar nichts geändert hat.
+- **Abschluss jeder Discovery:** ein Statement pro Lauf und Quelle setzt `last_seen_at` aller gemeldeten Elemente und `present = false` für alle übrigen (außer dem Zugangs-Element). `last_seen_at` stimmt damit auch dann, wenn sich am Inventar nichts geändert hat.
+- **Audit der Discovery:** Neue und weggefallene Links sowie erscheinende und verschwindende Elemente schreibt die Discovery mit `actor_id = NULL` in `audit_log`. Änderungen an Attributen werden nicht protokolliert.
 - **Vorab-Anlage:** Der User kann Treiber-Elemente anlegen, bevor der Treiber sie gesehen hat (`first_seen_at = NULL`, z. B. ein erwarteter Peer vor einer Produktion). Findet der Treiber das Element, übernimmt er die Zeile anhand der `external_id`.
 - **Wiederverwendete IDs:** Manche Geräte vergeben gelöschte IDs neu (XLink-Units). Ein neues Element erbt dann Labels und Regeln des alten. Faustregel: **Labels und Regeln gehören an stabile Dinge** (Ports, Geräte, vor allem Gruppen).
 
@@ -264,9 +290,11 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 
 | Wer | Spalten |
 |---|---|
-| Treiber | `kind`, `transport`, `direction`, `name`, `attributes`, `position`, `external_id`, `global_ref`, `actions`, `settings` |
+| Treiber | `kind`, `transport`, `direction`, `name`, `attributes`, `position`, `external_id`, `global_ref`, `actions`, `critical_actions`, `settings`; in `device_source`: `vendor`, `model`, `serial`, `firmware` |
 | Core | `present`, `first_seen_at`, `last_seen_at`, `device_id`, `source_id`, `parent_id` (aus der Discovery) |
-| User | `label`, `notes`, `monitored` |
+| User | `label`, `notes`, `monitored`, `deleted_at` (durch Löschen); in `device_source`: `address`, `config`, `secret_id`, `enabled` |
+
+**`monitored` vererbt sich entlang `parent_id`:** Ein Element gilt als überwacht, wenn es selbst und alle seine Vorfahren überwacht sind. Ist das Gerät stillgelegt, sind es alle seine Elemente; die einzelnen Flags bleiben erhalten. Gruppen vererben nicht; an einer Gruppe hat `monitored` keine Wirkung.
 
 ### Gruppen
 
@@ -274,7 +302,8 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 - Hierarchie und Mitgliedschaft laufen **ausschließlich über `element_link` vom Typ `member`**, nie über `parent_id`. Damit sind sie n:m und beliebig verschachtelt.
 - **Position und Label hängen an der Mitgliedschaft**, nicht am Element: Gerät B / Input 1 ist *in dieser Stagebox* Kanal 5.
 - `member`-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung per rekursiver Abfrage). Prüfung und Insert laufen in einer Transaktion unter einem Advisory Lock (`pg_advisory_xact_lock`), damit zwei parallele Änderungen nicht gemeinsam einen Zyklus erzeugen.
-- Health einer Gruppe = schlimmster Zustand der Mitglieder, plus Rollup mit Zählern. **Keine Redundanzlogik:** Jeder Ausfall ist ein Fehler, auch wenn die Produktion weiterläuft.
+- Mitgliedschaften ändern erfordert `inventory_edit` an der Gruppe **und** am Element (Abschnitt 12).
+- Health einer Gruppe = schlimmster Zustand der Mitglieder, plus Rollup mit Zählern (Abschnitt 8). **Keine Redundanzlogik:** Jeder Ausfall ist ein Fehler, auch wenn die Produktion weiterläuft.
 - Standorte und Produktionen werden als Gruppen modelliert.
 
 Beispiel: eine Stagebox mit 8 Eingängen aus zwei Geräten mit je 4 Eingängen.
@@ -304,7 +333,7 @@ Die physische Struktur steckt in `parent_id`. Alle anderen Beziehungen sind **Li
 Regeln:
 
 - **Unaufgelöste Links:** Ist ein Endpunkt noch nicht in Monika, steht seine `global_ref` in `from_ref`/`to_ref`. Der Core löst den Link auf, sobald das Element bekannt ist.
-- **Treiber-Links** werden bei Wegfall gelöscht (nicht weich markiert). Ihre Historie gehört ins Audit bzw. nach InfluxDB.
+- **Treiber-Links** werden bei Wegfall gelöscht (nicht weich markiert). Ihre Historie steht in `audit_log` (Einträge der Discovery mit `actor_id = NULL`).
 - `member`-Links haben keine Quelle, alle anderen genau eine (`element_link_owner_check`).
 - **Kreuzschienen-Grenze:** Aktionen dürfen `uses`-Links verändern, niemals `feeds`-Links.
 
@@ -339,7 +368,10 @@ L1  X8A1001
 
 ### Fakten
 
-`element_state.facts` ist eine **flache Map** aller aktuellen Werte mit Punkt-Schlüsseln, z. B. `{"running": true, "signal_present": true, "format.rate": 50, "vxl.cpu_temp": 61}`. Gerätegemeldete Alarme stehen getrennt in `alarms`.
+Die Fakten eines Elements sind eine **flache Map** aller aktuellen Werte mit Punkt-Schlüsseln, z. B. `{"running": true, "signal_present": true, "format.rate": 50}`. Sie liegen **nur im Speicher des Core** und werden im festen Takt nach InfluxDB geschrieben (Abschnitt 14), nicht in PostgreSQL. Gerätegemeldete Alarme werden direkt zu Befunden.
+
+- **Das Alter eines Werts sagt nichts über seine Gültigkeit.** Viele Treiber melden nur Änderungen; ein Encoder, der seit 8 Stunden läuft, hat ein 8 Stunden altes `running: true`. Solange die Quelle Lebenszeichen gibt, gilt jeder zuletzt gemeldete Wert.
+- `present` ist ein reservierter Fakt aus der Spalte `element.present` (Abschnitt 4).
 
 ### Regeln
 
@@ -365,8 +397,12 @@ fact <op> value          [when when_fact <when_op> when_value]
 Auswertung:
 
 - **Fakt existiert am Element nicht** oder **`when` ist nicht erfüllt** → die Regel gilt dort nicht. Nur so funktionieren Gruppen- und globale Regeln.
-- **Pro Element und Fakt gewinnt die spezifischste Regel:** Element > Gerät > Gruppe > global. Gleich spezifische Regeln gelten alle.
-- `monitored = false` nimmt ein Element von allen Regeln aus.
+- **Pro Element und Fakt gewinnt die spezifischste Regel**, bestimmt in dieser Reihenfolge:
+  1. Geltungsbereich: Element > Gerät > Gruppe > global. Bei verschachtelten Gruppen gewinnt die nähere (weniger Mitgliedschaftsstufen bis zum Element).
+  2. Bei gleichem Geltungsbereich: mehr Filter (`match_*`) = spezifischer.
+  3. Wirklich gleich spezifische Regeln (z. B. aus zwei unabhängigen Gruppen) gelten alle.
+- Der Geltungsbereich geht immer vor den Filtern: Eine globale Regel mit Filtern schlägt nie eine Gruppenregel. Die UI zeigt pro Element und Fakt, welche Regel gilt und welche sie überschreibt.
+- Nicht überwachte Elemente (effektives `monitored = false`, Abschnitt 5) sind von allen Regeln und von Gerätealarmen ausgenommen.
 - Operator und Werttyp werden in Go beim Speichern geprüft.
 
 Beispiele:
@@ -378,6 +414,16 @@ Beispiele:
 | `match_driver = videoxlink` | `vxl.cpu_temp lte 80`, Hysterese `75` | Temperatur aller X8 |
 | Ein bestimmtes X8 | `vxl.cpu_temp lte 85` | überschreibt die globale Regel für dieses Gerät |
 | Encoder E1 | `signal_present eq true` **when** `running eq true` | Signal nur prüfen, wenn die Unit läuft |
+| Gruppe „Stagebox links“ | `present eq true` | ein Element der Gruppe ist verschwunden (z. B. SFP gezogen) oder ein vorab angelegtes Element fehlt noch |
+
+**Zähler** lassen sich auf zwei Arten überwachen:
+
+| Muster | Regel | Bedeutung | Voraussetzung |
+|---|---|---|---|
+| **Gehalten** | `crc_errors eq 0` | Jeder Fehler erzeugt einen Befund, der bleibt, bis jemand den Zähler am Gerät zurücksetzt | Gerät bietet eine Reset-Aktion |
+| **Aktuell** | `crc_errors.rate eq 0`, mit `hold_seconds` | Befund, solange Fehler auftreten; endet, wenn keine mehr kommen | Treiber liefert die Rate (Zähler-Helfer, Abschnitt 4) |
+
+Regeln vergleichen nie Werte über die Zeit (kein „hat sich erhöht“); das leistet die Rate.
 
 ### Befunde
 
@@ -387,11 +433,19 @@ Ein Element ist nicht einfach „rot“, sondern hat **Befunde** (`finding`). He
 |---|---|---|
 | `rule` | verletzte Regel des Users | `rule.violated` |
 | `device` | vom Gerät gemeldeten Alarm (automatisch) | Alarmcode des Geräts |
-| `system` | Monika selbst | `source.unreachable`, `data.stale` |
+| `system` | Monika selbst | `source.unreachable` (am Zugangs-Element, Schwere `error`) |
 
 - Höchstens **ein aktiver Befund pro Element, Code und Regel** (Teilindex `finding_active_uq`).
 - **Quittieren** ändert nicht die Health, nur Anzeige und Meldung.
-- Wird eine Regel gelöscht, bleiben ihre Befunde mit Regel-Snapshot in `details` erhalten (`rule_id` → NULL).
+- **Eine Quelle ist nicht erreichbar**, wenn die Verbindung abbricht oder ihre Lebenszeichen ausbleiben. Dann bekommt ihr Zugangs-Element den Befund `source.unreachable` (Grund in `details`); alle anderen Elemente dieser Quelle werden `unknown`, Elemente anderer Quellen bleiben unberührt. Eine **deaktivierte** Quelle erzeugt keinen Befund, ihre Elemente sind aber ebenfalls `unknown`. Sende-Ziele ohne Health-Check geben keine Lebenszeichen und werden nie `unknown` (Abschnitt 11).
+
+**Ende eines Befunds:**
+
+- **Behoben:** Die Bewertung zeigt wieder den Sollzustand. Ereignis `finding.cleared`.
+- **Zurückgezogen:** Ein aktiver Befund endet, sobald er **dauerhaft** nicht mehr bewertet wird: Die Regel wurde gelöscht, deaktiviert oder so geändert, dass sie am Element nicht mehr gilt; das Element ist nicht mehr überwacht oder verschwunden; die Quelle ist deaktiviert; das Gerät ist gelöscht. Ereignis `finding.withdrawn`.
+- Der Grund steht in `details.cleared_reason` (`resolved`, `rule_deleted`, `rule_disabled`, `rule_changed`, `unmonitored`, `element_missing`, `source_disabled`, `device_deleted`).
+- Ist eine Quelle nur **nicht erreichbar**, bleiben ihre Befunde aktiv und werden neu bewertet, sobald sie wieder liefert.
+- Wird eine Regel gelöscht, bleiben ihre Befunde mit Regel-Snapshot in `details` erhalten (`rule_id` → NULL). Da ihre aktiven Befunde vorher zurückgezogen werden, kollidiert das nicht mit `finding_active_uq`.
 
 ### Ursache und Symptom
 
@@ -408,9 +462,20 @@ Ergebnis im REMI-Fall: „Peer X8A9001 getrennt“ ist **eine** Ursache mit „2
 
 ### Health
 
-- **Health** = schlimmster aktiver Befund am Element (`ok`, `warning`, `error`, `unknown`). `info`-Befunde färben nicht.
-- **Unbekannt statt Fehler:** Ist eine Quelle nicht erreichbar, bekommt das **Gerät** den Befund `source.unreachable`; alle Elemente darunter werden `unknown`. Sind Daten älter als etwa das Dreifache des Takts, wird das Element `unknown` (`data.stale`).
-- **Rollup** für Geräte und Gruppen: `{"ok": 12, "warning": 1, "error": 0, "unknown": 3}`.
+**Health eines Elements:**
+
+1. **Keine Health** (neutral) hat ein Element, das nicht überwacht oder verschwunden ist (`present = false`). Die UI zeigt es als „nicht überwacht“ bzw. „verschwunden“.
+2. **`unknown`**, wenn seine Quelle nicht liefert (nicht erreichbar oder deaktiviert). Andere aktive Befunde zählen dann nicht, denn ob sie noch stimmen, weiß niemand. Ausnahme: Das Zugangs-Element selbst zeigt seinen Befund `source.unreachable`, ist also rot.
+3. Sonst der **schlimmste aktive Befund** mit `warning` oder `error`; `info` färbt nicht. Ohne solchen Befund `ok`.
+
+`unknown` folgt aus der Lebendigkeit der Quelle, nicht aus der Schwere eines Befunds; `severity` bleibt `info`, `warning`, `error`.
+
+**Health von Gerät und Gruppe** fasst ihre Elemente bzw. Mitglieder zusammen, in der Rangfolge **`error` > `warning` > `unknown` > `ok`**:
+
+- Elemente ohne Health (nicht überwacht, verschwunden) zählen nicht mit, außer ein verschwundenes Element hat einen aktiven Befund (z. B. aus `present eq true`).
+- Ein stillgelegtes Gerät hat selbst keine Health und zählt in seinen Gruppen nicht mit.
+- Ist die Menge leer (Gerät ohne Quelle, leere Gruppe, alle Elemente stillgelegt), ist die Health `unknown`.
+- **Rollup** mit Zählern: `{"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}`. `unmonitored` und `missing` sind informativ und fließen nicht in die Health ein.
 
 ---
 
@@ -467,10 +532,19 @@ Die Prüfbedingung kommt aus der Aktionsdefinition (z. B. `start` → `running e
 
 Eine Aktion auf eine Gruppe oder ein Gerät wird auf alle Mitglieder verteilt, die sie unterstützen (bei `set`: die den Schlüssel haben). Es entsteht ein übergeordneter Lauf mit einem Kind-Lauf pro Element; der übergeordnete Lauf fasst zusammen („7 von 8 bestätigt“).
 
+- **Verschwundene Mitglieder**, die die Aktion unterstützen würden, bekommen einen Kind-Lauf, der sofort mit `failed` („Element nicht vorhanden“) endet. Mitglieder, die die Aktion nie unterstützt haben, werden übersprungen.
+- **Nicht überwachte Mitglieder** handeln normal; `monitored` betrifft nur die Bewertung.
+- **Status des übergeordneten Laufs:** Er endet, wenn alle Kinder beendet sind, mit dem schlechtesten Status seiner Kinder: `failed` > `rejected` > `unconfirmed` > `accepted` > `confirmed`. `cancelled` zählt nicht mit.
+- **Aktionen für das ganze Gerät** (`reboot` …) liegen an den Zugangs-Elementen. Die UI bietet sie am Gerät pro Quelle an („Neustart über XLink-API“). Zielt eine Sammelaktion oder ein Preset-Schritt mit einer solchen Aktion auf ein Gerät oder eine Gruppe, **muss der Treiber angegeben sein** („`reboot` über `videoxlink`“); ohne Angabe lässt sie sich nicht starten bzw. speichern. Die Angabe ist immer Pflicht, damit ein Preset sein Verhalten nicht still ändert, wenn eine zweite Quelle dazukommt. Geräte ohne passende Quelle werden übersprungen.
+
 ### Kritische Aktionen
 
 - **Kritisch ist, was bei einem Fehlgriff viel kaputt macht und lange zur Behebung braucht** (Reboot, Management-IP), im Gegensatz zu schnell behebbaren Fehlgriffen (Stream neu starten, Bitrate).
-- Der **Treiber** legt fest, was kritisch ist: Kennzeichen an der Aktionsdefinition bzw. `"critical": true` an einem Schlüssel in `element.settings`. Ein `set` ist kritisch, sobald ein gesetzter Schlüssel kritisch ist.
+- Der **Treiber** legt fest, was kritisch ist:
+  - Kennzeichen an der Aktionsdefinition (pro Treiber und Befehl),
+  - `element.critical_actions`: Befehle, die an diesem Element zusätzlich kritisch sind (z. B. ein einzelner Aufruf eines Sende-Ziels),
+  - `"critical": true` an einem Schlüssel in `element.settings`; ein `set` ist kritisch, sobald ein gesetzter Schlüssel kritisch ist.
+- Ein Befehl ist kritisch, wenn die Aktionsdefinition **oder** das Element es sagt. Ein Element kann einen Befehl nur zusätzlich kritisch machen, nie entschärfen.
 - `action_run.critical` friert ein, ob ein Lauf kritisch war.
 - Rechte: siehe [Abschnitt 12](#12-benutzer-rollen-und-rechte).
 
@@ -490,10 +564,11 @@ Die meisten Geräte haben keine eigenen Presets. Produktionen brauchen aber z. B
   - Jede Stufe wartet, bis alle Läufe der vorigen einen Endzustand erreicht haben.
   - **`delay_ms` pro Schritt:** Wartezeit ab Beginn der Stufe (ermöglicht Pausen zwischen Stufen und gestaffelte Starts innerhalb einer Stufe).
   - **`continue_on_error`:** Ohne dieses Kennzeichen bricht ein fehlgeschlagener Schritt das Preset ab.
-- Ziel eines Schritts ist ein Element, Gerät oder eine Gruppe (Verteilung auf Mitglieder).
+- Ziel eines Schritts ist ein Element, Gerät oder eine Gruppe (Verteilung auf Mitglieder). Bei Aktionen für das ganze Gerät auf Geräte oder Gruppen nennt der Schritt den Treiber (`preset_step.driver`, Abschnitt 9).
 - Ausführung: Preset-Lauf → Schritt-Läufe → Element-Läufe, alles in `action_run` über `parent_id`.
 - **Vorabprüfung der Rechte:** Vor dem Start prüft der Core für jeden Schritt das nötige Recht am Ziel (inkl. `critical`). Fehlt eines, startet das Preset nicht.
-- Ziel-Elemente sind mit `ON DELETE RESTRICT` geschützt. Ist ein Ziel nur `present = false`, schlägt der Schritt beim Ausführen mit klarer Meldung fehl.
+- **Schutz der Ziele:** Geräte und Gruppen, auf die ein Schritt zielt (bei Geräten auch auf eines ihrer Elemente), lassen sich nicht löschen; die UI nennt die Presets. Ein neuer Schritt kann nicht auf ein gelöschtes Gerät, eine gelöschte Gruppe oder deren Elemente zielen. `ON DELETE RESTRICT` bleibt als Sicherheitsnetz in der Datenbank.
+- Ist ein Ziel nur `present = false`, schlägt der Schritt beim Ausführen mit klarer Meldung fehl.
 
 ```
 Preset „Produktion XY – 25 Mbit“
@@ -505,14 +580,22 @@ Preset „Produktion XY – 25 Mbit“
 
 ---
 
-## 11. Generische Aktionen: der HTTP-Treiber
+## 11. Sende-Ziele
 
-Generische Aktionen (z. B. Webhooks auf Knopfdruck) sind **kein eigenes Konzept**, sondern ein Treiber.
+**Sende-Ziele** sind Systeme, an die Monika sendet, deren Zustand sie aber nicht lesen kann: HTTP-Endpunkte (Webhooks, Tally, Companion), später OSC oder TCP. Generische Aktionen sind damit **kein eigenes Konzept**, sondern Treiber für Sende-Ziele. Ihre Treiber folgen diesen Regeln:
 
-- Ein externes System ist ein **Gerät mit Treiber `http`**. Jeder konfigurierte Aufruf wird ein **Element** (`kind = trigger`, `actions = {trigger}`).
-- Damit funktionieren Labels, Gruppen, Presets, Rechte und Audit ohne Sonderfall.
-- **Für diesen Treiber ist seine Konfiguration (`device_source.config`) das Gerät.**
-- **Nur Sende-Aufrufe.** Monika liest keinen Zustand vom Zielsystem.
+- **Jeder konfigurierte Aufruf ist ein Element** (`kind = trigger`) mit der einzigen Aktion `trigger`. Damit funktionieren Labels, Gruppen, Presets, Rechte und Audit ohne Sonderfall.
+- **Parameter gehören zum Aufruf**, nicht zum Element: `trigger {"state": "program"}`. Die Konfiguration enthält nur Vorlagen und Standardwerte (`default`).
+- **Das Parameter-Schema** (Typ, Grenzen, Standard) steht in `element.attributes`; die UI baut daraus das Formular, der Treiber prüft die Werte selbst.
+- **Keine Einstellungen, kein `set`.** Die Konfiguration ändert nur der User; der Treiber verändert sie nie.
+- **Fakten sind nur Beobachtungen über Aufrufe**, nie vermutete Zustände des Ziels: `last_ok`, `last_called_at`, `last_duration_ms` (Kern) und protokollspezifische Details wie `http.status` (Roh). Eine Regel `last_ok eq true` funktioniert damit für jedes Sende-Ziel.
+- **Ergebnis eines Laufs:** Ziel hat angenommen → `accepted`, abgelehnt → `rejected`, nicht erreicht → `failed`. Eine Prüfbedingung gibt es nicht, `accepted` ist der Endzustand.
+- **Kritische Aufrufe** kennzeichnet der User pro Aufruf in der Konfiguration; der Treiber meldet sie in `critical_actions`.
+- **Erreichbarkeit** optional über einen Health-Check der Quelle; er zählt als Lebenszeichen. Ein Sende-Ziel ohne Health-Check hat keine Werte, die veralten können; seine Elemente werden nie `unknown`.
+- **Nur Sende-Aufrufe.** Monika liest keinen Zustand vom Zielsystem. Wer den echten Zustand braucht, braucht einen Treiber, der ihn liest.
+- Geheimnisse nur über den Secret-Store (`secret_id` der Quelle).
+
+### Beispiel: der HTTP-Treiber
 
 Konfiguration pro Aufruf:
 
@@ -523,9 +606,10 @@ Konfiguration pro Aufruf:
   "method": "POST",
   "path": "/api/tally",
   "body": "{\"camera\": {{camera}}, \"state\": {{state}}}",
+  "critical": false,
   "params": {
-    "camera": { "type": "int",  "min": 1, "max": 16, "value": 3 },
-    "state":  { "type": "enum", "values": ["off", "preview", "program"], "value": "off" }
+    "camera": { "type": "int",  "min": 1, "max": 16, "default": 3 },
+    "state":  { "type": "enum", "values": ["off", "preview", "program"], "default": "off" }
   }
 }
 ```
@@ -533,19 +617,15 @@ Konfiguration pro Aufruf:
 | Regel | |
 |---|---|
 | `id` | = `external_id`, vom User vergeben und stabil (kein Array-Index) |
-| `body`, `path` | Vorlagen; werden von keiner Aktion verändert |
+| `body`, `path` | Vorlagen |
 | Platzhalter | ohne Anführungszeichen; eingesetzt als JSON-Wert im Body bzw. URL-encodiert in Pfad und Query |
-| `params` | werden zu `element.settings`; `params.*.value` wird als Fakt gemeldet |
-| Bedeutung des Fakts | „Monika würde diesen Wert senden“, **nicht** Zustand des Zielsystems |
-| `set` | ändert den gespeicherten Wert (`params.*.value`) |
-| `trigger {…}` | Overrides nur für diesen Aufruf, gegen dieselben Grenzen geprüft; in Presets bevorzugt, weil atomar |
+| `params` | Parameter-Schema mit Standardwerten; landet in `element.attributes` |
+| `trigger {…}` | Werte nur für diesen Aufruf, gegen das Schema geprüft; fehlende Werte aus `default` |
 | Ergebnis | 2xx → `accepted` · 4xx/5xx → `rejected` (Status, Body in `response`) · Timeout/keine Verbindung → `failed` |
-| Fakten pro Aufruf | `last_status`, `last_called_at`, `last_duration_ms` |
-| Health-Check | optional pro Gerät (`path`, `interval_s`) → normale Erreichbarkeitslogik |
-| Nebenläufigkeit | Alle Aufrufe einer Quelle teilen sich `config`: `set` aktualisiert nur den betroffenen Pfad (`jsonb_set`) bzw. wird pro Quelle serialisiert |
-| Geheimnisse | nur über den Secret-Store (`secret_id` der Quelle) |
+| Fakten pro Aufruf | `last_ok`, `last_called_at`, `last_duration_ms`, `http.status` |
+| Health-Check | optional pro Quelle (`path`, `interval_s`) |
 
-Später möglich: weitere Treiber nach demselben Muster (`osc`, `tcp`).
+Später möglich: weitere Sende-Treiber nach demselben Muster (`osc`, `tcp`).
 
 ---
 
@@ -561,7 +641,18 @@ Später möglich: weitere Treiber nach demselben Muster (`osc`, `tcp`).
 
 - Rechte werden an **Rollen** vergeben, nie direkt an Benutzer.
 - **Nur Erlauben, kein Verbieten.** Rechte aus mehreren Rollen addieren sich.
-- **Scope wie bei Regeln:** Gerät oder Gruppe (rekursiv), NULL = überall.
+- **Geltungsbereich** (`scope_element_id`), ohne Filter:
+
+| Geltungsbereich | Gilt für |
+|---|---|
+| NULL | alles |
+| Gruppe | die Gruppe und alle Mitglieder, rekursiv; ist ein Mitglied ein Gerät, auch alle Elemente dieses Geräts |
+| Gerät | das Gerät und alle seine Elemente |
+| einzelnes Element | das Element und alle seine Kinder (über `parent_id`) |
+
+  Anders als bei Regeln vererbt sich ein Recht an einem Element auf seine Kinder; „alle Encoder“ wird über eine Gruppe abgebildet, nicht über Filter.
+- **Mitgliedschaften ändern** erfordert `inventory_edit` an der Gruppe **und** am aufgenommenen bzw. entfernten Element. Sonst könnte jemand mit Rechten an einer Gruppe fremde Elemente hineinziehen und dann bedienen.
+- **Geräte und Gruppen anlegen und löschen** erfordert `inventory_edit` global. Was beim Löschen mitgelöscht wird (Mitgliedschaften, Regeln, Rechte, Weiterleitungen mit diesem Geltungsbereich), braucht keine zusätzlichen Rechte.
 
 | Recht | Bereich | Bedeutung |
 |---|---|---|
@@ -592,15 +683,16 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 ### Audit
 
 - **Benutzer werden nie gelöscht**, nur deaktiviert. Alle Audit-Verweise bleiben gültig.
-- `action_run` protokolliert Aktionen, `audit_log` alle anderen Änderungen (Regeln, Presets, Quellen, Rollen, Rechte, Weiterleitungen, Anmeldungen), mit Vorher/Nachher und geschwärzten Geheimnissen.
+- `action_run` protokolliert Aktionen, `audit_log` alle anderen Änderungen (Regeln, Presets, Geräte, Gruppen, Quellen, Rollen, Rechte, Weiterleitungen, Anmeldungen), mit Vorher/Nachher und geschwärzten Geheimnissen.
+- Was beim Löschen mitgelöscht wird, bekommt eigene Einträge. Änderungen durch die Discovery (Links, erscheinende und verschwindende Elemente) stehen mit `actor_id = NULL` im `audit_log`; die Folgen eines Löschens durch den User (z. B. `present = false` aller Elemente eines Geräts) stehen nur im Eintrag des Löschens.
 
 ---
 
 ## 13. Weiterleitung
 
 - **Die Monika-UI ist der Hauptadressat.** Push nach außen ist für den Fall gedacht, dass niemand hinschaut.
-- Arten: **`syslog`** (in den zentralen Syslog-Stack; Monika-Ereignisse liegen dann in Loki neben den Gerätelogs) und **`webhook`** (Body-Vorlage wie beim HTTP-Treiber; deckt Slack, Teams und Mail über Node-RED ab).
-- Ereignisse: `finding.raised`, `finding.cleared`, `finding.acked`, `action.finished`.
+- Arten: **`syslog`** (in den zentralen Syslog-Stack; Monika-Ereignisse liegen dann in Loki neben den Gerätelogs) und **`webhook`** (Body-Vorlage wie bei Sende-Zielen; deckt Slack, Teams und Mail über Node-RED ab).
+- Ereignisse: `finding.raised`, `finding.cleared` (Problem behoben), `finding.withdrawn` (Befund zurückgezogen, Grund in `cleared_reason`), `finding.acked`, `action.finished`. Empfänger, die offene Alarme verfolgen, abonnieren `cleared` und `withdrawn`, damit sich jeder Alarm schließt.
 - Filter: Ereignistyp, Mindest-Schweregrad, Scope-Element.
 - **Best effort:** wenige Wiederholungen im Speicher, danach `last_error`. Kein Routing, keine Eskalation, keine Outbox.
 
@@ -610,16 +702,19 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 
 | Daten | Ort | Schreibverhalten |
 |---|---|---|
-| Inventar (Elemente, Geräte, Quellen, Links) | PostgreSQL | bei Discovery-Änderungen |
-| Aktueller Zustand, Health, Rollup | PostgreSQL `element_state` | **nur bei Änderung** |
+| Inventar (Elemente, Quellen, Links) | PostgreSQL | bei Discovery-Änderungen; `last_seen_at` einmal pro Discovery-Lauf |
+| Health, Rollup | PostgreSQL `element_state` | **nur bei Änderung** |
+| Aktuelle Fakten, Lebenszeichen der Quellen | **nur Speicher des Core** | ständig |
 | Befunde (aktiv und Historie) | PostgreSQL `finding` | bei Statuswechsel |
 | Regeln, Presets, Rechte, Weiterleitungen | PostgreSQL | bei Änderung durch den User |
 | Läufe und Audit | PostgreSQL `action_run`, `audit_log` | pro Ereignis |
-| Messwerte, Signal, Health als Zahl | **InfluxDB** | jeder Takt |
+| Fakten und Health als Zahl | **InfluxDB** | fester Takt |
 | Arbeitszustand der Bewertung | Speicher des Core | ständig |
 
 ### InfluxDB
 
+- Der Core schreibt die aktuellen Werte aller Elemente **im festen Takt**, unabhängig davon, wann der Treiber sie gemeldet hat. So entstehen auch bei Treibern, die nur Änderungen melden, keine Lücken in Grafana.
+- Elemente, deren Quelle nicht liefert, bekommen keine Fakten, nur ihre Health. Elemente ohne Health (nicht überwacht, verschwunden) bekommen keine Health.
 - Tags: `element_id`, `device_id`, `kind`, `transport`, `driver`.
 - **Nie Labels als Tags**: Labels ändern sich, eine Umbenennung würde Zeitreihen zerreißen. Grafana löst Namen über PostgreSQL auf.
 
@@ -627,7 +722,7 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 
 - IDs: `uuid` mit UUIDv7 (zeitlich sortiert, gut für B-Tree-Inserts). Go erzeugt IDs vor dem Insert, damit ganze Discovery-Bäume in einem Batch geschrieben werden können.
 - Enums nur für kleine, stabile Mengen (`link_type`, `health`, `severity`, `rule_op`, `action_status`, `finding_origin`, `permission`, `forward_kind`, `port_direction`).
-- Herstellerspezifisches in JSONB (`attributes`, `config`, `facts`, `settings`).
+- Herstellerspezifisches in JSONB (`attributes`, `config`, `settings`).
 - Zugangsdaten nie in JSONB, sondern verschlüsselt im Secret-Store.
 
 ### Secret-Store
@@ -659,18 +754,18 @@ Beim Start liest Monika aus Umgebungsvariablen bzw. einer `.env`-Datei (Variable
 | `MONIKA_INFLUX_URL`, `MONIKA_INFLUX_TOKEN` | InfluxDB |
 | `MONIKA_ADMIN_USER`, `MONIKA_ADMIN_PASSWORD` | initialer Admin; wird nur angelegt, wenn noch kein Benutzer existiert |
 
-Alles Weitere (Zugangsdaten der Geräte, Tokens für HTTP-Treiber und Webhooks, später das OIDC-Client-Secret) liegt im Secret-Store.
+Alles Weitere (Zugangsdaten der Geräte, Tokens für Sende-Ziele und Webhooks, später das OIDC-Client-Secret) liegt im Secret-Store.
 
 ---
 
 ## 15. Datenbank
 
-20 Tabellen in sieben Bereichen. Exakte Definition: `monika.dbml`.
+18 Tabellen in sieben Bereichen. Exakte Definition: `monika.dbml`.
 
 | Bereich | Tabellen |
 |---|---|
-| Inventar | `element`, `device`, `device_source`, `element_link` |
-| Zustand | `element_state`, `device_source_state` |
+| Inventar | `element`, `device_source`, `element_link` |
+| Zustand | `element_state` |
 | Bewertung | `rule`, `finding` |
 | Aktionen | `preset`, `preset_step`, `action_run` |
 | Benutzer und Rechte | `app_user`, `user_identity`, `role`, `role_member`, `permission_grant`, `api_token`, `audit_log` |
@@ -681,9 +776,8 @@ Alles Weitere (Zugangsdaten der Geräte, Tokens für HTTP-Treiber und Webhooks, 
 
 ```mermaid
 erDiagram
-  element ||--o| device : "ist (kind = device)"
-  device ||--o{ device_source : "erreichbar über"
-  device ||--o{ element : "gehört zu (device_id)"
+  element ||--o{ device_source : "Gerät erreichbar über"
+  element ||--o{ element : "device_id"
   element ||--o{ element : "parent_id"
   device_source ||--o{ element : "besitzt (source_id)"
 
@@ -691,8 +785,7 @@ erDiagram
   element ||--o{ element_link : "to_id"
   device_source ||--o{ element_link : "meldet"
 
-  element ||--o| element_state : "aktueller Zustand"
-  device_source ||--o| device_source_state : "Verbindung"
+  element ||--o| element_state : "Health, Rollup"
 
   element |o--o{ rule : "scope_element_id"
   element ||--o{ finding : "hat"
@@ -733,11 +826,14 @@ erDiagram
 
 ### Constraints
 
-Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `monika.dbml` und werden mit `make db-generate` in die Init-Migration übernommen. Einzige Ausnahme ist der Teilindex `finding_active_uq`: DBML kennt kein `WHERE` an Indizes, er steht deshalb handgeschrieben in `migrations/`.
+Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `monika.dbml` und werden mit `make db-generate` in die Init-Migration übernommen. Ausnahmen sind Indizes, die DBML nicht ausdrücken kann (Teilindex mit `WHERE`, `NULLS NOT DISTINCT`); sie stehen handgeschrieben in `migrations/`.
 
 | Tabelle | Constraint | Zweck |
 |---|---|---|
-| `element` | `element_class_check` | Pflichtfelder je Klasse (Gerät, Gruppe, Treiber-Element) |
+| `element` | `element_class_check` | Pflichtfelder je Klasse (Gerät, Gruppe, Zugang, Treiber-Element) |
+| `element` | `element_deleted_check` | `deleted_at` nur bei Geräten und Gruppen |
+| `element` | `element_critical_actions_check` | `critical_actions` ⊆ `actions` |
+| `element` | `element_source_external_uq` (handgeschrieben, `NULLS NOT DISTINCT`) | `external_id` eindeutig pro Quelle; genau ein Zugangs-Element pro Quelle |
 | `element_link` | `element_link_endpoints_check` | jeder Endpunkt als ID oder Referenz |
 | `element_link` | `element_link_owner_check` | `member` ohne Quelle, alle anderen mit Quelle |
 | `element_link` | `element_link_uq` (Ausdrucksindex) | keine doppelten Links, auch unaufgelöst |
@@ -756,13 +852,13 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 | `element_link.from_id`, `to_id` | `CASCADE` |
 | `finding.rule_id` | `SET NULL` (Historie bleibt) |
 | `preset_step.preset_id` | `CASCADE` |
-| `preset_step.element_id` | `RESTRICT` (Presets verlieren keine Schritte stillschweigend) |
+| `preset_step.element_id` | `RESTRICT` (Sicherheitsnetz; das Löschen von Geräten und Gruppen prüft Presets vorher) |
 | `action_run.preset_id`, `preset_step_id` | `SET NULL` |
 | `role_member.role_id`, `permission_grant.role_id` | `CASCADE` |
 | `permission_grant.scope_element_id` | `CASCADE` |
 | `device_source.secret_id`, `forward_target.secret_id` | `RESTRICT` (verwendete Secrets sind nicht löschbar) |
 | Verweise auf `app_user` | Benutzer werden nie gelöscht |
-| Verweise auf `element`, `device`, `device_source` | Geräte werden nur weich gelöscht (`device.deleted_at`), Quellen deaktiviert; Elemente verschwinden nur (`present = false`) |
+| Verweise auf `element`, `device_source` | Elemente werden nie hart gelöscht: Geräte und Gruppen weich (`element.deleted_at`), Treiber-Elemente verschwinden nur (`present = false`), Quellen werden deaktiviert. Was beim Löschen mitgelöscht wird, entfernt die Anwendung; die `ON DELETE`-Regeln auf `element` sind nur Sicherheitsnetz. |
 
 ---
 
@@ -771,7 +867,8 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 Quelle der Daten: `goxlinkclient` (JSON-RPC des Web-Frontends; `System`-Snapshot bei jeder Änderung, `Stats` etwa alle 2 s).
 
 ```
-X8A1111                device · VideoXLink X8 R2 · FW 1.8.4
+X8A1111                device                (Name = Label des Users)
+├─ XLink-API           access                VideoXLink X8 R2 · FW 1.8.4 · vxl.cpu_temp, NeedsReboot · reboot
 ├─ SDI 1–8             port · sdi · bidir
 ├─ eth0–eth7           network_interface        (eth6/7 2110-fähig)
 ├─ PTP                 clock
@@ -789,7 +886,8 @@ X8A1111                device · VideoXLink X8 R2 · FW 1.8.4
 
 | Thema | Umsetzung |
 |---|---|
-| Fakten | `running`, `signal_present`, `format.*`, `bitrate`, `vxl.cpu_temp`, `vxl.licenses_used`, … |
+| Fakten | `running`, `signal_present`, `format.*`, `bitrate` an den Units; Werte für das ganze Gerät (`vxl.cpu_temp`, `vxl.licenses_used`, `NeedsReboot`) am Zugangs-Element |
+| Identität | Modell und Firmware aus Sicht der XLink-Quelle (`device_source`) |
 | Gerätealarme | SRT-`Error` |
 | Abgeleitete Alarme | über Regeln (PTP-Sync, Temperaturen, Lizenzen, `NeedsReboot`) |
 | Befehle | `start`, `stop`, `vxl.reset_stats`, `vxl.reset_video_buffer`, `vxl.flush_audio` |
@@ -807,11 +905,10 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 | Thema | Stand |
 |---|---|
 | Treiber-Interfaces | konkrete Go-Interfaces des Cores (Einbindung ist entschieden: Compile-Zeit) |
-| Betrieb / Hochverfügbarkeit | Zustand liegt im Speicher des Core; Verhalten bei mehreren Instanzen ist nicht festgelegt |
+| Betrieb / Hochverfügbarkeit | Zustand liegt im Speicher des Core und baut sich aus den Treibern neu auf. Aktiv/passiv über ein Lock in PostgreSQL (`pg_try_advisory_lock`) ist ohne Umbau möglich; offen ist das Verhalten von Läufen bei einer Übernahme |
 | Aufbewahrung | Retention für `finding`, `action_run`, `audit_log` und InfluxDB |
 | InfluxDB-Details | Version, Measurement-Schema |
 | Frontend | Technologie und Live-Push-Mechanismus |
-| SQL-Migration | Übersetzung von `monika.dbml` inkl. aller Constraints und `ON DELETE`-Regeln |
 | Spätere Erweiterungen | `osc`-/`tcp`-Treiber; Prüfbedingung, die auf ein anderes Element zeigt |
 
 ---
@@ -821,11 +918,14 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 | Begriff | Bedeutung |
 |---|---|
 | **Element** | Alles, was Monika kennt: Gerät, Port, Unit, Stream, Peer, Trigger, Gruppe |
-| **Quelle** (`device_source`) | ein Zugangsweg zu einem Gerät über einen Treiber |
+| **Quelle** (`device_source`) | ein Zugangsweg zu einem Gerät über einen Treiber; trägt die Identität des Geräts aus ihrer Sicht |
+| **Zugangs-Element** (`kind = access`) | Wurzel einer Quelle im Gerät; trägt Fakten und Aktionen für das ganze Gerät und den Befund `source.unreachable`; in der UI verborgen |
+| **Lebenszeichen** | regelmäßiges Signal einer Quelle, dass sie liefert; bleibt es aus, ist die Quelle nicht erreichbar |
+| **Sende-Ziel** | System, an das Monika sendet, dessen Zustand sie aber nicht liest (z. B. HTTP-Endpunkt) |
 | **Treiber** | Plugin für einen Hersteller/Gerätetyp; meldet Inventar und Fakten, führt Aktionen aus |
 | **Fakt** | ein aktueller Wert eines Elements, z. B. `running: true` |
 | **Regel** | Sollzustand über einen Fakt, vom User definiert |
-| **Befund** | aktive oder vergangene Abweichung an einem Element (aus Regel, Gerät oder System) |
+| **Befund** | aktive oder vergangene Abweichung an einem Element (aus Regel, Gerät oder System); endet als behoben oder zurückgezogen |
 | **Ursache / Symptom** | Befund ohne bzw. mit `caused_by_id` |
 | **Stellvertreter** | Element, das ein anderes aus der Sicht eines Geräts darstellt (`represents`) |
 | **Peer** | Sicht eines lokalen XLink-Geräts auf eine Gegenstelle |
