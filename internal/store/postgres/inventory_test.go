@@ -32,7 +32,7 @@ func TestStoreApplyDiscovery(t *testing.T) {
 		ID: newID(), Kind: "sender", ParentID: device, DeviceID: device, SourceID: source,
 		ExternalID: "unit/E1", GlobalRef: "xlink:E1", Transport: "xlink", Direction: inventory.DirectionOut,
 		Name: "E1", Attributes: json.RawMessage(`{"slot": 1}`), Position: new(1),
-		Actions: []string{"start", "stop"}, Settings: json.RawMessage(`{"bitrate": {"type": "int"}}`),
+		Actions: []string{"start", "stop"}, CriticalActions: []string{}, Settings: json.RawMessage(`{"bitrate": {"type": "int"}}`),
 		Present: true, Monitored: true,
 	}
 	port := inventory.Element{
@@ -44,8 +44,7 @@ func TestStoreApplyDiscovery(t *testing.T) {
 
 	missing, err := s.ApplyDiscovery(ctx, inventory.Discovery{
 		SourceID: source,
-		DeviceID: device,
-		Identity: &inventory.Identity{Name: "X8A1001", Vendor: "VideoXLink", Model: "X8"},
+		Identity: &inventory.Identity{Vendor: "VideoXLink", Model: "X8"},
 		Upsert:   []inventory.Element{encoder, port},
 		Seen:     []uuid.UUID{encoder.ID, port.ID},
 		AddLinks: []inventory.Link{link},
@@ -58,8 +57,8 @@ func TestStoreApplyDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(snap.Devices) != 1 || snap.Devices[0].Model != "X8" {
-		t.Fatalf("devices = %+v, want X8", snap.Devices)
+	if len(snap.Sources) != 1 || snap.Sources[0].Identity.Model != "X8" {
+		t.Fatalf("sources = %+v, want identity X8", snap.Sources)
 	}
 	got := findElement(t, snap, encoder.ID)
 	if got.FirstSeenAt.IsZero() || got.LastSeenAt.IsZero() {
@@ -78,7 +77,6 @@ func TestStoreApplyDiscovery(t *testing.T) {
 	// Zweiter Lauf: der Encoder fehlt, der Link ist weg.
 	missing, err = s.ApplyDiscovery(ctx, inventory.Discovery{
 		SourceID:    source,
-		DeviceID:    device,
 		Seen:        []uuid.UUID{port.ID},
 		RemoveLinks: []uuid.UUID{link.ID},
 	})

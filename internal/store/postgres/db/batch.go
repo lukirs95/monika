@@ -83,14 +83,14 @@ func (b *InsertDriverLinkBatchResults) Close() error {
 const upsertDriverElement = `-- name: UpsertDriverElement :batchone
 INSERT INTO element (
   id, kind, parent_id, device_id, source_id, external_id, global_ref,
-  transport, direction, name, attributes, position, actions, settings,
+  transport, direction, name, attributes, position, actions, critical_actions, settings,
   present, first_seen_at, last_seen_at
 ) VALUES (
   $1, $2, $3::uuid, $4::uuid, $5::uuid, $6::text, $7,
-  $8, $9, $10, $11, $12, $13, $14,
+  $8, $9, $10, $11, $12, $13, $14, $15,
   true, now(), now()
 )
-ON CONFLICT (device_id, external_id) DO UPDATE
+ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
 SET kind          = excluded.kind,
     parent_id     = excluded.parent_id,
     global_ref    = excluded.global_ref,
@@ -100,12 +100,12 @@ SET kind          = excluded.kind,
     attributes    = excluded.attributes,
     position      = excluded.position,
     actions       = excluded.actions,
+    critical_actions = excluded.critical_actions,
     settings      = excluded.settings,
     present       = true,
     first_seen_at = COALESCE(element.first_seen_at, now()),
     last_seen_at  = now(),
     updated_at    = now()
-WHERE element.source_id = excluded.source_id
 RETURNING id
 `
 
@@ -116,26 +116,25 @@ type UpsertDriverElementBatchResults struct {
 }
 
 type UpsertDriverElementParams struct {
-	ID         uuid.UUID
-	Kind       string
-	ParentID   uuid.UUID
-	DeviceID   uuid.UUID
-	SourceID   uuid.UUID
-	ExternalID string
-	GlobalRef  *string
-	Transport  *string
-	Direction  *PortDirection
-	Name       *string
-	Attributes json.RawMessage
-	Position   *int32
-	Actions    []string
-	Settings   json.RawMessage
+	ID              uuid.UUID
+	Kind            string
+	ParentID        uuid.UUID
+	DeviceID        uuid.UUID
+	SourceID        uuid.UUID
+	ExternalID      string
+	GlobalRef       *string
+	Transport       *string
+	Direction       *PortDirection
+	Name            *string
+	Attributes      json.RawMessage
+	Position        *int32
+	Actions         []string
+	CriticalActions []string
+	Settings        json.RawMessage
 }
 
-// Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (device_id, external_id).
+// Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 // Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
-// Gehört das vorhandene Element einer anderen Quelle, wird nichts geändert und keine Zeile
-// zurückgegeben (pgx.ErrNoRows): ein Treiber fasst nur Elemente seiner eigenen Quelle an.
 func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverElementParams) *UpsertDriverElementBatchResults {
 	batch := &pgx.Batch{}
 	for _, a := range arg {
@@ -153,6 +152,7 @@ func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverEle
 			a.Attributes,
 			a.Position,
 			a.Actions,
+			a.CriticalActions,
 			a.Settings,
 		}
 		batch.Queue(upsertDriverElement, vals...)

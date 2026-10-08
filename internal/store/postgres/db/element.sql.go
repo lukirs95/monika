@@ -102,7 +102,7 @@ func (q *Queries) FinishDiscovery(ctx context.Context, arg FinishDiscoveryParams
 }
 
 const listElements = `-- name: ListElements :many
-SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at FROM element
+SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element
 ORDER BY id
 `
 
@@ -130,6 +130,7 @@ func (q *Queries) ListElements(ctx context.Context) ([]Element, error) {
 			&i.Attributes,
 			&i.Position,
 			&i.Actions,
+			&i.CriticalActions,
 			&i.Settings,
 			&i.Present,
 			&i.FirstSeenAt,
@@ -137,6 +138,7 @@ func (q *Queries) ListElements(ctx context.Context) ([]Element, error) {
 			&i.Label,
 			&i.Notes,
 			&i.Monitored,
+			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

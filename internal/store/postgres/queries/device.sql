@@ -1,36 +1,17 @@
 -- name: CreateDevice :exec
--- Legt Element und Geräte-Zeile in einem Statement an. element.device_id und
--- device.element_id verweisen aufeinander; die Fremdschlüssel werden erst am
--- Ende des Statements geprüft.
-WITH e AS (
-  INSERT INTO element (id, kind, device_id, label, notes)
-  VALUES (@id, 'device', @id, @label, @notes)
-  RETURNING id
-)
-INSERT INTO device (element_id)
-SELECT id FROM e;
+-- Ein Gerät ist ein Element mit kind = device; device_id verweist auf sich selbst.
+INSERT INTO element (id, kind, device_id, label, notes)
+VALUES (@id, 'device', @id, @label, @notes);
 
--- name: UpdateDeviceIdentity :execrows
--- Identität des Geräts, wie eine Quelle sie meldet.
-WITH e AS (
-  UPDATE element
-  SET name          = @name,
-      present       = true,
-      first_seen_at = COALESCE(first_seen_at, now()),
-      last_seen_at  = now(),
-      updated_at    = now()
-  WHERE id = @element_id AND kind = 'device'
-)
-UPDATE device
-SET vendor   = @vendor,
-    model    = @model,
-    serial   = @serial,
-    firmware = @firmware
-WHERE element_id = @element_id;
-
--- name: ListDevices :many
-SELECT * FROM device
-ORDER BY element_id;
+-- name: UpdateSourceIdentity :execrows
+-- Identität des Geräts, wie diese Quelle sie meldet.
+UPDATE device_source
+SET vendor     = @vendor,
+    model      = @model,
+    serial     = @serial,
+    firmware   = @firmware,
+    updated_at = now()
+WHERE id = @id;
 
 -- name: CreateDeviceSource :exec
 INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
@@ -45,14 +26,14 @@ SET address    = @address,
     secret_id  = @secret_id,
     enabled    = @enabled,
     updated_at = now()
-WHERE id = @id
-  AND device_id IN (SELECT element_id FROM device WHERE deleted_at IS NULL);
+WHERE device_source.id = @id
+  AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL);
 
 -- name: LockDevice :one
--- Sperrt die Geräte-Zeile bis zum Ende der Transaktion; liefert deleted_at.
+-- Sperrt das Geräte-Element bis zum Ende der Transaktion; liefert deleted_at.
 SELECT deleted_at
-FROM device
-WHERE element_id = @element_id
+FROM element
+WHERE id = @id AND kind = 'device'
 FOR UPDATE;
 
 -- name: ListPresetsUsingDevice :many
@@ -65,25 +46,25 @@ WHERE e.device_id = @device_id::uuid
 ORDER BY p.name, p.id;
 
 -- name: DeleteDevice :exec
--- Weiches Löschen: Quellen deaktivieren, Elemente nicht mehr überwachen, aus allen Gruppen
--- entfernen. Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
--- Nur über postgres.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
+-- Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
+-- das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.
+-- Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
+-- Nur über postgres.Store.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
 WITH sources AS (
   UPDATE device_source
   SET enabled = false, updated_at = now()
-  WHERE device_id = @device_id::uuid
-), elements AS (
-  UPDATE element
-  SET monitored = false, updated_at = now()
   WHERE device_id = @device_id::uuid
 ), memberships AS (
   DELETE FROM element_link l
   USING element e
   WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = @device_id::uuid
 )
-UPDATE device
-SET deleted_at = now()
-WHERE element_id = @device_id::uuid;
+UPDATE element
+SET present    = false,
+    monitored  = CASE WHEN id = @device_id::uuid THEN false ELSE monitored END,
+    deleted_at = CASE WHEN id = @device_id::uuid THEN now() ELSE deleted_at END,
+    updated_at = now()
+WHERE device_id = @device_id::uuid;
 
 -- name: ListDeviceSources :many
 SELECT * FROM device_source

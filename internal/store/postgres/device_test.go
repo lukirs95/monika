@@ -34,16 +34,16 @@ func TestDeleteDevice(t *testing.T) {
 		t.Fatalf("DeleteDevice: %v", err)
 	}
 
-	devices, err := q.ListDevices(ctx)
-	if err != nil || len(devices) != 1 || devices[0].DeletedAt == nil {
-		t.Fatalf("ListDevices = %+v, %v; want device with deleted_at", devices, err)
+	if e := element(t, q, device); e.DeletedAt == nil || e.Monitored {
+		t.Fatalf("device = %+v, want deleted_at set and not monitored", e)
 	}
 	sources, err := q.ListDeviceSources(ctx)
 	if err != nil || len(sources) != 1 || sources[0].Enabled {
 		t.Fatalf("ListDeviceSources = %+v, %v; want source disabled", sources, err)
 	}
-	if e := element(t, q, port); e.Monitored {
-		t.Fatalf("element %s still monitored", port)
+	// Das Element verschwindet; sein eigenes monitored bleibt, stillgelegt ist es über das Gerät.
+	if e := element(t, q, port); e.Present || !e.Monitored {
+		t.Fatalf("element = %+v, want missing with own monitored flag kept", e)
 	}
 	links, err := q.ListElementLinks(ctx)
 	if err != nil || len(links) != 0 {

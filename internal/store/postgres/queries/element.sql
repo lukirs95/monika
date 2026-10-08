@@ -4,20 +4,18 @@ SELECT * FROM element
 ORDER BY id;
 
 -- name: UpsertDriverElement :batchone
--- Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (device_id, external_id).
+-- Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
 -- Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
--- Gehört das vorhandene Element einer anderen Quelle, wird nichts geändert und keine Zeile
--- zurückgegeben (pgx.ErrNoRows): ein Treiber fasst nur Elemente seiner eigenen Quelle an.
 INSERT INTO element (
   id, kind, parent_id, device_id, source_id, external_id, global_ref,
-  transport, direction, name, attributes, position, actions, settings,
+  transport, direction, name, attributes, position, actions, critical_actions, settings,
   present, first_seen_at, last_seen_at
 ) VALUES (
   @id, @kind, @parent_id::uuid, @device_id::uuid, @source_id::uuid, @external_id::text, @global_ref,
-  @transport, @direction, @name, @attributes, @position, @actions, @settings,
+  @transport, @direction, @name, @attributes, @position, @actions, @critical_actions, @settings,
   true, now(), now()
 )
-ON CONFLICT (device_id, external_id) DO UPDATE
+ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
 SET kind          = excluded.kind,
     parent_id     = excluded.parent_id,
     global_ref    = excluded.global_ref,
@@ -27,12 +25,12 @@ SET kind          = excluded.kind,
     attributes    = excluded.attributes,
     position      = excluded.position,
     actions       = excluded.actions,
+    critical_actions = excluded.critical_actions,
     settings      = excluded.settings,
     present       = true,
     first_seen_at = COALESCE(element.first_seen_at, now()),
     last_seen_at  = now(),
     updated_at    = now()
-WHERE element.source_id = excluded.source_id
 RETURNING id;
 
 -- name: FinishDiscovery :many

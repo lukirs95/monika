@@ -87,6 +87,7 @@ CREATE TABLE "element" (
   "attributes" jsonb NOT NULL DEFAULT ('{}'::jsonb),
   "position" int,
   "actions" text[] NOT NULL DEFAULT ('{}'),
+  "critical_actions" text[] NOT NULL DEFAULT ('{}'),
   "settings" jsonb,
   "present" boolean NOT NULL DEFAULT true,
   "first_seen_at" timestamptz,
@@ -94,6 +95,7 @@ CREATE TABLE "element" (
   "label" text,
   "notes" text,
   "monitored" boolean NOT NULL DEFAULT true,
+  "deleted_at" timestamptz,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
   "updated_at" timestamptz NOT NULL DEFAULT (now()),
   CONSTRAINT "element_class_check" CHECK ((kind = 'device'
@@ -104,18 +106,15 @@ CREATE TABLE "element" (
        AND device_id IS NULL AND parent_id IS NULL
        AND source_id IS NULL AND external_id IS NULL)
     OR
-    (kind NOT IN ('device', 'group')
+    (kind = 'access'
+       AND device_id IS NOT NULL AND parent_id = device_id
+       AND source_id IS NOT NULL AND external_id IS NULL)
+    OR
+    (kind NOT IN ('device', 'group', 'access')
        AND device_id IS NOT NULL AND parent_id IS NOT NULL
-       AND source_id IS NOT NULL AND external_id IS NOT NULL))
-);
-
-CREATE TABLE "device" (
-  "element_id" uuid PRIMARY KEY,
-  "vendor" text,
-  "model" text,
-  "serial" text,
-  "firmware" text,
-  "deleted_at" timestamptz
+       AND source_id IS NOT NULL AND external_id IS NOT NULL)),
+  CONSTRAINT "element_deleted_check" CHECK (deleted_at IS NULL OR kind IN ('device', 'group')),
+  CONSTRAINT "element_critical_actions_check" CHECK (critical_actions <@ actions)
 );
 
 CREATE TABLE "device_source" (
@@ -126,6 +125,10 @@ CREATE TABLE "device_source" (
   "config" jsonb NOT NULL DEFAULT ('{}'::jsonb),
   "secret_id" uuid,
   "enabled" boolean NOT NULL DEFAULT true,
+  "vendor" text,
+  "model" text,
+  "serial" text,
+  "firmware" text,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
   "updated_at" timestamptz NOT NULL DEFAULT (now())
 );
@@ -206,6 +209,7 @@ CREATE TABLE "preset_step" (
   "action" text NOT NULL,
   "params" jsonb,
   "continue_on_error" boolean NOT NULL DEFAULT false,
+  "driver" text,
   CONSTRAINT "preset_step_check" CHECK (stage >= 1 AND delay_ms >= 0)
 );
 
@@ -330,42 +334,26 @@ CREATE TABLE "secret" (
 
 CREATE TABLE "element_state" (
   "element_id" uuid PRIMARY KEY,
-  "facts" jsonb NOT NULL DEFAULT ('{}'::jsonb),
-  "alarms" jsonb,
-  "health" health NOT NULL DEFAULT 'unknown',
+  "health" health,
   "rollup" jsonb,
-  "reported_at" timestamptz,
   "updated_at" timestamptz NOT NULL DEFAULT (now())
 );
-
-CREATE TABLE "device_source_state" (
-  "source_id" uuid PRIMARY KEY,
-  "connected" boolean NOT NULL DEFAULT false,
-  "last_contact_at" timestamptz,
-  "last_sync_at" timestamptz,
-  "last_error" text,
-  "updated_at" timestamptz NOT NULL DEFAULT (now())
-);
-
-CREATE UNIQUE INDEX "element_device_external_uq" ON "element" ("device_id", "external_id");
 
 CREATE INDEX ON "element" ("parent_id");
 
 CREATE INDEX ON "element" ("device_id");
 
-CREATE INDEX ON "element" ("source_id");
-
 CREATE INDEX ON "element" ("kind", "transport");
 
 CREATE INDEX ON "element" USING GIN ("actions");
 
-CREATE INDEX ON "device" ("vendor", "model");
-
-CREATE INDEX ON "device" ("firmware");
-
 CREATE UNIQUE INDEX ON "device_source" ("device_id", "driver");
 
 CREATE INDEX ON "device_source" ("secret_id");
+
+CREATE INDEX ON "device_source" ("vendor", "model");
+
+CREATE INDEX ON "device_source" ("firmware");
 
 CREATE INDEX ON "element_link" ("from_id");
 
@@ -431,17 +419,25 @@ CREATE INDEX ON "element_state" ("health");
 
 COMMENT ON TABLE "element" IS 'Hinweis: device_id = id beim Gerät erfordert, dass die id vor dem Insert
 vergeben wird (in Go erzeugen statt per Default).
+
+Eindeutigkeit der external_id pro Quelle, mit genau einem Zugangs-Element
+(external_id NULL) pro Quelle. DBML kennt kein NULLS NOT DISTINCT; der Index
+steht deshalb handgeschrieben in migrations/ und deckt auch Abfragen nach
+source_id ab:
+
+CREATE UNIQUE INDEX element_source_external_uq
+  ON element (source_id, external_id) NULLS NOT DISTINCT;
 ';
 
-COMMENT ON COLUMN "element"."kind" IS 'device, group, module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger';
+COMMENT ON COLUMN "element"."kind" IS 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger';
 
 COMMENT ON COLUMN "element"."parent_id" IS 'nur physische/strukturelle Hierarchie';
 
-COMMENT ON COLUMN "element"."device_id" IS 'zugehöriges Gerät; beim Gerät selbst = eigene id; NULL bei Gruppen';
+COMMENT ON COLUMN "element"."device_id" IS 'zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen';
 
 COMMENT ON COLUMN "element"."source_id" IS 'besitzende Quelle; NULL bei Gerät und Gruppe';
 
-COMMENT ON COLUMN "element"."external_id" IS 'stabile ID innerhalb des Geräts, z.B. Slot-Pfad oder UnitID';
+COMMENT ON COLUMN "element"."external_id" IS 'stabile ID innerhalb der Quelle, z.B. Slot-Pfad oder UnitID; NULL nur beim Zugangs-Element';
 
 COMMENT ON COLUMN "element"."global_ref" IS 'global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern';
 
@@ -457,19 +453,27 @@ COMMENT ON COLUMN "element"."position" IS 'Sortierung innerhalb des Parents';
 
 COMMENT ON COLUMN "element"."actions" IS 'unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}';
 
+COMMENT ON COLUMN "element"."critical_actions" IS 'Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)';
+
 COMMENT ON COLUMN "element"."settings" IS 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}';
 
-COMMENT ON COLUMN "element"."present" IS 'false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten';
+COMMENT ON COLUMN "element"."present" IS 'false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar';
 
 COMMENT ON COLUMN "element"."first_seen_at" IS 'NULL = vom User vorab angelegt, vom Treiber noch nie gesehen';
 
-COMMENT ON COLUMN "element"."monitored" IS 'false = von allen Regeln ausgenommen (unbenutzt)';
+COMMENT ON COLUMN "element"."monitored" IS 'false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id';
 
-COMMENT ON TABLE "device" IS '1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source. Geräte werden nie hart gelöscht.';
+COMMENT ON COLUMN "element"."deleted_at" IS 'weich gelöscht (nur Gerät und Gruppe); Zeilen bleiben für Läufe, Befunde und Audit';
 
-COMMENT ON COLUMN "device"."deleted_at" IS 'weich gelöscht: Quellen deaktiviert, Elemente nicht überwacht, aus Gruppen entfernt; Zeilen bleiben für Läufe, Befunde und Audit';
+COMMENT ON TABLE "device_source" IS 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle
+besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
+Zu jeder Quelle legt der Core ein Zugangs-Element (kind = access) an.
+Quellen werden nie gelöscht, nur deaktiviert. Verbindungszustand und
+Lebenszeichen liegen im Speicher des Core; ein Ausfall steht als Befund
+source.unreachable am Zugangs-Element.
+';
 
-COMMENT ON TABLE "device_source" IS 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.';
+COMMENT ON COLUMN "device_source"."device_id" IS 'Element mit kind = device (gesichert in der Anwendung)';
 
 COMMENT ON COLUMN "device_source"."driver" IS 'videoxlink, embrionix, directout-ravio, ipmi, ...';
 
@@ -478,6 +482,8 @@ COMMENT ON COLUMN "device_source"."address" IS 'Management-Host/IP';
 COMMENT ON COLUMN "device_source"."config" IS 'treiberspezifische Verbindungsparameter, keine Geheimnisse';
 
 COMMENT ON COLUMN "device_source"."secret_id" IS 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen';
+
+COMMENT ON COLUMN "device_source"."enabled" IS 'false = deaktiviert: kein Befund, Elemente der Quelle unknown';
 
 COMMENT ON TABLE "element_link" IS 'Regeln:
 - Treiber-Links (feeds, uses, represents) werden bei Wegfall gelöscht,
@@ -518,11 +524,11 @@ Teilindizes; finding_active_uq steht deshalb in migrations/00002_finding_active_
 
 COMMENT ON COLUMN "finding"."rule_id" IS 'bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt';
 
-COMMENT ON COLUMN "finding"."code" IS 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, data.stale';
+COMMENT ON COLUMN "finding"."code" IS 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable';
 
 COMMENT ON COLUMN "finding"."message" IS 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds';
 
-COMMENT ON COLUMN "finding"."details" IS 'Sollwert, Istwert, Regel-Snapshot';
+COMMENT ON COLUMN "finding"."details" IS 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted)';
 
 COMMENT ON COLUMN "finding"."caused_by_id" IS 'NULL = Ursache, sonst Symptom';
 
@@ -547,6 +553,8 @@ COMMENT ON COLUMN "preset_step"."action" IS 'start, stop, set, reboot, trigger, 
 COMMENT ON COLUMN "preset_step"."params" IS 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides';
 
 COMMENT ON COLUMN "preset_step"."continue_on_error" IS 'false = Fehler bricht das Preset ab';
+
+COMMENT ON COLUMN "preset_step"."driver" IS 'Pflicht bei Aktionen für das ganze Gerät (an Zugangs-Elementen) auf Geräte oder Gruppen, z.B. reboot über videoxlink';
 
 COMMENT ON TABLE "action_run" IS 'Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
 Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
@@ -599,13 +607,13 @@ COMMENT ON COLUMN "api_token"."user_id" IS 'meist ein Dienstkonto';
 
 COMMENT ON COLUMN "api_token"."token_hash" IS 'SHA-256 eines zufälligen Tokens; Klartext nur einmal bei Erstellung angezeigt';
 
-COMMENT ON TABLE "audit_log" IS 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run.';
+COMMENT ON TABLE "audit_log" IS 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.';
 
 COMMENT ON COLUMN "audit_log"."actor_id" IS 'NULL = Monika selbst';
 
 COMMENT ON COLUMN "audit_log"."verb" IS 'create | update | delete | login | login_failed';
 
-COMMENT ON COLUMN "audit_log"."object_type" IS 'rule, preset, device_source, role, permission_grant, forward_target, ...';
+COMMENT ON COLUMN "audit_log"."object_type" IS 'rule, preset, element, element_link, device_source, role, permission_grant, forward_target, ...';
 
 COMMENT ON COLUMN "audit_log"."before" IS 'Geheimnisse geschwärzt';
 
@@ -617,7 +625,7 @@ COMMENT ON COLUMN "forward_target"."config" IS 'syslog: host, port, protocol, fa
 
 COMMENT ON COLUMN "forward_target"."secret_id" IS 'z.B. Token im Webhook-Header';
 
-COMMENT ON COLUMN "forward_target"."events" IS 'finding.raised, finding.cleared, finding.acked, action.finished';
+COMMENT ON COLUMN "forward_target"."events" IS 'finding.raised, finding.cleared, finding.withdrawn, finding.acked, action.finished';
 
 COMMENT ON COLUMN "forward_target"."min_severity" IS 'nur für finding.*; NULL = alle';
 
@@ -637,31 +645,21 @@ COMMENT ON COLUMN "secret"."nonce" IS '12 Byte, pro Verschlüsselung zufällig';
 
 COMMENT ON COLUMN "secret"."key_id" IS 'Version des Master-Keys, mit dem verschlüsselt wurde';
 
-COMMENT ON COLUMN "element_state"."facts" IS 'flache Map aller aktuellen Werte, z.B. {"running": true, "format.rate": 50}';
+COMMENT ON TABLE "element_state" IS 'Nur, was der Core ableitet. Aktuelle Fakten liegen nur im Speicher des Core und gehen im festen Takt nach InfluxDB.';
 
-COMMENT ON COLUMN "element_state"."alarms" IS 'vom Gerät gemeldete Alarme → automatisch Befunde';
+COMMENT ON COLUMN "element_state"."health" IS 'vom Core; NULL = keine Health (nicht überwacht oder verschwunden)';
 
-COMMENT ON COLUMN "element_state"."health" IS 'vom Core: schlimmster aktiver Befund am Element';
-
-COMMENT ON COLUMN "element_state"."rollup" IS 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3}';
-
-COMMENT ON COLUMN "element_state"."reported_at" IS 'Zeitpunkt der Messung am Gerät';
+COMMENT ON COLUMN "element_state"."rollup" IS 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}';
 
 COMMENT ON COLUMN "element_state"."updated_at" IS 'Zeitpunkt des Schreibens';
 
-COMMENT ON TABLE "device_source_state" IS 'Verbindungszustand von Monika zur Quelle. Getrennt von device_source, weil er sich ständig ändert.';
-
-COMMENT ON COLUMN "device_source_state"."last_sync_at" IS 'letztes vollständiges Discovery';
-
 ALTER TABLE "element" ADD FOREIGN KEY ("parent_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "element" ADD FOREIGN KEY ("device_id") REFERENCES "device" ("element_id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "element" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "device" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "device_source" ADD FOREIGN KEY ("device_id") REFERENCES "device" ("element_id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "device_source" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "device_source" ADD FOREIGN KEY ("secret_id") REFERENCES "secret" ("id") ON DELETE RESTRICT DEFERRABLE INITIALLY IMMEDIATE;
 
@@ -722,7 +720,5 @@ ALTER TABLE "secret" ADD FOREIGN KEY ("created_by_id") REFERENCES "app_user" ("i
 ALTER TABLE "secret" ADD FOREIGN KEY ("updated_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "element_state" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "device_source_state" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 -- +goose StatementEnd

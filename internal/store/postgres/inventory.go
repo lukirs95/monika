@@ -17,10 +17,6 @@ func (s *Store) Load(ctx context.Context) (inventory.Snapshot, error) {
 	opts := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
 	err := pgx.BeginTxFunc(ctx, s.pool, opts, func(tx pgx.Tx) error {
 		q := db.New(tx)
-		devices, err := q.ListDevices(ctx)
-		if err != nil {
-			return fmt.Errorf("list devices: %w", err)
-		}
 		sources, err := q.ListDeviceSources(ctx)
 		if err != nil {
 			return fmt.Errorf("list sources: %w", err)
@@ -34,7 +30,6 @@ func (s *Store) Load(ctx context.Context) (inventory.Snapshot, error) {
 			return fmt.Errorf("list links: %w", err)
 		}
 		snap = inventory.Snapshot{
-			Devices:  mapSlice(devices, toDevice),
 			Sources:  mapSlice(sources, toSource),
 			Elements: mapSlice(elements, toElement),
 			Links:    mapSlice(links, toLink),
@@ -49,15 +44,14 @@ func (s *Store) ApplyDiscovery(ctx context.Context, d inventory.Discovery) ([]uu
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		if id := d.Identity; id != nil {
-			if _, err := q.UpdateDeviceIdentity(ctx, db.UpdateDeviceIdentityParams{
-				ElementID: d.DeviceID,
-				Name:      nullable(id.Name),
-				Vendor:    nullable(id.Vendor),
-				Model:     nullable(id.Model),
-				Serial:    nullable(id.Serial),
-				Firmware:  nullable(id.Firmware),
+			if _, err := q.UpdateSourceIdentity(ctx, db.UpdateSourceIdentityParams{
+				ID:       d.SourceID,
+				Vendor:   nullable(id.Vendor),
+				Model:    nullable(id.Model),
+				Serial:   nullable(id.Serial),
+				Firmware: nullable(id.Firmware),
 			}); err != nil {
-				return fmt.Errorf("update device identity: %w", err)
+				return fmt.Errorf("update source identity: %w", err)
 			}
 		}
 		if err := upsertElements(ctx, q, d.Upsert); err != nil {
@@ -102,8 +96,6 @@ func upsertElements(ctx context.Context, q *db.Queries, elements []inventory.Ele
 		p := params[i]
 		switch {
 		case err != nil:
-		case errors.Is(e, pgx.ErrNoRows):
-			err = fmt.Errorf("element %q of device %s belongs to another source", p.ExternalID, p.DeviceID)
 		case e != nil:
 			err = fmt.Errorf("upsert element %q: %w", p.ExternalID, e)
 		case id != p.ID:
@@ -279,60 +271,48 @@ func rowsAffected(n int64, err error) error {
 
 func toElement(e db.Element) inventory.Element {
 	return inventory.Element{
-		ID:          e.ID,
-		Kind:        inventory.Kind(e.Kind),
-		ParentID:    value(e.ParentID),
-		DeviceID:    value(e.DeviceID),
-		SourceID:    value(e.SourceID),
-		ExternalID:  value(e.ExternalID),
-		GlobalRef:   value(e.GlobalRef),
-		Transport:   value(e.Transport),
-		Direction:   inventory.Direction(value(e.Direction)),
-		Name:        value(e.Name),
-		Attributes:  e.Attributes,
-		Position:    convert(e.Position, toInt),
-		Actions:     e.Actions,
-		Settings:    e.Settings,
-		Present:     e.Present,
-		FirstSeenAt: value(e.FirstSeenAt),
-		LastSeenAt:  value(e.LastSeenAt),
-		Label:       value(e.Label),
-		Notes:       value(e.Notes),
-		Monitored:   e.Monitored,
+		ID:              e.ID,
+		Kind:            inventory.Kind(e.Kind),
+		ParentID:        value(e.ParentID),
+		DeviceID:        value(e.DeviceID),
+		SourceID:        value(e.SourceID),
+		ExternalID:      value(e.ExternalID),
+		GlobalRef:       value(e.GlobalRef),
+		Transport:       value(e.Transport),
+		Direction:       inventory.Direction(value(e.Direction)),
+		Name:            value(e.Name),
+		Attributes:      e.Attributes,
+		Position:        convert(e.Position, toInt),
+		Actions:         e.Actions,
+		CriticalActions: e.CriticalActions,
+		Settings:        e.Settings,
+		Present:         e.Present,
+		FirstSeenAt:     value(e.FirstSeenAt),
+		LastSeenAt:      value(e.LastSeenAt),
+		Label:           value(e.Label),
+		Notes:           value(e.Notes),
+		Monitored:       e.Monitored,
+		DeletedAt:       value(e.DeletedAt),
 	}
 }
 
 func toUpsertParams(e inventory.Element) db.UpsertDriverElementParams {
-	actions := e.Actions
-	if actions == nil {
-		actions = []string{}
-	}
 	return db.UpsertDriverElementParams{
-		ID:         e.ID,
-		Kind:       string(e.Kind),
-		ParentID:   e.ParentID,
-		DeviceID:   e.DeviceID,
-		SourceID:   e.SourceID,
-		ExternalID: e.ExternalID,
-		GlobalRef:  nullable(e.GlobalRef),
-		Transport:  nullable(e.Transport),
-		Direction:  nullable(db.PortDirection(e.Direction)),
-		Name:       nullable(e.Name),
-		Attributes: jsonObject(e.Attributes),
-		Position:   convert(e.Position, toInt32),
-		Actions:    actions,
-		Settings:   e.Settings,
-	}
-}
-
-func toDevice(d db.Device) inventory.Device {
-	return inventory.Device{
-		ID:        d.ElementID,
-		Vendor:    value(d.Vendor),
-		Model:     value(d.Model),
-		Serial:    value(d.Serial),
-		Firmware:  value(d.Firmware),
-		DeletedAt: value(d.DeletedAt),
+		ID:              e.ID,
+		Kind:            string(e.Kind),
+		ParentID:        e.ParentID,
+		DeviceID:        e.DeviceID,
+		SourceID:        e.SourceID,
+		ExternalID:      e.ExternalID,
+		GlobalRef:       nullable(e.GlobalRef),
+		Transport:       nullable(e.Transport),
+		Direction:       nullable(db.PortDirection(e.Direction)),
+		Name:            nullable(e.Name),
+		Attributes:      jsonObject(e.Attributes),
+		Position:        convert(e.Position, toInt32),
+		Actions:         nonNil(e.Actions),
+		CriticalActions: nonNil(e.CriticalActions),
+		Settings:        e.Settings,
 	}
 }
 
@@ -345,6 +325,12 @@ func toSource(s db.DeviceSource) inventory.Source {
 		Config:   s.Config,
 		SecretID: value(s.SecretID),
 		Enabled:  s.Enabled,
+		Identity: inventory.Identity{
+			Vendor:   value(s.Vendor),
+			Model:    value(s.Model),
+			Serial:   value(s.Serial),
+			Firmware: value(s.Firmware),
+		},
 	}
 }
 

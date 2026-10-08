@@ -11,13 +11,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// Kind ist die Rolle eines Elements. Die Klassen Gerät und Gruppe verwaltet der Core;
-// alle anderen Werte kommen aus dem Vokabular der Treiber.
+// Kind ist die Rolle eines Elements. Gerät, Gruppe und Zugang sind reserviert und werden nur
+// vom Core angelegt; alle anderen Werte kommen aus dem Vokabular der Treiber.
 type Kind string
 
 const (
 	KindDevice Kind = "device"
 	KindGroup  Kind = "group"
+	KindAccess Kind = "access" // Wurzel einer Quelle im Gerät, ohne ExternalID
 )
 
 // Direction ist die Fähigkeit eines Anschlusses; die aktuelle Richtung ist ein Fakt.
@@ -48,15 +49,16 @@ type Element struct {
 	SourceID uuid.UUID
 
 	// vom Treiber
-	ExternalID string
-	GlobalRef  string
-	Transport  string
-	Direction  Direction
-	Name       string
-	Attributes json.RawMessage
-	Position   *int
-	Actions    []string
-	Settings   json.RawMessage
+	ExternalID      string
+	GlobalRef       string
+	Transport       string
+	Direction       Direction
+	Name            string
+	Attributes      json.RawMessage
+	Position        *int
+	Actions         []string
+	CriticalActions []string
+	Settings        json.RawMessage
 
 	// vom Core
 	Present     bool
@@ -67,6 +69,7 @@ type Element struct {
 	Label     string
 	Notes     string
 	Monitored bool
+	DeletedAt time.Time // nur Gerät und Gruppe
 }
 
 // UserFields sind die Spalten eines Elements, die nur der User pflegt.
@@ -76,19 +79,8 @@ type UserFields struct {
 	Monitored bool
 }
 
-// Device ist die Identität eines Geräts; ID ist die ID seines Elements.
-type Device struct {
-	ID        uuid.UUID
-	Vendor    string
-	Model     string
-	Serial    string
-	Firmware  string
-	DeletedAt time.Time
-}
-
 // Identity ist die Identität eines Geräts, wie eine Quelle sie meldet.
 type Identity struct {
-	Name     string
 	Vendor   string
 	Model    string
 	Serial   string
@@ -104,6 +96,7 @@ type Source struct {
 	Config   json.RawMessage
 	SecretID uuid.UUID
 	Enabled  bool
+	Identity Identity // vom Treiber
 }
 
 // Link ist eine Beziehung zwischen zwei Elementen. Ein noch unbekannter Endpunkt steht
@@ -124,7 +117,6 @@ type Link struct {
 
 // Snapshot ist das gesamte Inventar, wie es beim Start geladen wird.
 type Snapshot struct {
-	Devices  []Device
 	Sources  []Source
 	Elements []Element
 	Links    []Link
@@ -133,7 +125,6 @@ type Snapshot struct {
 // Discovery ist das Ergebnis eines Discovery-Laufs einer Quelle.
 type Discovery struct {
 	SourceID uuid.UUID
-	DeviceID uuid.UUID
 	Identity *Identity // nil = unverändert
 
 	// Upsert enthält neue und geänderte Elemente, Seen alle in diesem Lauf gemeldeten.

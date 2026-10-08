@@ -14,13 +14,8 @@ import (
 )
 
 const createDevice = `-- name: CreateDevice :exec
-WITH e AS (
-  INSERT INTO element (id, kind, device_id, label, notes)
-  VALUES ($1, 'device', $1, $2, $3)
-  RETURNING id
-)
-INSERT INTO device (element_id)
-SELECT id FROM e
+INSERT INTO element (id, kind, device_id, label, notes)
+VALUES ($1, 'device', $1, $2, $3)
 `
 
 type CreateDeviceParams struct {
@@ -29,9 +24,7 @@ type CreateDeviceParams struct {
 	Notes *string
 }
 
-// Legt Element und Geräte-Zeile in einem Statement an. element.device_id und
-// device.element_id verweisen aufeinander; die Fremdschlüssel werden erst am
-// Ende des Statements geprüft.
+// Ein Gerät ist ein Element mit kind = device; device_id verweist auf sich selbst.
 func (q *Queries) CreateDevice(ctx context.Context, arg CreateDeviceParams) error {
 	_, err := q.db.Exec(ctx, createDevice, arg.ID, arg.Label, arg.Notes)
 	return err
@@ -70,30 +63,30 @@ WITH sources AS (
   UPDATE device_source
   SET enabled = false, updated_at = now()
   WHERE device_id = $1::uuid
-), elements AS (
-  UPDATE element
-  SET monitored = false, updated_at = now()
-  WHERE device_id = $1::uuid
 ), memberships AS (
   DELETE FROM element_link l
   USING element e
   WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = $1::uuid
 )
-UPDATE device
-SET deleted_at = now()
-WHERE element_id = $1::uuid
+UPDATE element
+SET present    = false,
+    monitored  = CASE WHEN id = $1::uuid THEN false ELSE monitored END,
+    deleted_at = CASE WHEN id = $1::uuid THEN now() ELSE deleted_at END,
+    updated_at = now()
+WHERE device_id = $1::uuid
 `
 
-// Weiches Löschen: Quellen deaktivieren, Elemente nicht mehr überwachen, aus allen Gruppen
-// entfernen. Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
-// Nur über postgres.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
+// Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
+// das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.
+// Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
+// Nur über postgres.Store.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
 func (q *Queries) DeleteDevice(ctx context.Context, deviceID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteDevice, deviceID)
 	return err
 }
 
 const listDeviceSources = `-- name: ListDeviceSources :many
-SELECT id, device_id, driver, address, config, secret_id, enabled, created_at, updated_at FROM device_source
+SELECT id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at FROM device_source
 ORDER BY id
 `
 
@@ -114,40 +107,12 @@ func (q *Queries) ListDeviceSources(ctx context.Context) ([]DeviceSource, error)
 			&i.Config,
 			&i.SecretID,
 			&i.Enabled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listDevices = `-- name: ListDevices :many
-SELECT element_id, vendor, model, serial, firmware, deleted_at FROM device
-ORDER BY element_id
-`
-
-func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
-	rows, err := q.db.Query(ctx, listDevices)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Device
-	for rows.Next() {
-		var i Device
-		if err := rows.Scan(
-			&i.ElementID,
 			&i.Vendor,
 			&i.Model,
 			&i.Serial,
 			&i.Firmware,
-			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -196,60 +161,17 @@ func (q *Queries) ListPresetsUsingDevice(ctx context.Context, deviceID uuid.UUID
 
 const lockDevice = `-- name: LockDevice :one
 SELECT deleted_at
-FROM device
-WHERE element_id = $1
+FROM element
+WHERE id = $1 AND kind = 'device'
 FOR UPDATE
 `
 
-// Sperrt die Geräte-Zeile bis zum Ende der Transaktion; liefert deleted_at.
-func (q *Queries) LockDevice(ctx context.Context, elementID uuid.UUID) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, lockDevice, elementID)
+// Sperrt das Geräte-Element bis zum Ende der Transaktion; liefert deleted_at.
+func (q *Queries) LockDevice(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, lockDevice, id)
 	var deleted_at *time.Time
 	err := row.Scan(&deleted_at)
 	return deleted_at, err
-}
-
-const updateDeviceIdentity = `-- name: UpdateDeviceIdentity :execrows
-WITH e AS (
-  UPDATE element
-  SET name          = $6,
-      present       = true,
-      first_seen_at = COALESCE(first_seen_at, now()),
-      last_seen_at  = now(),
-      updated_at    = now()
-  WHERE id = $5 AND kind = 'device'
-)
-UPDATE device
-SET vendor   = $1,
-    model    = $2,
-    serial   = $3,
-    firmware = $4
-WHERE element_id = $5
-`
-
-type UpdateDeviceIdentityParams struct {
-	Vendor    *string
-	Model     *string
-	Serial    *string
-	Firmware  *string
-	ElementID uuid.UUID
-	Name      *string
-}
-
-// Identität des Geräts, wie eine Quelle sie meldet.
-func (q *Queries) UpdateDeviceIdentity(ctx context.Context, arg UpdateDeviceIdentityParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateDeviceIdentity,
-		arg.Vendor,
-		arg.Model,
-		arg.Serial,
-		arg.Firmware,
-		arg.ElementID,
-		arg.Name,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const updateDeviceSource = `-- name: UpdateDeviceSource :execrows
@@ -259,8 +181,8 @@ SET address    = $1,
     secret_id  = $3,
     enabled    = $4,
     updated_at = now()
-WHERE id = $5
-  AND device_id IN (SELECT element_id FROM device WHERE deleted_at IS NULL)
+WHERE device_source.id = $5
+  AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL)
 `
 
 type UpdateDeviceSourceParams struct {
@@ -279,6 +201,39 @@ func (q *Queries) UpdateDeviceSource(ctx context.Context, arg UpdateDeviceSource
 		arg.Config,
 		arg.SecretID,
 		arg.Enabled,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateSourceIdentity = `-- name: UpdateSourceIdentity :execrows
+UPDATE device_source
+SET vendor     = $1,
+    model      = $2,
+    serial     = $3,
+    firmware   = $4,
+    updated_at = now()
+WHERE id = $5
+`
+
+type UpdateSourceIdentityParams struct {
+	Vendor   *string
+	Model    *string
+	Serial   *string
+	Firmware *string
+	ID       uuid.UUID
+}
+
+// Identität des Geräts, wie diese Quelle sie meldet.
+func (q *Queries) UpdateSourceIdentity(ctx context.Context, arg UpdateSourceIdentityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateSourceIdentity,
+		arg.Vendor,
+		arg.Model,
+		arg.Serial,
+		arg.Firmware,
 		arg.ID,
 	)
 	if err != nil {

@@ -679,7 +679,7 @@ type AppUser struct {
 	LastLoginAt *time.Time
 }
 
-// Alle Änderungen außer Aktionen; Aktionen stehen in action_run.
+// Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.
 type AuditLog struct {
 	ID uuid.UUID
 	// NULL = Monika selbst
@@ -687,7 +687,7 @@ type AuditLog struct {
 	At      time.Time
 	// create | update | delete | login | login_failed
 	Verb string
-	// rule, preset, device_source, role, permission_grant, forward_target, ...
+	// rule, preset, element, element_link, device_source, role, permission_grant, forward_target, ...
 	ObjectType string
 	ObjectID   *uuid.UUID
 	// Geheimnisse geschwärzt
@@ -696,20 +696,15 @@ type AuditLog struct {
 	After json.RawMessage
 }
 
-// 1:1-Erweiterung von element (kind = device). Wie das Gerät erreicht wird, steht in device_source. Geräte werden nie hart gelöscht.
-type Device struct {
-	ElementID uuid.UUID
-	Vendor    *string
-	Model     *string
-	Serial    *string
-	Firmware  *string
-	// weich gelöscht: Quellen deaktiviert, Elemente nicht überwacht, aus Gruppen entfernt; Zeilen bleiben für Läufe, Befunde und Audit
-	DeletedAt *time.Time
-}
-
-// Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
+// Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle
+// besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
+// Zu jeder Quelle legt der Core ein Zugangs-Element (kind = access) an.
+// Quellen werden nie gelöscht, nur deaktiviert. Verbindungszustand und
+// Lebenszeichen liegen im Speicher des Core; ein Ausfall steht als Befund
+// source.unreachable am Zugangs-Element.
 type DeviceSource struct {
-	ID       uuid.UUID
+	ID uuid.UUID
+	// Element mit kind = device (gesichert in der Anwendung)
 	DeviceID uuid.UUID
 	// videoxlink, embrionix, directout-ravio, ipmi, ...
 	Driver string
@@ -718,36 +713,39 @@ type DeviceSource struct {
 	// treiberspezifische Verbindungsparameter, keine Geheimnisse
 	Config json.RawMessage
 	// Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen
-	SecretID  *uuid.UUID
+	SecretID *uuid.UUID
+	// false = deaktiviert: kein Befund, Elemente der Quelle unknown
 	Enabled   bool
+	Vendor    *string
+	Model     *string
+	Serial    *string
+	Firmware  *string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// Verbindungszustand von Monika zur Quelle. Getrennt von device_source, weil er sich ständig ändert.
-type DeviceSourceState struct {
-	SourceID      uuid.UUID
-	Connected     bool
-	LastContactAt *time.Time
-	// letztes vollständiges Discovery
-	LastSyncAt *time.Time
-	LastError  *string
-	UpdatedAt  time.Time
-}
-
 // Hinweis: device_id = id beim Gerät erfordert, dass die id vor dem Insert
 // vergeben wird (in Go erzeugen statt per Default).
+//
+// Eindeutigkeit der external_id pro Quelle, mit genau einem Zugangs-Element
+// (external_id NULL) pro Quelle. DBML kennt kein NULLS NOT DISTINCT; der Index
+// steht deshalb handgeschrieben in migrations/ und deckt auch Abfragen nach
+// source_id ab:
+//
+// CREATE UNIQUE INDEX element_source_external_uq
+//
+//	ON element (source_id, external_id) NULLS NOT DISTINCT;
 type Element struct {
 	ID uuid.UUID
-	// device, group, module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger
+	// device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger
 	Kind string
 	// nur physische/strukturelle Hierarchie
 	ParentID *uuid.UUID
-	// zugehöriges Gerät; beim Gerät selbst = eigene id; NULL bei Gruppen
+	// zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen
 	DeviceID *uuid.UUID
 	// besitzende Quelle; NULL bei Gerät und Gruppe
 	SourceID *uuid.UUID
-	// stabile ID innerhalb des Geräts, z.B. Slot-Pfad oder UnitID
+	// stabile ID innerhalb der Quelle, z.B. Slot-Pfad oder UnitID; NULL nur beim Zugangs-Element
 	ExternalID *string
 	// global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern
 	GlobalRef *string
@@ -763,17 +761,21 @@ type Element struct {
 	Position *int32
 	// unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}
 	Actions []string
+	// Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)
+	CriticalActions []string
 	// schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}
 	Settings json.RawMessage
-	// false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten
+	// false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar
 	Present bool
 	// NULL = vom User vorab angelegt, vom Treiber noch nie gesehen
 	FirstSeenAt *time.Time
 	LastSeenAt  *time.Time
 	Label       *string
 	Notes       *string
-	// false = von allen Regeln ausgenommen (unbenutzt)
+	// false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id
 	Monitored bool
+	// weich gelöscht (nur Gerät und Gruppe); Zeilen bleiben für Läufe, Befunde und Audit
+	DeletedAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -803,18 +805,13 @@ type ElementLink struct {
 	CreatedAt time.Time
 }
 
+// Nur, was der Core ableitet. Aktuelle Fakten liegen nur im Speicher des Core und gehen im festen Takt nach InfluxDB.
 type ElementState struct {
 	ElementID uuid.UUID
-	// flache Map aller aktuellen Werte, z.B. {"running": true, "format.rate": 50}
-	Facts json.RawMessage
-	// vom Gerät gemeldete Alarme → automatisch Befunde
-	Alarms json.RawMessage
-	// vom Core: schlimmster aktiver Befund am Element
-	Health Health
-	// nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3}
+	// vom Core; NULL = keine Health (nicht überwacht oder verschwunden)
+	Health *Health
+	// nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}
 	Rollup json.RawMessage
-	// Zeitpunkt der Messung am Gerät
-	ReportedAt *time.Time
 	// Zeitpunkt des Schreibens
 	UpdatedAt time.Time
 }
@@ -827,12 +824,12 @@ type Finding struct {
 	Origin    FindingOrigin
 	// bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt
 	RuleID *uuid.UUID
-	// rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, data.stale
+	// rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable
 	Code     string
 	Severity Severity
 	// lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds
 	Message *string
-	// Sollwert, Istwert, Regel-Snapshot
+	// Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted)
 	Details json.RawMessage
 	// NULL = Ursache, sonst Symptom
 	CausedByID *uuid.UUID
@@ -854,7 +851,7 @@ type ForwardTarget struct {
 	Config json.RawMessage
 	// z.B. Token im Webhook-Header
 	SecretID *uuid.UUID
-	// finding.raised, finding.cleared, finding.acked, action.finished
+	// finding.raised, finding.cleared, finding.withdrawn, finding.acked, action.finished
 	Events []string
 	// nur für finding.*; NULL = alle
 	MinSeverity *Severity
@@ -903,6 +900,8 @@ type PresetStep struct {
 	Params json.RawMessage
 	// false = Fehler bricht das Preset ab
 	ContinueOnError bool
+	// Pflicht bei Aktionen für das ganze Gerät (an Zugangs-Elementen) auf Geräte oder Gruppen, z.B. reboot über videoxlink
+	Driver *string
 }
 
 type Role struct {

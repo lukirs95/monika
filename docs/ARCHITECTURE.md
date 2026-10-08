@@ -833,7 +833,7 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 | `element` | `element_class_check` | Pflichtfelder je Klasse (Gerät, Gruppe, Zugang, Treiber-Element) |
 | `element` | `element_deleted_check` | `deleted_at` nur bei Geräten und Gruppen |
 | `element` | `element_critical_actions_check` | `critical_actions` ⊆ `actions` |
-| `element` | `element_source_external_uq` (handgeschrieben, `NULLS NOT DISTINCT`) | `external_id` eindeutig pro Quelle; genau ein Zugangs-Element pro Quelle |
+| `element` | `element_source_external_uq` (handgeschrieben, Teilindex mit `NULLS NOT DISTINCT`) | `external_id` eindeutig pro Quelle; genau ein Zugangs-Element pro Quelle |
 | `element_link` | `element_link_endpoints_check` | jeder Endpunkt als ID oder Referenz |
 | `element_link` | `element_link_owner_check` | `member` ohne Quelle, alle anderen mit Quelle |
 | `element_link` | `element_link_uq` (Ausdrucksindex) | keine doppelten Links, auch unaufgelöst |

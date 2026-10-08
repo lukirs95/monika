@@ -39,6 +39,14 @@ func mapSlice[From, To any](s []From, f func(From) To) []To {
 	return out
 }
 
+// nonNil ersetzt nil durch einen leeren Slice für Array-Spalten mit NOT NULL.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
 // jsonObject ersetzt ein fehlendes JSON durch {} für Spalten mit NOT NULL.
 func jsonObject(m json.RawMessage) json.RawMessage {
 	if len(m) == 0 {

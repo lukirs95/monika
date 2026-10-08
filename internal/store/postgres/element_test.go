@@ -5,12 +5,10 @@ package postgres_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"slices"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/lukirs95/monika/internal/store/postgres/db"
 )
@@ -45,14 +43,15 @@ func newSource(t *testing.T, q *db.Queries, device, source uuid.UUID, driver str
 // driverElement liefert Upsert-Parameter für ein Element direkt unter dem Gerät.
 func driverElement(device, source uuid.UUID, externalID string) db.UpsertDriverElementParams {
 	return db.UpsertDriverElementParams{
-		ID:         newID(),
-		Kind:       "port",
-		ParentID:   device,
-		DeviceID:   device,
-		SourceID:   source,
-		ExternalID: externalID,
-		Attributes: json.RawMessage(`{}`),
-		Actions:    []string{},
+		ID:              newID(),
+		Kind:            "port",
+		ParentID:        device,
+		DeviceID:        device,
+		SourceID:        source,
+		ExternalID:      externalID,
+		Attributes:      json.RawMessage(`{}`),
+		Actions:         []string{},
+		CriticalActions: []string{},
 	}
 }
 
@@ -89,18 +88,6 @@ func TestCreateDevice(t *testing.T) {
 		t.Fatalf("device element = %+v, want kind device, device_id = id, never seen", e)
 	}
 
-	n, err := q.UpdateDeviceIdentity(ctx, db.UpdateDeviceIdentityParams{
-		ElementID: id,
-		Name:      new("X8A1001"),
-		Vendor:    new("VideoXLink"),
-		Model:     new("X8"),
-	})
-	if err != nil || n != 1 {
-		t.Fatalf("UpdateDeviceIdentity = %d, %v; want 1, nil", n, err)
-	}
-	if e := element(t, q, id); *e.Name != "X8A1001" || e.FirstSeenAt == nil {
-		t.Fatalf("device element = %+v, want name X8A1001 and first_seen_at set", e)
-	}
 }
 
 func TestUpsertDriverElement(t *testing.T) {
@@ -148,12 +135,13 @@ func TestUpsertDriverElement(t *testing.T) {
 		}
 	})
 
-	t.Run("ignores element of other source", func(t *testing.T) {
+	t.Run("same external_id in other source is a separate element", func(t *testing.T) {
 		other := newID()
 		newSource(t, q, device, other, "ipmi")
-		_, err := upsert(ctx, q, driverElement(device, other, "sdi/1"))
-		if !errors.Is(err, pgx.ErrNoRows) {
-			t.Fatalf("err = %v, want pgx.ErrNoRows", err)
+		e := driverElement(device, other, "sdi/1")
+		got, err := upsert(ctx, q, e)
+		if err != nil || got != e.ID || got == id {
+			t.Fatalf("upsert = %s, %v; want new element %s", got, err, e.ID)
 		}
 	})
 }
