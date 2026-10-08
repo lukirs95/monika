@@ -4,7 +4,11 @@ package postgres_test
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -93,5 +97,42 @@ func TestDeleteSecretInUse(t *testing.T) {
 
 	if err := s.DeleteSecret(ctx, uuid.Nil, id); !errors.Is(err, secret.ErrInUse) {
 		t.Fatalf("DeleteSecret = %v, want ErrInUse", err)
+	}
+}
+
+func TestSecretServiceOnPostgres(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := postgres.New(server.NewDB(t))
+	key := func() secret.Key {
+		b := make([]byte, 32)
+		rand.Read(b)
+		k, err := secret.ParseKey(base64.StdEncoding.EncodeToString(b))
+		if err != nil {
+			t.Fatalf("ParseKey: %v", err)
+		}
+		return k
+	}
+	oldKey, newKey := key(), key()
+
+	old, err := secret.NewService(store, secret.Keys{Current: oldKey}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	sec, err := old.Create(ctx, uuid.Nil, "xlink-admin", "", json.RawMessage(`{"password": "geheim"}`))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	rotated, err := secret.NewService(store, secret.Keys{Current: newKey, Previous: oldKey}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if n, err := rotated.VerifyAndRotate(ctx); err != nil || n != 1 {
+		t.Fatalf("VerifyAndRotate = %d, %v; want 1, nil", n, err)
+	}
+	got, err := rotated.Value(ctx, sec.ID)
+	if err != nil || string(got) != `{"password": "geheim"}` {
+		t.Fatalf("Value = %s, %v; want original value", got, err)
 	}
 }
