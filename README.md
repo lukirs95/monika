@@ -27,7 +27,7 @@ monika/
 │  ├─ secret/               verschlüsselter Secret-Store (AES-256-GCM)
 │  ├─ core/
 │  │  ├─ inventory/         Discovery-Sync: Elemente, Geräte, Quellen, Links
-│  │  ├─ state/             Zustand im Speicher, Fakten, Staleness
+│  │  ├─ state/             Fakten im Speicher, Lebenszeichen der Quellen
 │  │  └─ evaluation/        Regeln, Befunde, Ursache/Symptom, Health, Rollup
 │  ├─ action/               Aktions-Executor: FIFO pro Element, Prüfung, Läufe
 │  ├─ preset/               Preset-Runner: Stufen, Delays, Rechte-Vorabprüfung

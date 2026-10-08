@@ -3,7 +3,9 @@
 Zwischenstand der Implementierung, damit die Arbeit in einer neuen Sitzung nahtlos weitergeht.
 Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 
-Stand: 2026-10-07 (letzter Commit `46fbb8f`)
+Stand: 2026-10-08 (letzter Commit `731358e`)
+
+> **Achtung:** Am 2026-10-08 wurde die Architektur in einer Durchsicht überarbeitet (Abschnitt „Architektur-Durchsicht“). `docs/ARCHITECTURE.md` und `docs/schema/monika.dbml` sind aktuell, **Migrationen und Code noch nicht**. `make db-generate` erst zusammen mit den Code-Änderungen aus „Nächste Schritte“, Punkt 1 ausführen, sonst bricht der Build.
 
 ## Erledigt
 
@@ -18,24 +20,44 @@ Stand: 2026-10-07 (letzter Commit `46fbb8f`)
 - **Inventar nach dem Store-Muster:**
   - `internal/core/inventory`: Domänentypen, `inventory.Store`, Fehler (`ErrNotFound`, `ErrMemberCycle`, `DeviceInUseError`).
   - `postgres.Store` implementiert `inventory.Store` (`Load`, `ApplyDiscovery`, Geräte, Quellen, Gruppen).
-- **Entscheidungen dieser Sitzung** (stehen auch in `docs/ARCHITECTURE.md`):
-  - Geräte werden **weich gelöscht** (`device.deleted_at`, Quellen aus, `monitored = false`, raus aus Gruppen); abgelehnt, solange ein Preset-Schritt auf das Gerät zielt.
-  - `FinishDiscovery`: ein Statement pro Discovery-Lauf setzt `last_seen_at` und `present`.
-  - Gruppen-Zyklenprüfung unter Advisory Lock (`LockMemberLinks`).
+- **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
+
+## Architektur-Durchsicht (2026-10-08)
+
+Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbml`. Kurzfassung:
+
+- **Zugangs-Element** (`kind = access`, ohne `external_id`) pro Quelle, vom Core beim Anlegen der Quelle erzeugt; trägt Fakten und Aktionen für das ganze Gerät und `source.unreachable`.
+- **Tabelle `device` entfällt:** Gerät = Element mit `kind = device`; Identität pro Quelle in `device_source`.
+- **Tabelle `device_source_state` entfällt:** Verbindung über `source.unreachable`, Lebenszeichen im Speicher.
+- **`element_state`** nur noch `health` (nullable), `rollup`, `updated_at`; Fakten nur im Speicher und im festen Takt nach InfluxDB.
+- **`external_id` eindeutig pro Quelle** (`element_source_external_uq`, `NULLS NOT DISTINCT`, handgeschrieben).
+- **Weiches Löschen** für Geräte und Gruppen über `element.deleted_at`; mitgelöscht werden Mitgliedschaften und Konfiguration mit diesem Geltungsbereich; Löschen/Anlegen erfordert `inventory_edit` global.
+- **Befunde enden** als behoben (`finding.cleared`) oder zurückgezogen (`finding.withdrawn`, `details.cleared_reason`); `data.stale` entfällt.
+- **Health:** neutral bei nicht überwacht/verschwunden, `unknown` wenn die Quelle nicht liefert, Zusammenfassen `error` > `warning` > `unknown` > `ok`, leere Menge `unknown`.
+- `monitored` vererbt sich entlang `parent_id`; `present` ist reservierter Fakt; Zähler über `<fakt>.rate`.
+- **Sende-Ziele** (verallgemeinert aus dem HTTP-Treiber): nur `trigger`, kein `set`, Fakten nur über Aufrufe.
+- Neue Spalten `element.critical_actions`, `preset_step.driver`; Regel-Präzedenz und Geltungsbereich der Rechte präzisiert.
 
 ## Nächste Schritte
 
-1. **`secret` auf das Store-Muster umstellen:** `secret.Store`-Interface und Typen in `internal/secret`, Methoden in `postgres.Store`. Fehlercode `23001` (`restrict_violation`, Secret noch in Verwendung) auf einen fachlichen Fehler abbilden. Danach Verschlüsselung (AES-256-GCM), Master-Key aus der Umgebung, Rotation, Startprüfung.
-2. **Zustand:** Queries und Store für `element_state` (nur bei Änderung schreiben) und `device_source_state`.
-3. **Bewertung:** Queries und Store für Regeln und Befunde (aktive laden, anlegen, aufheben, quittieren).
-4. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte ablehnen und die Geräte-Zeile mitsperren (siehe Lücken).
-5. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env`, `postgres.Open`, `postgres.Migrate`, Verdrahtung.
-6. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`).
+1. **Schema und Code an die Durchsicht anpassen** (vor allem anderen):
+   - DBML → `make db-generate`; neue handgeschriebene Migration für `element_source_external_uq`; `make db-validate`.
+   - Queries und Store: `device` entfällt (`CreateDevice` ohne CTE, `UpdateDeviceIdentity` → `device_source`, `LockDevice` auf `element`, `ListDevices` entfällt bzw. wird zu Geräte-Elementen); `deleted_at` an `element`; Upsert mit `ON CONFLICT (source_id, external_id)` ohne Quellen-Prüfung; `FinishDiscovery` nimmt `access` aus, setzt aber `last_seen_at`.
+   - `CreateSource` legt das Zugangs-Element mit an und lehnt gelöschte Geräte ab.
+   - `DeleteDevice`: `monitored = false` nur am Gerät, `present = false` an allen Elementen, Regeln/Rechte/Weiterleitungen des Geltungsbereichs löschen, aktive Befunde zurückziehen, Audit-Eintrag. Weiches Löschen für Gruppen ergänzen.
+   - `inventory`-Typen anpassen (`Device` → Identität an `Source`, `CriticalActions`, `DeletedAt`).
+   - Tests nachziehen (u. a. „gleiche `external_id` bei anderer Quelle = eigenes Element“).
+2. **`secret` auf das Store-Muster umstellen:** `secret.Store`-Interface und Typen in `internal/secret`, Methoden in `postgres.Store`. Fehlercode `23001` (`restrict_violation`, Secret noch in Verwendung) auf einen fachlichen Fehler abbilden. Danach Verschlüsselung (AES-256-GCM), Master-Key aus der Umgebung, Rotation, Startprüfung.
+3. **Zustand:** Queries und Store für `element_state` (Health und Rollup, nur bei Änderung).
+4. **Bewertung:** Queries und Store für Regeln und Befunde (aktive laden, anlegen, aufheben, quittieren).
+5. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
+6. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env`, `postgres.Open`, `postgres.Migrate`, Verdrahtung.
+7. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
 
 ## Bekannte Lücken
 
-- `CreateDeviceSource` und `CreatePlannedElement` nehmen auch gelöschte Geräte an.
-- Preset-Schritte: Wer einen Schritt anlegt, muss prüfen, ob das Ziel-Gerät gelöscht ist, und die Geräte-Zeile sperren (sonst Race mit `DeleteDevice`).
+- `CreateDeviceSource` und `CreatePlannedElement` nehmen auch gelöschte Geräte an (wird in Schritt 1 behoben).
+- Preset-Schritte: Wer einen Schritt anlegt, muss prüfen, ob das Ziel gelöscht ist, und die Zeile sperren (sonst Race mit dem Löschen).
 - `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.
 - Kein Linter festgelegt: `CLAUDE.md` verlangt einen, es gibt aber noch kein `make lint` (Vorschlag: golangci-lint).
 - testcontainers schreibt viele Logzeilen in die Testausgabe.
