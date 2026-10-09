@@ -25,6 +25,10 @@ tags:
     description: Regeln und Befunde
   - name: actions
     description: Aktionen (Läufe) und Presets
+  - name: admin
+    description: Weiterleitung, Secrets, Benutzer, Rollen, Rechte, Tokens
+  - name: self
+    description: Eigenes Passwort und eigene Sitzungen
 
 paths:
   /auth/login:
@@ -750,6 +754,442 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemMissingRights' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /forward-targets:
+    get:
+      tags: [admin]
+      operationId: listForwardTargets
+      summary: Weiterleitungsziele mit letztem Ergebnis (admin)
+      responses:
+        '200':
+          description: Ziele
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ForwardTarget' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      operationId: createForwardTarget
+      summary: Weiterleitungsziel anlegen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForwardTargetInput' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForwardTarget' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /forward-targets/{target_id}:
+    put:
+      tags: [admin]
+      operationId: updateForwardTarget
+      summary: Weiterleitungsziel ändern (admin)
+      parameters:
+        - $ref: '#/components/parameters/TargetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForwardTargetInput' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForwardTarget' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      tags: [admin]
+      operationId: deleteForwardTarget
+      summary: Weiterleitungsziel löschen (admin)
+      parameters:
+        - $ref: '#/components/parameters/TargetID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /secrets:
+    get:
+      tags: [admin]
+      operationId: listSecrets
+      summary: Secrets ohne Wert (admin oder inventory_edit, zum Zuweisen an Quellen)
+      responses:
+        '200':
+          description: Secrets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Secret' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      operationId: createSecret
+      summary: Secret anlegen (admin); der Wert ist danach nie wieder lesbar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecretCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Secret' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /secrets/{secret_id}:
+    delete:
+      tags: [admin]
+      operationId: deleteSecret
+      summary: Secret löschen (admin); in Verwendung 409 `secret_in_use`
+      parameters:
+        - $ref: '#/components/parameters/SecretID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /secrets/{secret_id}/value:
+    put:
+      tags: [admin]
+      operationId: replaceSecretValue
+      summary: Wert ersetzen (admin); Quellen mit diesem Secret werden neu gestartet
+      parameters:
+        - $ref: '#/components/parameters/SecretID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecretValue' }
+      responses:
+        '204': { description: Ersetzt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /users:
+    get:
+      tags: [admin]
+      operationId: listUsers
+      summary: Benutzer und Dienstkonten (admin)
+      responses:
+        '200':
+          description: Benutzer
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      operationId: createUser
+      summary: Benutzer oder Dienstkonto anlegen (admin)
+      description: Benutzernamen werden kleingeschrieben; vergeben 409 `username_taken`. Dienstkonten haben kein Passwort.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /users/{user_id}:
+    put:
+      tags: [admin]
+      operationId: updateUser
+      summary: Anzeigename, E-Mail, Deaktivierung (admin); Deaktivieren beendet alle Sitzungen
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserUpdate' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{user_id}/password:
+    put:
+      tags: [admin]
+      operationId: setUserPassword
+      summary: Passwort eines Benutzers setzen (admin); beendet seine Sitzungen
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordSet' }
+      responses:
+        '204': { description: Gesetzt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /users/{user_id}/totp/reset:
+    post:
+      tags: [admin]
+      operationId: resetUserTOTP
+      summary: TOTP eines Benutzers zurücksetzen (admin); bei der nächsten Anmeldung neu einrichten
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '204': { description: Zurückgesetzt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/{user_id}/tokens:
+    get:
+      tags: [admin]
+      operationId: listTokens
+      summary: API-Tokens eines Benutzers ohne Wert (admin)
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Token' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [admin]
+      operationId: createToken
+      summary: API-Token erzeugen (admin); der Klartext wird nur in dieser Antwort gezeigt
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenCreate' }
+      responses:
+        '201':
+          description: Erzeugt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenCreated' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tokens/{token_id}:
+    delete:
+      tags: [admin]
+      operationId: revokeToken
+      summary: Token widerrufen (admin); beendet auch seine Kiosk-Sitzungen
+      parameters:
+        - name: token_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Widerrufen }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /roles:
+    get:
+      tags: [admin]
+      operationId: listRoles
+      summary: Rollen mit Rechten und Mitgliedern (admin)
+      responses:
+        '200':
+          description: Rollen
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      operationId: createRole
+      summary: Rolle anlegen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleInput' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /roles/{role_id}:
+    put:
+      tags: [admin]
+      operationId: updateRole
+      summary: Name, Beschreibung, Kopplung an den IdP (admin)
+      parameters:
+        - $ref: '#/components/parameters/RoleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleInput' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [admin]
+      operationId: deleteRole
+      summary: Rolle löschen (admin); ihre Rechte und Mitgliedschaften entfallen
+      parameters:
+        - $ref: '#/components/parameters/RoleID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /roles/{role_id}/grants:
+    put:
+      tags: [admin]
+      operationId: setRoleGrants
+      summary: Rechte einer Rolle ersetzen (admin)
+      description: preset_run, preset_edit und admin nur ohne Geltungsbereich (422 `global_permission`).
+      parameters:
+        - $ref: '#/components/parameters/RoleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/Grant' }
+      responses:
+        '204': { description: Ersetzt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /roles/{role_id}/members:
+    put:
+      tags: [admin]
+      operationId: setRoleMembers
+      summary: Mitglieder einer Rolle ersetzen (admin); Mitgliedschaften aus dem IdP bleiben unberührt
+      parameters:
+        - $ref: '#/components/parameters/RoleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { type: string, format: uuid }
+      responses:
+        '204': { description: Ersetzt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/password:
+    put:
+      tags: [self]
+      operationId: changeOwnPassword
+      summary: Eigenes Passwort ändern; beendet alle anderen eigenen Sitzungen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordChange' }
+      responses:
+        '204': { description: Geändert }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /auth/sessions:
+    get:
+      tags: [self]
+      operationId: listOwnSessions
+      summary: Eigene aktive Sitzungen
+      responses:
+        '200':
+          description: Sitzungen
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SessionInfo' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/sessions/{session_id}:
+    delete:
+      tags: [self]
+      operationId: revokeOwnSession
+      summary: Eigene Sitzung beenden (z. B. auf einem vergessenen Rechner)
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Beendet }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     session:
@@ -795,6 +1235,26 @@ components:
       schema: { type: string, format: uuid }
     PresetID:
       name: preset_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TargetID:
+      name: target_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    SecretID:
+      name: secret_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserID:
+      name: user_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RoleID:
+      name: role_id
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -1117,6 +1577,161 @@ components:
                   step_id: { type: string, format: uuid, nullable: true, description: 'leer, wenn preset_run selbst fehlt' }
                   element_id: { type: string, format: uuid, nullable: true }
                   permission: { type: string }
+
+    ForwardTargetInput:
+      type: object
+      required: [name, kind, enabled, config, events]
+      properties:
+        name: { type: string, minLength: 1 }
+        kind: { type: string, enum: [syslog, webhook] }
+        enabled: { type: boolean }
+        config: { type: object, additionalProperties: true, description: 'syslog: host, port, protocol, facility; webhook: url, method, headers, body (Vorlage)' }
+        secret_id: { type: string, format: uuid, nullable: true }
+        events:
+          type: array
+          items: { type: string, enum: [finding.raised, finding.cleared, finding.withdrawn, finding.acked, action.finished] }
+        min_severity: { type: string, enum: [info, warning, error], nullable: true }
+        scope_element_id: { type: string, format: uuid, nullable: true }
+    ForwardTarget:
+      allOf:
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+            last_sent_at: { type: string, format: date-time, nullable: true }
+            last_error: { type: string, nullable: true }
+        - $ref: '#/components/schemas/ForwardTargetInput'
+
+    Secret:
+      type: object
+      required: [id, name, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SecretValue:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: object
+          additionalProperties: true
+          description: 'Klartext als JSON, Format legt der Treiber fest, z. B. {"username": "admin", "password": "…"}'
+    SecretCreate:
+      allOf:
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1 }
+            description: { type: string, nullable: true }
+        - $ref: '#/components/schemas/SecretValue'
+
+    User:
+      type: object
+      required: [id, username, service, disabled, totp_enabled, roles, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        service: { type: boolean }
+        disabled: { type: boolean }
+        totp_enabled: { type: boolean }
+        roles:
+          type: array
+          items: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time, nullable: true }
+    UserCreate:
+      type: object
+      required: [username, service]
+      properties:
+        username: { type: string, minLength: 1 }
+        display_name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        service: { type: boolean }
+        password: { type: string, format: password, nullable: true, description: 'Pflicht für Menschen, mindestens 12 Zeichen; leer bei Dienstkonten' }
+    UserUpdate:
+      type: object
+      required: [display_name, email, disabled]
+      properties:
+        display_name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        disabled: { type: boolean }
+    PasswordSet:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, format: password, minLength: 12 }
+    PasswordChange:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password }
+        new_password: { type: string, format: password, minLength: 12 }
+
+    Token:
+      type: object
+      required: [id, user_id, name, read_only, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        read_only: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    TokenCreate:
+      type: object
+      required: [name, read_only]
+      properties:
+        name: { type: string, minLength: 1 }
+        read_only: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+    TokenCreated:
+      allOf:
+        - $ref: '#/components/schemas/Token'
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: 'monika_…; nur in dieser Antwort sichtbar' }
+
+    RoleInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        external_ref: { type: string, nullable: true, description: 'Wert im Groups-Claim des IdP (später OIDC)' }
+    Role:
+      allOf:
+        - type: object
+          required: [id, grants, members]
+          properties:
+            id: { type: string, format: uuid }
+            grants:
+              type: array
+              items: { $ref: '#/components/schemas/Grant' }
+            members:
+              type: array
+              items: { type: string, format: uuid }
+        - $ref: '#/components/schemas/RoleInput'
+
+    SessionInfo:
+      type: object
+      required: [id, kind, created_at, last_seen_at, expires_at, current]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [user, kiosk] }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        user_agent: { type: string, nullable: true }
+        remote_addr: { type: string, nullable: true }
+        current: { type: boolean, description: 'die Sitzung dieser Anfrage' }
 
     LoginRequest:
       type: object
