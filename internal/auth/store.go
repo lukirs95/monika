@@ -5,6 +5,8 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+
+	"github.com/lukirs95/monika/internal/secret"
 )
 
 var (
@@ -12,6 +14,9 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrNameTaken bedeutet, dass Benutzername bzw. Rollenname schon vergeben sind.
 	ErrNameTaken = errors.New("name already taken")
+	// ErrTOTPConfirmed bedeutet, dass bereits ein bestätigtes TOTP existiert; es lässt sich nur
+	// zurücksetzen, nicht überschreiben.
+	ErrTOTPConfirmed = errors.New("totp already confirmed")
 )
 
 // Store persistiert Benutzer, Rollen, Rechte, Sitzungen, Tokens und TOTP. Jede Methode ist eine in
@@ -62,4 +67,19 @@ type Store interface {
 	TouchTokens(ctx context.Context, ts []Touch) error
 	// RevokeToken widerruft ein Token und beendet seine Kiosk-Sitzungen. Unbekannt: ErrNotFound.
 	RevokeToken(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
+
+	// TOTP liefert das TOTP eines Benutzers. Keines: ErrNotFound.
+	TOTP(ctx context.Context, user uuid.UUID) (TOTP, error)
+	// SaveTOTP speichert ein neues, unbestätigtes Geheimnis. Schon bestätigt: ErrTOTPConfirmed.
+	SaveTOTP(ctx context.Context, user uuid.UUID, v secret.Encrypted) error
+	// ConfirmTOTP bestätigt die Einrichtung mit dem verwendeten Zeitschritt und ersetzt die
+	// Wiederherstellungscodes (als Hash). Keine offene Einrichtung: ErrNotFound.
+	ConfirmTOTP(ctx context.Context, user uuid.UUID, step int64, recoveryCodeHashes []string) error
+	// UseTOTPStep verbraucht einen Zeitschritt; false, wenn er nicht neuer ist als der letzte.
+	UseTOTPStep(ctx context.Context, user uuid.UUID, step int64) (bool, error)
+	// UseRecoveryCode verbraucht einen Wiederherstellungscode; false, wenn unbekannt oder verbraucht.
+	UseRecoveryCode(ctx context.Context, user uuid.UUID, codeHash string) (bool, error)
+	// ResetTOTP löscht TOTP und Wiederherstellungscodes (Admin); bei der nächsten Anmeldung wird
+	// neu eingerichtet. Keines: ErrNotFound.
+	ResetTOTP(ctx context.Context, actor uuid.UUID, user uuid.UUID) error
 }
