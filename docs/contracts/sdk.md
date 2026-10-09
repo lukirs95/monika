@@ -167,6 +167,7 @@ classDiagram
 | `sdk.Register(Driver)` | Registrierung in `init()`; doppelte Namen sind ein Programmierfehler (`panic`) |
 | `Driver.Actions` | **Katalog**: wie jede Aktion funktioniert, die der Treiber irgendwo anbietet (Parameter, Prüfbedingung, Timeout, `critical`). *Welches* Element sie unterstützt, steht in `Element.Actions`; `reboot` kann z. B. am Zugangs-Element (Gerät) und an einzelnen Modulen stehen |
 | `Driver.Heartbeat` | erwarteter Abstand der Lebenszeichen; ohne Lebenszeichen für das **Dreifache** gilt die Quelle als nicht erreichbar. `0` = Sende-Ziel ohne Health-Check, nie `unknown` |
+| `SourceConfig.Logger` | vom Core pro Quelle erzeugt, mit den Attributen `driver`, `source_id` und `device_id` (siehe Logging) |
 | `SourceConfig.Secret` | entschlüsselter Klartext des Secrets der Quelle (JSON, Format legt der Treiber fest); leer ohne Secret. Nie loggen |
 | `Facts` | `map[string]any`; Werte nur `bool`, `float64` oder `string`, keine Listen oder Objekte. **Zahlen sind immer `float64`**, auch Ganzzahlen (Treiber wandeln um); exakt bis 2⁵³. Andere Werte verwirft der Core mit Log-Eintrag. Schlüssel aus dem Vokabular |
 | `Snapshot.Facts`, `.Alarms` | Schlüssel ist die `external_id` (`""` = Zugangs-Element) |
@@ -339,6 +340,24 @@ sequenceDiagram
 - Zähler, die ein Gerät als Dezimalzahl liefert, deckt der `Counter` nicht ab; ein Helfer dafür kommt, wenn ein Treiber ihn braucht.
 - Der Treiber meldet den Rohwert (`crc_errors`) und, sobald `ok`, die Rate (`crc_errors.rate`).
 
+## Logging
+
+- Treiber loggen **ausschließlich** über `SourceConfig.Logger`, nie über `slog.Default()`, das Paket `log` oder `fmt.Print*`. Jede Zeile ist so ihrer Quelle zugeordnet.
+- Stufen: `Debug` für Protokolldetails, `Info` für Verbinden und Trennen, `Warn` für Fehler, die der Treiber selbst behebt, `Error` für Fehler, die er nicht behebt.
+- Werte aus `SourceConfig.Secret` werden nie geloggt.
+- **Gerätelibraries** nehmen einen `*slog.Logger` (oder `slog.Handler`) als Option an; ohne Angabe geben sie nichts aus bzw. nutzen `slog.Default()`. Für eigene Libraries wie `goxlinkclient` ist das Pflicht.
+
+Fremde Libraries mit eigenem Logging:
+
+| Library | Vorgehen | Zuordnung zur Quelle |
+|---|---|---|
+| nimmt `*slog.Logger` bzw. `slog.Handler` | `cfg.Logger` durchreichen | ja |
+| eigenes Logger-Interface (`Printf`, logrus, zap …) | Adapter im Treiberpaket, der nach `slog` schreibt | ja |
+| Standard-Paket `log` | Monika setzt beim Start `slog.SetDefault`; seit Go 1.21 landet damit auch `log.Printf` strukturiert im selben Handler | nein (global) |
+| schreibt direkt auf `os.Stdout` | nicht abzufangen; Library anpassen oder forken | nein |
+
+Eine Isolation pro Library gibt es in einem Prozess nicht (keine Goroutine-lokalen Variablen, `os.Stdout` ist global); sie wäre nur mit eigenen Treiber-Prozessen möglich, die `docs/ARCHITECTURE.md` (Abschnitt 4) verwirft.
+
 ## Entscheidungen
 
 | # | Frage | Entscheidung |
@@ -352,3 +371,4 @@ sequenceDiagram
 | S7 | Wer verbindet neu? | der Treiber bzw. seine Gerätelibrary |
 | S8 | Hängender Treiber | 10 s nach dem Stopp `Stuck`; keine zweite Instanz, solange die alte läuft |
 | S9 | Sammelaktion auf ein Gerät | mit Treiber an das Zugangs-Element, ohne Treiber an die übrigen Elemente |
+| S10 | Logging | nur über `SourceConfig.Logger` (mit `driver`, `source_id`, `device_id`); Gerätelibraries nehmen einen `*slog.Logger` an; `log`-Ausgaben fremder Libraries landen global über `slog.SetDefault` |

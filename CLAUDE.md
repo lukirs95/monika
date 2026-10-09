@@ -21,7 +21,7 @@ Arbeitsregeln für Claude in diesem Repository.
   - Abhängigkeiten explizit über Konstruktoren verdrahten (in `cmd/monika`), kein DI-Framework
   - Goroutinen haben einen klaren Besitzer und ein klares Ende; kein Leak
   - Paketnamen kurz, klein, ohne `util`/`common`/`helpers`
-  - strukturiertes Logging mit `log/slog`
+  - strukturiertes Logging mit `log/slog`; Gerätelibraries nehmen einen `*slog.Logger` als Option an, Treiber loggen nur über den Logger aus `sdk.SourceConfig`
   - table-driven Tests
 - Code ist mit `gofmt`/`goimports` formatiert und besteht `go vet` sowie den Linter.
 
