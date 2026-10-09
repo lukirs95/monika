@@ -19,6 +19,8 @@ tags:
     description: Anmeldung, Sitzungen, TOTP, Kiosk
   - name: state
     description: Aktueller Stand, Fakten, Ereignisstrom und Abos
+  - name: inventory
+    description: Treiber, Geräte, Quellen, Gruppen, Elemente, Mitgliedschaften
 
 paths:
   /auth/login:
@@ -234,6 +236,267 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/Unprocessable' }
 
+  /drivers:
+    get:
+      tags: [inventory]
+      operationId: listDrivers
+      summary: Registrierte Treiber mit Konfigurationsschema und Aktionen
+      responses:
+        '200':
+          description: Treiber
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Driver' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /devices:
+    post:
+      tags: [inventory]
+      operationId: createDevice
+      summary: Gerät anlegen (inventory_edit global)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Element' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /devices/{device_id}:
+    delete:
+      tags: [inventory]
+      operationId: deleteDevice
+      summary: Gerät weich löschen (inventory_edit global)
+      description: |
+        Entfernt Mitgliedschaften, löscht Regeln, Rechte und Weiterleitungen mit diesem
+        Geltungsbereich, zieht aktive Befunde zurück und stoppt die Quellen. Solange ein
+        Preset-Schritt auf das Gerät oder eines seiner Elemente zielt: 409 `device_in_use`.
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
+
+  /devices/{device_id}/sources:
+    get:
+      tags: [inventory]
+      operationId: listSources
+      summary: Quellen eines Geräts mit Konfiguration und Identität (view am Gerät)
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      responses:
+        '200':
+          description: Quellen
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Source' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [inventory]
+      operationId: createSource
+      summary: Quelle anlegen, mit Zugangs-Element (inventory_edit am Gerät)
+      description: |
+        Die Konfiguration wird gegen das Schema des Treibers geprüft. Pro Gerät höchstens eine
+        Quelle je Treiber (409 `source_exists`).
+      parameters:
+        - $ref: '#/components/parameters/DeviceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SourceCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /sources/{source_id}:
+    put:
+      tags: [inventory]
+      operationId: updateSource
+      summary: Adresse, Konfiguration, Secret und Aktivierung ändern (inventory_edit am Gerät)
+      description: Die Quelle wird mit der neuen Konfiguration neu gestartet.
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SourceUpdate' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /groups:
+    post:
+      tags: [inventory]
+      operationId: createGroup
+      summary: Gruppe anlegen (inventory_edit global)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Element' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /groups/{group_id}:
+    delete:
+      tags: [inventory]
+      operationId: deleteGroup
+      summary: Gruppe weich löschen (inventory_edit global)
+      description: Solange ein Preset-Schritt auf die Gruppe zielt, 409 `group_in_use`.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
+
+  /groups/{group_id}/members:
+    post:
+      tags: [inventory]
+      operationId: addGroupMember
+      summary: Element in die Gruppe aufnehmen (inventory_edit an Gruppe und Element)
+      description: Würde ein Zyklus zwischen Gruppen entstehen, 409 `member_cycle`.
+      parameters:
+        - $ref: '#/components/parameters/GroupID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MembershipCreate' }
+      responses:
+        '201':
+          description: Aufgenommen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /memberships/{link_id}:
+    put:
+      tags: [inventory]
+      operationId: updateGroupMember
+      summary: Position und Label einer Mitgliedschaft ändern (inventory_edit an Gruppe und Element)
+      parameters:
+        - $ref: '#/components/parameters/LinkID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MembershipUpdate' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [inventory]
+      operationId: removeGroupMember
+      summary: Mitgliedschaft entfernen (inventory_edit an Gruppe und Element)
+      parameters:
+        - $ref: '#/components/parameters/LinkID'
+      responses:
+        '204': { description: Entfernt }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /elements:
+    post:
+      tags: [inventory]
+      operationId: createPlannedElement
+      summary: Treiber-Element vorab anlegen, bevor der Treiber es sieht (inventory_edit am Gerät)
+      description: Reservierte `kind`-Werte (`device`, `group`, `access`) ergeben 422 `reserved_kind`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlannedElementCreate' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Element' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /elements/{element_id}/user-fields:
+    put:
+      tags: [inventory]
+      operationId: updateUserFields
+      summary: Label, Notizen und Überwachung setzen (inventory_edit am Element)
+      description: Ersetzt alle drei Felder; `null` leert Label bzw. Notizen.
+      parameters:
+        - $ref: '#/components/parameters/ElementID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserFields' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Element' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     session:
@@ -249,6 +512,21 @@ components:
   parameters:
     ElementID:
       name: element_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DeviceID:
+      name: device_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    GroupID:
+      name: group_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LinkID:
+      name: link_id
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -271,6 +549,21 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Sichtbar, aber das Recht fehlt (`forbidden`) bzw. nur lesender Zugang (`read_only`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Widerspricht dem Stand, z. B. `source_exists`, `member_cycle`, `external_id_taken`
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    InUse:
+      description: Wird noch von Presets verwendet (`device_in_use`, `group_in_use`)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemInUse' }
     NotFound:
       description: Unbekannt oder nicht sichtbar
       content:
@@ -304,6 +597,126 @@ components:
           type: string
           description: Stabiler Fehlercode, z. B. `not_found`, `forbidden`, `read_only`, `device_in_use`, `invalid_target`, `watch_limit`
         instance: { type: string }
+
+    ProblemInUse:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [presets]
+          properties:
+            presets:
+              type: array
+              description: Presets mit Schritten auf das Objekt (nur die, die der Benutzer sehen darf)
+              items: { $ref: '#/components/schemas/PresetRef' }
+    PresetRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+
+    Driver:
+      type: object
+      required: [name, config_schema, actions, heartbeat_seconds]
+      properties:
+        name: { type: string }
+        config_schema: { type: object, additionalProperties: true, description: 'JSON-Schema für SourceCreate.config' }
+        heartbeat_seconds: { type: number, description: '0 = Sende-Ziel ohne Health-Check' }
+        actions:
+          type: array
+          items: { $ref: '#/components/schemas/ActionDef' }
+    ActionDef:
+      type: object
+      required: [name, critical]
+      properties:
+        name: { type: string }
+        params: { type: object, additionalProperties: true, nullable: true, description: 'JSON-Schema der Parameter' }
+        critical: { type: boolean }
+        timeout_seconds: { type: number, nullable: true }
+
+    DeviceCreate:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1 }
+        notes: { type: string, nullable: true }
+    GroupCreate:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1 }
+        notes: { type: string, nullable: true }
+    PlannedElementCreate:
+      type: object
+      required: [kind, device_id, source_id, external_id]
+      properties:
+        kind: { type: string }
+        device_id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid, nullable: true, description: 'Standard: das Gerät' }
+        external_id: { type: string, minLength: 1 }
+        label: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+    UserFields:
+      type: object
+      required: [label, notes, monitored]
+      properties:
+        label: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        monitored: { type: boolean }
+
+    Source:
+      type: object
+      required: [id, device_id, access_element_id, driver, config, enabled]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        access_element_id: { type: string, format: uuid }
+        driver: { type: string }
+        address: { type: string, nullable: true }
+        config: { type: object, additionalProperties: true }
+        secret_id: { type: string, format: uuid, nullable: true }
+        enabled: { type: boolean }
+        identity: { $ref: '#/components/schemas/Identity' }
+    Identity:
+      type: object
+      description: Identität des Geräts aus Sicht dieser Quelle (vom Treiber)
+      properties:
+        vendor: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        serial: { type: string, nullable: true }
+        firmware: { type: string, nullable: true }
+    SourceCreate:
+      type: object
+      required: [driver, config, enabled]
+      properties:
+        driver: { type: string }
+        address: { type: string, nullable: true }
+        config: { type: object, additionalProperties: true }
+        secret_id: { type: string, format: uuid, nullable: true }
+        enabled: { type: boolean }
+    SourceUpdate:
+      type: object
+      required: [config, enabled]
+      properties:
+        address: { type: string, nullable: true }
+        config: { type: object, additionalProperties: true }
+        secret_id: { type: string, format: uuid, nullable: true }
+        enabled: { type: boolean }
+
+    MembershipCreate:
+      type: object
+      required: [element_id]
+      properties:
+        element_id: { type: string, format: uuid, description: 'aufzunehmendes Element, Gerät oder Gruppe' }
+        position: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+    MembershipUpdate:
+      type: object
+      required: [position, label]
+      properties:
+        position: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
 
     LoginRequest:
       type: object
