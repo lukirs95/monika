@@ -8,7 +8,9 @@ Der Core hält Inventar, Fakten, Regeln, aktive Befunde und Health im Speicher u
 
 - **Eine Schleife besitzt den Zustand.** Alle Eingaben (Meldungen der Treiber, Befehle der API, Timer) laufen als Nachrichten in **eine** Goroutine, die sie nacheinander verarbeitet. Kein Zustand im Speicher wird von zwei Goroutinen gleichzeitig angefasst; es braucht keine Locks, und jede Verarbeitung sieht einen in sich stimmigen Stand.
 - **Die Komponenten sind Logik, keine Dienste.** `inventory`, `state` und `evaluation` haben keine eigenen Goroutinen. Die Schleife ruft sie in fester Reihenfolge auf und reicht die Änderungen der einen an die nächste weiter.
+- **Dienste laufen nebenher.** Supervisor (Quellen), Executor, Preset-Runner, Weiterleitung und Influx-Schreiber haben eigene Goroutinen und eigenen Zustand, aber nie Zugriff auf den Zustand der Schleife. Sie sprechen mit ihr nur über Nachrichten (`Do`, `Reporter`, Aufträge an den Supervisor), Ereignisse und die `View` (siehe [`flows.md`](flows.md)).
 - **Lesen ohne Schleife.** Nach jeder Verarbeitung veröffentlicht die Schleife eine unveränderliche Ansicht (`View`). API, Influx-Schreiber und Aktions-Executor lesen sie ohne Wartezeit.
+- **Reagieren über Ereignisse, abtasten über die `View`.** Wer auf eine Änderung reagiert (UI-Push, Weiterleitung, Prüfbedingung des Executors), abonniert Ereignisse und fragt nicht ab. Wer im festen Takt einen Stand abtastet (Influx-Schreiber), liest die `View` im Takt. Einmal lesen nach dem Anmelden gehört zum Abonnieren (siehe Abonnenten).
 - **Änderungen werden als Ereignisse verteilt.** Wer reagieren muss (UI-Push, Weiterleitung, Aktions-Executor), abonniert sie.
 - **Erst die Datenbank, dann der Speicher.** Inventar und Befunde werden geschrieben, bevor der Speicher sie übernimmt. Scheitert das Schreiben, bleibt der Speicher unverändert.
 
@@ -224,7 +226,7 @@ sequenceDiagram
     I->>S: DeleteDevice(actor, id)
     S-->>I: ok bzw. InUseError
     I-->>L: Diff (Deleted, Missing)
-    L->>L: Quellen des Geräts stoppen
+    L-)L: Supervisor beauftragen: Quellen des Geräts stoppen
     L->>E: Befunde und Health der betroffenen Elemente
     L->>L: neue View
     L->>B: Ereignisse (u. a. FindingEnded mit device_deleted)
@@ -232,7 +234,7 @@ sequenceDiagram
 ```
 
 - Jeder Befehl ist eine Transaktion im Store **und** ein Schritt der Schleife. Die API sieht nach `Do` die neue `View`.
-- Befehle, die Quellen betreffen (Gerät löschen, Quelle ändern, Secret ersetzen), lösen Start bzw. Stopp der Quelle aus (`sdk.md`, Stoppen).
+- Befehle, die Quellen betreffen (Gerät löschen, Quelle ändern, Secret ersetzen), beauftragen den Supervisor mit Start bzw. Stopp der Quelle (`sdk.md`, Stoppen). Die Schleife wartet nicht darauf; Panics und hängende Quellen meldet der Supervisor als Nachricht zurück.
 
 ## Abonnenten
 
@@ -286,7 +288,7 @@ stateDiagram-v2
 
 | # | Frage | Entscheidung |
 |---|---|---|
-| C1 | Nebenläufigkeit | eine Schleife besitzt den gesamten Zustand; Komponenten sind Logik ohne eigene Goroutinen |
+| C1 | Nebenläufigkeit | eine Schleife besitzt den gesamten Zustand im Speicher; `inventory`, `state`, `evaluation` sind Logik ohne eigene Goroutinen; Dienste (Supervisor, Executor …) laufen nebenher und sprechen nur über Nachrichten, Ereignisse und die `View` |
 | C2 | Lesen | unveränderliche `View` nach jeder Verarbeitung, ohne Locks lesbar |
 | C3 | Schreiben in die Datenbank | Inventar und Befunde sofort und synchron in der Schleife; Health gesammelt im Takt |
 | C4 | Rückstau bei Last | Reporter fasst `Update`s zusammen (neuester Wert gilt, Zwischenwerte können entfallen, Reihenfolge bleibt); das Verfahren ist Sache der Implementierung |

@@ -47,7 +47,7 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`
-   3. Abläufe: Start (inkl. `secret.Service.VerifyAndRotate`), Discovery-Lauf, Fakt → Befund → Weiterleitung, Aktion bis `confirmed`, Preset-Lauf
+   3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. Aktionen, Presets, Weiterleitung, API
 2. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
