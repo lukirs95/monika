@@ -323,6 +323,106 @@ func (b *SetForwardTargetResultBatchResults) Close() error {
 	return b.br.Close()
 }
 
+const touchSession = `-- name: TouchSession :batchexec
+UPDATE user_session SET last_seen_at = $1
+WHERE id = $2 AND last_seen_at < $1
+`
+
+type TouchSessionBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type TouchSessionParams struct {
+	At time.Time
+	ID uuid.UUID
+}
+
+func (q *Queries) TouchSession(ctx context.Context, arg []TouchSessionParams) *TouchSessionBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.At,
+			a.ID,
+		}
+		batch.Queue(touchSession, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &TouchSessionBatchResults{br, len(arg), false}
+}
+
+func (b *TouchSessionBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *TouchSessionBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
+const touchToken = `-- name: TouchToken :batchexec
+UPDATE api_token SET last_used_at = $1
+WHERE id = $2 AND (last_used_at IS NULL OR last_used_at < $1)
+`
+
+type TouchTokenBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type TouchTokenParams struct {
+	At *time.Time
+	ID uuid.UUID
+}
+
+func (q *Queries) TouchToken(ctx context.Context, arg []TouchTokenParams) *TouchTokenBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.At,
+			a.ID,
+		}
+		batch.Queue(touchToken, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &TouchTokenBatchResults{br, len(arg), false}
+}
+
+func (b *TouchTokenBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *TouchTokenBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertDriverElement = `-- name: UpsertDriverElement :batchone
 WITH prev AS (
   SELECT p.present

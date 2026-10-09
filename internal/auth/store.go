@@ -42,4 +42,24 @@ type Store interface {
 	SetGrants(ctx context.Context, actor uuid.UUID, role uuid.UUID, gs []Grant) error
 	// SetMembers ersetzt die manuellen Mitglieder einer Rolle; Mitgliedschaften aus dem IdP bleiben.
 	SetMembers(ctx context.Context, actor uuid.UUID, role uuid.UUID, users []uuid.UUID) error
+
+	CreateSession(ctx context.Context, s Session, tokenHash string) error
+	// SessionByHash liefert Sitzung und Benutzer, bei Kiosk-Sitzungen auch den Stand des Tokens
+	// (ID, ReadOnly, ExpiresAt, RevokedAt). Ob sie gilt, prüft der Aufrufer. Unbekannt: ErrNotFound.
+	SessionByHash(ctx context.Context, tokenHash string) (Session, User, Token, error)
+	// ListSessions liefert die aktiven Sitzungen eines Benutzers, neueste zuerst.
+	ListSessions(ctx context.Context, user uuid.UUID) ([]Session, error)
+	// TouchSessions aktualisiert last_seen_at gesammelt; ältere Zeitpunkte werden ignoriert.
+	TouchSessions(ctx context.Context, ts []Touch) error
+	// RevokeSession beendet eine Sitzung des Benutzers. Unbekannt oder schon beendet: ErrNotFound.
+	RevokeSession(ctx context.Context, user uuid.UUID, id uuid.UUID) error
+
+	// CreateToken legt ein Token an; gespeichert und protokolliert wird nie der Klartext.
+	CreateToken(ctx context.Context, actor uuid.UUID, t Token, tokenHash string) error
+	// TokenByHash liefert Token und Benutzer. Ob es gilt, prüft der Aufrufer. Unbekannt: ErrNotFound.
+	TokenByHash(ctx context.Context, tokenHash string) (Token, User, error)
+	ListTokens(ctx context.Context, user uuid.UUID) ([]Token, error)
+	TouchTokens(ctx context.Context, ts []Touch) error
+	// RevokeToken widerruft ein Token und beendet seine Kiosk-Sitzungen. Unbekannt: ErrNotFound.
+	RevokeToken(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 }
