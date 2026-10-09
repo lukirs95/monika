@@ -44,8 +44,12 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 
 1. **Bewertung:** Queries und Store für Regeln und Befunde, als Erweiterung von `evaluation.Store` (aktive laden, anlegen, aufheben, quittieren).
 2. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
-3. **Bootstrap in `cmd/monika`:** Konfiguration aus Umgebung/`.env` (`MONIKA_MASTER_KEY` per `secret.ParseKey`), `postgres.Open`, `postgres.Migrate`, `secret.Service.VerifyAndRotate` (bei Fehler kein Start), Verdrahtung.
-4. **Treiber-SDK (`sdk/`):** Interfaces sind noch offen; Voraussetzung für den Discovery-Sync im Core (`sdk` → `inventory`). Vertrag: vollständiger Stand, Lebenszeichen, Zähler-Helfer, reservierte Werte.
+3. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
+   1. Treiber-SDK (`sdk/`): Discovery, Fakten, Lebenszeichen, vollständiger Stand, Ausführung, Registrierung, Zähler-Helfer, reservierte Werte
+   2. Core-Komponenten: Inventar, Zustand, Bewertung und wie sie einander Änderungen melden
+   3. Abläufe: Start (inkl. `secret.Service.VerifyAndRotate`), Discovery-Lauf, Fakt → Befund → Weiterleitung, Aktion bis `confirmed`, Preset-Lauf
+   4. Aktionen, Presets, Weiterleitung, API
+4. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken
 

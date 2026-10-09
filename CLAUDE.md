@@ -7,6 +7,7 @@ Arbeitsregeln für Claude in diesem Repository.
 - Verbindlich sind `docs/ARCHITECTURE.md` (Verhalten, Architekturentscheidungen) und `docs/schema/monika.dbml` (Datenbankschema).
 - Aktueller Arbeitsstand, nächste Schritte und bekannte Lücken stehen in `docs/STATUS.md`. Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 - Die Go-Architektur entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen. Bereits festgelegt ist das Muster für die Persistenz (siehe unten).
+- **Erst Vertrag, dann Code:** Außerhalb des Stores entsteht Code erst, wenn sein Vertrag (Interfaces, Methoden, Abläufe) in `docs/contracts/` als Mermaid-Diagramm abgestimmt ist: `classDiagram` für Interfaces und Typen, `sequenceDiagram` für Abläufe, `stateDiagram-v2` für Lebenszyklen. `docs/ARCHITECTURE.md` erklärt das Warum, die Verträge legen das Wie fest.
 - Abhängigkeiten zeigen nur nach innen: `drivers/*` importiert nur `sdk/` (und die jeweilige Gerätelibrary), nie `internal/`.
 
 ## Go
@@ -35,6 +36,8 @@ Vorbild ist `internal/core/inventory` mit `internal/store/postgres`.
 - **Fachliche Operationen:** Jede Store-Methode ist eine in sich atomare fachliche Operation (z. B. `ApplyDiscovery`, `DeleteDevice`). Transaktionen öffnet und schließt nur der Store; Fachpakete sehen keine Transaktionen.
 - **Eine Implementierung:** `postgres.Store` erfüllt alle Store-Interfaces, abgesichert per `var _ paket.Store = (*Store)(nil)`. Er übersetzt zwischen Domänentypen und sqlc-Typen (Helfer in `convert.go`).
 - **sqlc-Typen verlassen `store/postgres` nie.** Fachpakete importieren weder `postgres` noch `db`; verdrahtet wird in `cmd/monika`.
+- **Nur das Fachpaket schreibt.** Jedes Store-Interface wird ausschließlich von dem Paket aufgerufen, das es definiert (Inventar und Bewertung vom Core, Secrets vom `secret.Service`). Die API schreibt nie direkt in den Store, sondern immer über das Fachpaket; sonst laufen der Zustand im Speicher des Core und die Datenbank auseinander.
+- **Lesen:** Aktueller Zustand (Inventar, Fakten, Health, aktive Befunde) kommt aus dem Speicher des Core. Verlauf (Audit, vergangene Befunde, abgeschlossene Läufe) darf die API lesend direkt aus PostgreSQL holen, über eigene, rein lesende Queries.
 - **Tests:** Der Store wird mit Integrationstests gegen PostgreSQL getestet, Fachpakete mit Unit-Tests gegen eine In-Memory-Attrappe ihres Interfaces.
 
 ## Build und Tests
