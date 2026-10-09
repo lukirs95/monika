@@ -164,6 +164,62 @@ func (b *InsertRunBatchResults) Close() error {
 	return b.br.Close()
 }
 
+const setForwardTargetResult = `-- name: SetForwardTargetResult :batchexec
+UPDATE forward_target
+SET last_sent_at = CASE WHEN $1::text IS NULL THEN $2::timestamptz ELSE last_sent_at END,
+    last_error   = $1::text
+WHERE id = $3::uuid
+`
+
+type SetForwardTargetResultBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type SetForwardTargetResultParams struct {
+	Error *string
+	At    time.Time
+	ID    uuid.UUID
+}
+
+// Ergebnis des letzten Versands, gesammelt im Takt geschrieben. Erfolg setzt last_sent_at und
+// leert last_error; ein Fehler setzt nur last_error.
+func (q *Queries) SetForwardTargetResult(ctx context.Context, arg []SetForwardTargetResultParams) *SetForwardTargetResultBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.Error,
+			a.At,
+			a.ID,
+		}
+		batch.Queue(setForwardTargetResult, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &SetForwardTargetResultBatchResults{br, len(arg), false}
+}
+
+func (b *SetForwardTargetResultBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *SetForwardTargetResultBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertDriverElement = `-- name: UpsertDriverElement :batchone
 WITH prev AS (
   SELECT p.present
