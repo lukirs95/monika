@@ -209,6 +209,11 @@ Enum permission {
   admin          [note: 'global: Benutzer, Rollen, Rechte, Weiterleitungen']
 }
 
+Enum session_kind {
+  user  [note: 'Mensch, angemeldet mit Passwort und TOTP']
+  kiosk [note: 'Dashboard, angemeldet mit einem Token mit read_only']
+}
+
 Enum forward_kind {
   syslog
   webhook
@@ -635,7 +640,8 @@ Table api_token {
   id           uuid        [pk, default: `uuidv7()`]
   user_id      uuid        [not null, ref: > app_user.id, note: 'meist ein Dienstkonto']
   name         text        [not null]
-  token_hash   text        [not null, unique, note: 'SHA-256 eines zufälligen Tokens; Klartext nur einmal bei Erstellung angezeigt']
+  token_hash   text        [not null, unique, note: 'SHA-256 eines zufälligen Tokens (monika_…); Klartext nur einmal bei Erstellung angezeigt']
+  read_only    boolean     [not null, default: false, note: 'darf nichts ändern; Voraussetzung für Kiosk-Sitzungen']
   expires_at   timestamptz
   revoked_at   timestamptz
   last_used_at timestamptz
@@ -644,6 +650,57 @@ Table api_token {
   indexes {
     user_id
   }
+}
+
+Table user_session {
+  id           uuid         [pk, default: `uuidv7()`]
+  user_id      uuid         [not null, ref: > app_user.id]
+  kind         session_kind [not null]
+  token_id     uuid         [ref: > api_token.id, note: 'nur Kiosk: das Token, mit dem angemeldet wurde; endet mit ihm']
+  token_hash   text         [not null, unique, note: 'SHA-256 des Sitzungs-Tokens aus dem Cookie']
+  created_at   timestamptz  [not null, default: `now()`]
+  last_seen_at timestamptz  [not null, default: `now()`, note: 'gesammelt aktualisiert; Leerlauf-Timeout nur bei kind = user']
+  expires_at   timestamptz  [not null, note: 'absolutes Ende']
+  revoked_at   timestamptz
+  user_agent   text
+  remote_addr  text
+
+  indexes {
+    user_id
+    token_id
+  }
+
+  checks {
+    `(kind = 'kiosk') = (token_id IS NOT NULL)` [name: 'user_session_kind_check']
+  }
+
+  Note: 'Sitzungen der UI und der Dashboards (docs/contracts/auth.md). Nur der Hash des Tokens wird gespeichert.'
+}
+
+Table user_totp {
+  user_id      uuid        [pk, ref: - app_user.id]
+  ciphertext   bytea       [not null, note: 'TOTP-Geheimnis, AES-256-GCM mit dem Master-Key; Associated Data = user_id']
+  nonce        bytea       [not null]
+  key_id       text        [not null, note: 'Fingerabdruck des Master-Keys; Rotation wie bei secret']
+  confirmed_at timestamptz [note: 'NULL = Einrichtung noch nicht bestätigt']
+  last_step    bigint      [note: 'zuletzt verwendeter Zeitschritt; ein Code gilt nur einmal']
+  created_at   timestamptz [not null, default: `now()`]
+
+  Note: 'Zweiter Faktor für interaktive lokale Benutzer. VerifyAndRotate prüft und rotiert diese Zeilen zusammen mit secret.'
+}
+
+Table user_recovery_code {
+  id         uuid        [pk, default: `uuidv7()`]
+  user_id    uuid        [not null, ref: > app_user.id]
+  code_hash  text        [not null, note: 'Hash des Wiederherstellungscodes']
+  used_at    timestamptz [note: 'NULL = noch gültig']
+  created_at timestamptz [not null, default: `now()`]
+
+  indexes {
+    user_id
+  }
+
+  Note: '10 Codes pro Einrichtung, je einmal gültig; neue Einrichtung ersetzt sie.'
 }
 
 Table audit_log {

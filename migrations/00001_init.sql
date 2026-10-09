@@ -62,6 +62,11 @@ CREATE TYPE "permission" AS ENUM (
   'admin'
 );
 
+CREATE TYPE "session_kind" AS ENUM (
+  'user',
+  'kiosk'
+);
+
 CREATE TYPE "forward_kind" AS ENUM (
   'syslog',
   'webhook'
@@ -286,9 +291,43 @@ CREATE TABLE "api_token" (
   "user_id" uuid NOT NULL,
   "name" text NOT NULL,
   "token_hash" text UNIQUE NOT NULL,
+  "read_only" boolean NOT NULL DEFAULT false,
   "expires_at" timestamptz,
   "revoked_at" timestamptz,
   "last_used_at" timestamptz,
+  "created_at" timestamptz NOT NULL DEFAULT (now())
+);
+
+CREATE TABLE "user_session" (
+  "id" uuid PRIMARY KEY DEFAULT (uuidv7()),
+  "user_id" uuid NOT NULL,
+  "kind" session_kind NOT NULL,
+  "token_id" uuid,
+  "token_hash" text UNIQUE NOT NULL,
+  "created_at" timestamptz NOT NULL DEFAULT (now()),
+  "last_seen_at" timestamptz NOT NULL DEFAULT (now()),
+  "expires_at" timestamptz NOT NULL,
+  "revoked_at" timestamptz,
+  "user_agent" text,
+  "remote_addr" text,
+  CONSTRAINT "user_session_kind_check" CHECK ((kind = 'kiosk') = (token_id IS NOT NULL))
+);
+
+CREATE TABLE "user_totp" (
+  "user_id" uuid PRIMARY KEY,
+  "ciphertext" bytea NOT NULL,
+  "nonce" bytea NOT NULL,
+  "key_id" text NOT NULL,
+  "confirmed_at" timestamptz,
+  "last_step" bigint,
+  "created_at" timestamptz NOT NULL DEFAULT (now())
+);
+
+CREATE TABLE "user_recovery_code" (
+  "id" uuid PRIMARY KEY DEFAULT (uuidv7()),
+  "user_id" uuid NOT NULL,
+  "code_hash" text NOT NULL,
+  "used_at" timestamptz,
   "created_at" timestamptz NOT NULL DEFAULT (now())
 );
 
@@ -408,6 +447,12 @@ CREATE INDEX ON "permission_grant" ("scope_element_id");
 CREATE UNIQUE INDEX "permission_grant_uq" ON "permission_grant" ((role_id), (permission), (COALESCE(scope_element_id, '00000000-0000-0000-0000-000000000000'::uuid)));
 
 CREATE INDEX ON "api_token" ("user_id");
+
+CREATE INDEX ON "user_session" ("user_id");
+
+CREATE INDEX ON "user_session" ("token_id");
+
+CREATE INDEX ON "user_recovery_code" ("user_id");
 
 CREATE INDEX ON "audit_log" ("object_type", "object_id");
 
@@ -607,7 +652,35 @@ COMMENT ON COLUMN "permission_grant"."scope_element_id" IS 'Gruppe (Mitglieder r
 
 COMMENT ON COLUMN "api_token"."user_id" IS 'meist ein Dienstkonto';
 
-COMMENT ON COLUMN "api_token"."token_hash" IS 'SHA-256 eines zufälligen Tokens; Klartext nur einmal bei Erstellung angezeigt';
+COMMENT ON COLUMN "api_token"."token_hash" IS 'SHA-256 eines zufälligen Tokens (monika_…); Klartext nur einmal bei Erstellung angezeigt';
+
+COMMENT ON COLUMN "api_token"."read_only" IS 'darf nichts ändern; Voraussetzung für Kiosk-Sitzungen';
+
+COMMENT ON TABLE "user_session" IS 'Sitzungen der UI und der Dashboards (docs/contracts/auth.md). Nur der Hash des Tokens wird gespeichert.';
+
+COMMENT ON COLUMN "user_session"."token_id" IS 'nur Kiosk: das Token, mit dem angemeldet wurde; endet mit ihm';
+
+COMMENT ON COLUMN "user_session"."token_hash" IS 'SHA-256 des Sitzungs-Tokens aus dem Cookie';
+
+COMMENT ON COLUMN "user_session"."last_seen_at" IS 'gesammelt aktualisiert; Leerlauf-Timeout nur bei kind = user';
+
+COMMENT ON COLUMN "user_session"."expires_at" IS 'absolutes Ende';
+
+COMMENT ON TABLE "user_totp" IS 'Zweiter Faktor für interaktive lokale Benutzer. VerifyAndRotate prüft und rotiert diese Zeilen zusammen mit secret.';
+
+COMMENT ON COLUMN "user_totp"."ciphertext" IS 'TOTP-Geheimnis, AES-256-GCM mit dem Master-Key; Associated Data = user_id';
+
+COMMENT ON COLUMN "user_totp"."key_id" IS 'Fingerabdruck des Master-Keys; Rotation wie bei secret';
+
+COMMENT ON COLUMN "user_totp"."confirmed_at" IS 'NULL = Einrichtung noch nicht bestätigt';
+
+COMMENT ON COLUMN "user_totp"."last_step" IS 'zuletzt verwendeter Zeitschritt; ein Code gilt nur einmal';
+
+COMMENT ON TABLE "user_recovery_code" IS '10 Codes pro Einrichtung, je einmal gültig; neue Einrichtung ersetzt sie.';
+
+COMMENT ON COLUMN "user_recovery_code"."code_hash" IS 'Hash des Wiederherstellungscodes';
+
+COMMENT ON COLUMN "user_recovery_code"."used_at" IS 'NULL = noch gültig';
 
 COMMENT ON TABLE "audit_log" IS 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.';
 
@@ -710,6 +783,14 @@ ALTER TABLE "permission_grant" ADD FOREIGN KEY ("role_id") REFERENCES "role" ("i
 ALTER TABLE "permission_grant" ADD FOREIGN KEY ("scope_element_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "api_token" ADD FOREIGN KEY ("user_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "user_session" ADD FOREIGN KEY ("user_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "user_session" ADD FOREIGN KEY ("token_id") REFERENCES "api_token" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "user_totp" ADD FOREIGN KEY ("user_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "user_recovery_code" ADD FOREIGN KEY ("user_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "audit_log" ADD FOREIGN KEY ("actor_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 

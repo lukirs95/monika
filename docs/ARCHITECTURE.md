@@ -762,7 +762,7 @@ Alles Weitere (Zugangsdaten der Geräte, Tokens für Sende-Ziele und Webhooks, s
 
 ## 15. Datenbank
 
-18 Tabellen in sieben Bereichen. Exakte Definition: `monika.dbml`.
+21 Tabellen in sieben Bereichen. Exakte Definition: `monika.dbml`.
 
 | Bereich | Tabellen |
 |---|---|
@@ -770,7 +770,7 @@ Alles Weitere (Zugangsdaten der Geräte, Tokens für Sende-Ziele und Webhooks, s
 | Zustand | `element_state` |
 | Bewertung | `rule`, `finding` |
 | Aktionen | `preset`, `preset_step`, `action_run` |
-| Benutzer und Rechte | `app_user`, `user_identity`, `role`, `role_member`, `permission_grant`, `api_token`, `audit_log` |
+| Benutzer und Rechte | `app_user`, `user_identity`, `user_session`, `user_totp`, `user_recovery_code`, `role`, `role_member`, `permission_grant`, `api_token`, `audit_log` |
 | Weiterleitung | `forward_target` |
 | Geheimnisse | `secret` |
 
@@ -814,6 +814,10 @@ erDiagram
   role ||--o{ permission_grant : "hat Rechte"
   element |o--o{ permission_grant : "scope_element_id"
   app_user ||--o{ api_token : "besitzt"
+  app_user ||--o{ user_session : "Sitzungen"
+  api_token |o--o{ user_session : "Kiosk"
+  app_user ||--o| user_totp : "zweiter Faktor"
+  app_user ||--o{ user_recovery_code : "Wiederherstellung"
 
   app_user ||--o{ action_run : "requested_by_id"
   app_user |o--o{ finding : "acked_by_id"

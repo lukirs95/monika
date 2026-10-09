@@ -555,6 +555,64 @@ func AllRuleOpValues() []RuleOp {
 	}
 }
 
+type SessionKind string
+
+const (
+	SessionKindUser  SessionKind = "user"
+	SessionKindKiosk SessionKind = "kiosk"
+)
+
+func (e *SessionKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SessionKind(s)
+	case string:
+		*e = SessionKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SessionKind: %T", src)
+	}
+	return nil
+}
+
+type NullSessionKind struct {
+	SessionKind SessionKind
+	Valid       bool // Valid is true if SessionKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSessionKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.SessionKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SessionKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSessionKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SessionKind), nil
+}
+
+func (e SessionKind) Valid() bool {
+	switch e {
+	case SessionKindUser,
+		SessionKindKiosk:
+		return true
+	}
+	return false
+}
+
+func AllSessionKindValues() []SessionKind {
+	return []SessionKind{
+		SessionKindUser,
+		SessionKindKiosk,
+	}
+}
+
 type Severity string
 
 const (
@@ -654,8 +712,10 @@ type ApiToken struct {
 	// meist ein Dienstkonto
 	UserID uuid.UUID
 	Name   string
-	// SHA-256 eines zufälligen Tokens; Klartext nur einmal bei Erstellung angezeigt
-	TokenHash  string
+	// SHA-256 eines zufälligen Tokens (monika_…); Klartext nur einmal bei Erstellung angezeigt
+	TokenHash string
+	// darf nichts ändern; Voraussetzung für Kiosk-Sitzungen
+	ReadOnly   bool
 	ExpiresAt  *time.Time
 	RevokedAt  *time.Time
 	LastUsedAt *time.Time
@@ -981,4 +1041,49 @@ type UserIdentity struct {
 	Subject    string
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
+}
+
+// 10 Codes pro Einrichtung, je einmal gültig; neue Einrichtung ersetzt sie.
+type UserRecoveryCode struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+	// Hash des Wiederherstellungscodes
+	CodeHash string
+	// NULL = noch gültig
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
+// Sitzungen der UI und der Dashboards (docs/contracts/auth.md). Nur der Hash des Tokens wird gespeichert.
+type UserSession struct {
+	ID     uuid.UUID
+	UserID uuid.UUID
+	Kind   SessionKind
+	// nur Kiosk: das Token, mit dem angemeldet wurde; endet mit ihm
+	TokenID *uuid.UUID
+	// SHA-256 des Sitzungs-Tokens aus dem Cookie
+	TokenHash string
+	CreatedAt time.Time
+	// gesammelt aktualisiert; Leerlauf-Timeout nur bei kind = user
+	LastSeenAt time.Time
+	// absolutes Ende
+	ExpiresAt  time.Time
+	RevokedAt  *time.Time
+	UserAgent  *string
+	RemoteAddr *string
+}
+
+// Zweiter Faktor für interaktive lokale Benutzer. VerifyAndRotate prüft und rotiert diese Zeilen zusammen mit secret.
+type UserTotp struct {
+	UserID uuid.UUID
+	// TOTP-Geheimnis, AES-256-GCM mit dem Master-Key; Associated Data = user_id
+	Ciphertext []byte
+	Nonce      []byte
+	// Fingerabdruck des Master-Keys; Rotation wie bei secret
+	KeyID string
+	// NULL = Einrichtung noch nicht bestätigt
+	ConfirmedAt *time.Time
+	// zuletzt verwendeter Zeitschritt; ein Code gilt nur einmal
+	LastStep  *int64
+	CreatedAt time.Time
 }
