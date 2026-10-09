@@ -24,6 +24,8 @@ Stand: 2026-10-08
 - **Zustand** (2026-10-08): `evaluation.Store` mit `LoadHealth`/`SaveHealth` für `element_state`; unveränderte Werte lassen die Zeile unberührt.
 - **Bewertung** (2026-10-09): Regeln und Befunde in `evaluation.Store`; Regeln mit Audit, Löschen/Deaktivieren zieht aktive Befunde zurück; Befunde mit `ErrAlreadyActive`, Ende mit Grund, Ursache, Quittierung.
 - **Presets** (2026-10-09): `preset.Store`; Ziele und ihre Geräte werden beim Speichern gesperrt und auf Löschung geprüft (Race mit `DeleteDevice`/`DeleteGroup` per Test abgesichert); Schritte behalten beim Ändern ihre IDs; Audit mit Schritten am Ende der Transaktion. **Damit ist der Store vorerst vollständig.**
+- **Verträge** (2026-10-09): `docs/contracts/` – SDK, Core, Abläufe, Dienste, Anmeldung, API (OpenAPI 3.0.3); `make docs-check`, `make api-check`.
+- **Schema und Stores aus den Verträgen** (2026-10-09): Tabellen `user_session`, `user_totp`, `user_recovery_code`, `api_token.read_only`; `action.Store`, `forward.Store`, `auth.Store` (Benutzer, Rollen, Rechte, Sitzungen, Tokens, TOTP); `secret.Vault` für die gemeinsame Rotation von Secrets und TOTP.
 - **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
 
 ## Architektur-Durchsicht (2026-10-08)
@@ -50,11 +52,12 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
    5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api.yaml` (OpenAPI 3.0.3, `make api-check`)
-2. **Schema nachziehen** aus den Verträgen: `user_session`, `user_totp`, `user_recovery_code`, `api_token.read_only` (`auth.md`); Store-Methoden für `action.Store`, `forward.Store`, `auth.Store`.
-3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
+2. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken
 
+- `inventory.Source` kennt die ID ihres Zugangs-Elements nicht; die API (`Source.access_element_id`) braucht sie.
+- Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
 - `CreatePlannedElement` nimmt auch Elemente gelöschter Geräte an und prüft keine reservierten `kind`-Werte (Prüfung gehört in den Core).
 - Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
 - `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.

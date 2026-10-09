@@ -89,3 +89,29 @@ func replaceRecoveryCodes(ctx context.Context, q *db.Queries, user uuid.UUID, ha
 	})
 	return err
 }
+
+// TOTPVault macht die TOTP-Geheimnisse zu einem secret.Vault, damit VerifyAndRotate sie beim Start
+// zusammen mit den Secrets prüft und rotiert.
+type TOTPVault struct{ store *Store }
+
+var _ secret.Vault = TOTPVault{}
+
+// TOTPVault liefert den Vault der TOTP-Geheimnisse für secret.NewService.
+func (s *Store) TOTPVault() TOTPVault { return TOTPVault{store: s} }
+
+func (v TOTPVault) ListEncrypted(ctx context.Context) ([]secret.Encrypted, error) {
+	rows, err := v.store.q.ListTOTPValues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r db.ListTOTPValuesRow) secret.Encrypted {
+		return secret.Encrypted{ID: r.UserID, Ciphertext: r.Ciphertext, Nonce: r.Nonce, KeyID: r.KeyID}
+	}), nil
+}
+
+func (v TOTPVault) Reencrypt(ctx context.Context, e secret.Encrypted) error {
+	n, err := v.store.q.ReencryptTOTP(ctx, db.ReencryptTOTPParams{
+		UserID: e.ID, Ciphertext: e.Ciphertext, Nonce: e.Nonce, KeyID: e.KeyID,
+	})
+	return affected(n, err, secret.ErrNotFound)
+}

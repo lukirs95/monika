@@ -136,3 +136,52 @@ func TestSecretServiceOnPostgres(t *testing.T) {
 		t.Fatalf("Value = %s, %v; want original value", got, err)
 	}
 }
+
+// Die TOTP-Geheimnisse werden beim Start zusammen mit den Secrets rotiert.
+func TestRotationIncludesTOTP(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	store := postgres.New(pool)
+	anna := newUser(t, pool)
+	key := func() secret.Key {
+		b := make([]byte, 32)
+		rand.Read(b)
+		k, err := secret.ParseKey(base64.StdEncoding.EncodeToString(b))
+		if err != nil {
+			t.Fatalf("ParseKey: %v", err)
+		}
+		return k
+	}
+	oldKey, newKey := key(), key()
+
+	old, err := secret.NewService(store, secret.Keys{Current: oldKey}, slog.New(slog.DiscardHandler), store.TOTPVault())
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	seed, err := old.Seal(anna, []byte("totp-seed"))
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if err := store.SaveTOTP(ctx, anna, seed); err != nil {
+		t.Fatalf("SaveTOTP: %v", err)
+	}
+	if _, err := old.Create(ctx, uuid.Nil, "xlink-admin", "", json.RawMessage(`{"password": "geheim"}`)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	rotated, err := secret.NewService(store, secret.Keys{Current: newKey, Previous: oldKey}, slog.New(slog.DiscardHandler), store.TOTPVault())
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if n, err := rotated.VerifyAndRotate(ctx); err != nil || n != 2 {
+		t.Fatalf("VerifyAndRotate = %d, %v; want secret and TOTP rotated", n, err)
+	}
+	totp, err := store.TOTP(ctx, anna)
+	if err != nil || totp.Value.KeyID != newKey.ID() {
+		t.Fatalf("TOTP = %+v, %v; want new key", totp, err)
+	}
+	if got, err := rotated.Open(totp.Value); err != nil || string(got) != "totp-seed" {
+		t.Fatalf("Open = %q, %v; want totp-seed", got, err)
+	}
+}

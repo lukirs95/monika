@@ -169,8 +169,8 @@ func TestVerifyAndRotate(t *testing.T) {
 	// Ohne den passenden Schlüssel startet Monika nicht, und nichts wird verändert.
 	foreign, _ := newTestService(t, store, Keys{Current: newTestKey(t), Previous: oldKey})
 	snapshot := store.values[ids[0]]
-	if _, err := foreign.VerifyAndRotate(ctx); err == nil || !strings.Contains(err.Error(), "2 of 2 secrets") {
-		t.Fatalf("VerifyAndRotate with foreign key = %v, want error naming 2 of 2 secrets", err)
+	if _, err := foreign.VerifyAndRotate(ctx); err == nil || !strings.Contains(err.Error(), "2 of 2 encrypted values") {
+		t.Fatalf("VerifyAndRotate with foreign key = %v, want error naming 2 of 2 values", err)
 	}
 	if !bytes.Equal(store.values[ids[0]].Ciphertext, snapshot.Ciphertext) {
 		t.Fatal("secret changed although verification failed")
@@ -192,5 +192,58 @@ func TestVerifyAndRotateRefusesTamperedValue(t *testing.T) {
 
 	if _, err := s.VerifyAndRotate(ctx); err == nil {
 		t.Fatal("VerifyAndRotate accepted a tampered secret")
+	}
+}
+
+// memVault ist ein weiterer verschlüsselter Bestand, z. B. TOTP-Geheimnisse.
+type memVault map[uuid.UUID]Encrypted
+
+func (m memVault) ListEncrypted(context.Context) ([]Encrypted, error) {
+	var out []Encrypted
+	for _, v := range m {
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (m memVault) Reencrypt(_ context.Context, v Encrypted) error {
+	m[v.ID] = v
+	return nil
+}
+
+func TestVaultsAreRotatedAndVerified(t *testing.T) {
+	ctx := t.Context()
+	oldKey, newKey := newTestKey(t), newTestKey(t)
+	vault := memVault{}
+
+	before, _ := newTestService(t, newMemStore(), Keys{Current: oldKey})
+	user := uuid.Must(uuid.NewV7())
+	enc, err := before.Seal(user, []byte("totp-seed"))
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	vault[user] = enc
+
+	var log bytes.Buffer
+	s, err := NewService(newMemStore(), Keys{Current: newKey, Previous: oldKey}, slog.New(slog.NewTextHandler(&log, nil)), vault)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if n, err := s.VerifyAndRotate(ctx); err != nil || n != 1 {
+		t.Fatalf("VerifyAndRotate = %d, %v; want 1 rotated vault value", n, err)
+	}
+	if vault[user].KeyID != newKey.ID() {
+		t.Fatalf("vault value still uses key %s", vault[user].KeyID)
+	}
+	if got, err := s.Open(vault[user]); err != nil || string(got) != "totp-seed" {
+		t.Fatalf("Open = %q, %v; want totp-seed", got, err)
+	}
+
+	// Ein unlesbarer Wert in einem Vault verhindert den Start wie ein unlesbares Secret.
+	foreign, _ := newTestService(t, newMemStore(), Keys{Current: newTestKey(t)})
+	other, _ := foreign.Seal(uuid.Must(uuid.NewV7()), []byte("x"))
+	vault[other.ID] = other
+	if _, err := s.VerifyAndRotate(ctx); err == nil {
+		t.Fatal("VerifyAndRotate accepted a vault value with an unknown key")
 	}
 }

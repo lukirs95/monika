@@ -24,19 +24,54 @@ type Keys struct {
 	Previous Key
 }
 
+// Vault ist ein Bestand von Werten, die mit dem Master-Key verschlüsselt sind (z. B. die
+// TOTP-Geheimnisse). VerifyAndRotate prüft und rotiert alle Vaults zusammen mit den Secrets.
+type Vault interface {
+	ListEncrypted(ctx context.Context) ([]Encrypted, error)
+	Reencrypt(ctx context.Context, v Encrypted) error
+}
+
+// storeVault macht die Secrets selbst zu einem Vault.
+type storeVault struct{ Store }
+
+func (v storeVault) ListEncrypted(ctx context.Context) ([]Encrypted, error) {
+	return v.ListSecretValues(ctx)
+}
+
+func (v storeVault) Reencrypt(ctx context.Context, e Encrypted) error {
+	return v.ReencryptSecret(ctx, e)
+}
+
 // Service ver- und entschlüsselt Secrets und legt sie im Store ab.
 type Service struct {
 	store  Store
+	vaults []Vault // Secrets zuerst, dann weitere Bestände
 	keys   Keys
 	logger *slog.Logger
 }
 
-// NewService erzeugt den Service. Ohne aktuellen Master-Key: Fehler.
-func NewService(store Store, keys Keys, logger *slog.Logger) (*Service, error) {
+// NewService erzeugt den Service. vaults sind weitere verschlüsselte Bestände, die beim Start
+// geprüft und rotiert werden. Ohne aktuellen Master-Key: Fehler.
+func NewService(store Store, keys Keys, logger *slog.Logger, vaults ...Vault) (*Service, error) {
 	if keys.Current.IsZero() {
 		return nil, errors.New("no current master key")
 	}
-	return &Service{store: store, keys: keys, logger: logger}, nil
+	return &Service{store: store, vaults: append([]Vault{storeVault{store}}, vaults...), keys: keys, logger: logger}, nil
+}
+
+// Seal verschlüsselt beliebige Bytes mit dem aktuellen Master-Key; id ist Associated Data.
+// Für Bestände außerhalb der Secrets, z. B. TOTP-Geheimnisse (Vault).
+func (s *Service) Seal(id uuid.UUID, plaintext []byte) (Encrypted, error) {
+	return s.keys.Current.seal(id, plaintext)
+}
+
+// Open entschlüsselt einen Wert, der mit dem aktuellen oder vorigen Master-Key verschlüsselt ist.
+func (s *Service) Open(e Encrypted) ([]byte, error) {
+	key, err := s.keyFor(e)
+	if err != nil {
+		return nil, err
+	}
+	return key.open(e)
 }
 
 // Create legt ein Secret an; der Klartext ist JSON, sein Format legt der Treiber fest.
@@ -94,52 +129,62 @@ func (s *Service) Delete(ctx context.Context, actor uuid.UUID, id uuid.UUID) err
 	return s.store.DeleteSecret(ctx, actor, id)
 }
 
-// VerifyAndRotate läuft beim Start. Es entschlüsselt jedes Secret zur Probe; ist eines nicht
-// lesbar, wird nichts rotiert und Monika darf nicht starten. Danach verschlüsselt es alle Secrets
-// mit dem vorigen Schlüssel neu mit dem aktuellen und liefert ihre Anzahl. Bricht das mittendrin
-// ab, setzt der nächste Start mit beiden Schlüsseln fort.
+// VerifyAndRotate läuft beim Start. Es entschlüsselt jeden Wert aller Vaults (Secrets, TOTP …)
+// zur Probe; ist einer nicht lesbar, wird nichts rotiert und Monika darf nicht starten. Danach
+// verschlüsselt es alle Werte mit dem vorigen Schlüssel neu mit dem aktuellen und liefert ihre
+// Anzahl. Bricht das mittendrin ab, setzt der nächste Start mit beiden Schlüsseln fort.
 func (s *Service) VerifyAndRotate(ctx context.Context) (rotated int, err error) {
-	all, err := s.store.ListSecretValues(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("list secrets: %w", err)
+	type staleValue struct {
+		vault     Vault
+		value     Encrypted
+		plaintext []byte
 	}
-
-	var errs []error
-	var stale []Encrypted
-	plaintexts := make(map[uuid.UUID][]byte)
-	for _, enc := range all {
-		key, err := s.keyFor(enc)
-		if err == nil {
-			plaintexts[enc.ID], err = key.open(enc)
-		}
+	var (
+		errs  []error
+		stale []staleValue
+		total int
+	)
+	for _, v := range s.vaults {
+		all, err := v.ListEncrypted(ctx)
 		if err != nil {
-			errs = append(errs, err)
-			continue
+			return 0, fmt.Errorf("list encrypted values: %w", err)
 		}
-		if key.ID() != s.keys.Current.ID() {
-			stale = append(stale, enc)
+		total += len(all)
+		for _, enc := range all {
+			key, err := s.keyFor(enc)
+			var plaintext []byte
+			if err == nil {
+				plaintext, err = key.open(enc)
+			}
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if key.ID() != s.keys.Current.ID() {
+				stale = append(stale, staleValue{vault: v, value: enc, plaintext: plaintext})
+			}
 		}
 	}
 	if len(errs) > 0 {
-		return 0, fmt.Errorf("%d of %d secrets cannot be decrypted with the given master keys: %w",
-			len(errs), len(all), errors.Join(errs...))
+		return 0, fmt.Errorf("%d of %d encrypted values cannot be decrypted with the given master keys: %w",
+			len(errs), total, errors.Join(errs...))
 	}
 
-	for _, enc := range stale {
-		fresh, err := s.keys.Current.seal(enc.ID, plaintexts[enc.ID])
+	for _, st := range stale {
+		fresh, err := s.keys.Current.seal(st.value.ID, st.plaintext)
 		if err != nil {
 			return rotated, err
 		}
-		if err := s.store.ReencryptSecret(ctx, fresh); err != nil {
-			return rotated, fmt.Errorf("re-encrypt secret %s: %w", enc.ID, err)
+		if err := st.vault.Reencrypt(ctx, fresh); err != nil {
+			return rotated, fmt.Errorf("re-encrypt %s: %w", st.value.ID, err)
 		}
 		rotated++
 	}
 	if rotated > 0 {
-		s.logger.InfoContext(ctx, "secrets re-encrypted with the current master key", "count", rotated)
+		s.logger.InfoContext(ctx, "values re-encrypted with the current master key", "count", rotated)
 	}
 	if !s.keys.Previous.IsZero() && len(stale) == 0 {
-		s.logger.InfoContext(ctx, "no secret uses the previous master key any more; MONIKA_MASTER_KEY_PREVIOUS can be removed")
+		s.logger.InfoContext(ctx, "no value uses the previous master key any more; MONIKA_MASTER_KEY_PREVIOUS can be removed")
 	}
 	return rotated, nil
 }
