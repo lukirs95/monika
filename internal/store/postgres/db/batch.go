@@ -267,3 +267,83 @@ func (b *UpsertElementHealthBatchResults) Close() error {
 	b.closed = true
 	return b.br.Close()
 }
+
+const upsertPresetStep = `-- name: UpsertPresetStep :batchone
+INSERT INTO preset_step (id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, driver)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (id) DO UPDATE
+SET stage             = excluded.stage,
+    position          = excluded.position,
+    delay_ms          = excluded.delay_ms,
+    element_id        = excluded.element_id,
+    action            = excluded.action,
+    params            = excluded.params,
+    continue_on_error = excluded.continue_on_error,
+    driver            = excluded.driver
+WHERE preset_step.preset_id = excluded.preset_id
+RETURNING id
+`
+
+type UpsertPresetStepBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertPresetStepParams struct {
+	ID              uuid.UUID
+	PresetID        uuid.UUID
+	Stage           int32
+	Position        int32
+	DelayMs         int32
+	ElementID       uuid.UUID
+	Action          string
+	Params          json.RawMessage
+	ContinueOnError bool
+	Driver          *string
+}
+
+// Ein Schritt wechselt nie das Preset: Gehört die ID zu einem anderen, kommt keine Zeile zurück.
+func (q *Queries) UpsertPresetStep(ctx context.Context, arg []UpsertPresetStepParams) *UpsertPresetStepBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ID,
+			a.PresetID,
+			a.Stage,
+			a.Position,
+			a.DelayMs,
+			a.ElementID,
+			a.Action,
+			a.Params,
+			a.ContinueOnError,
+			a.Driver,
+		}
+		batch.Queue(upsertPresetStep, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertPresetStepBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertPresetStepBatchResults) QueryRow(f func(int, uuid.UUID, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		var id uuid.UUID
+		if b.closed {
+			if f != nil {
+				f(t, id, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		row := b.br.QueryRow()
+		err := row.Scan(&id)
+		if f != nil {
+			f(t, id, err)
+		}
+	}
+}
+
+func (b *UpsertPresetStepBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}

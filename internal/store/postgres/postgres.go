@@ -12,6 +12,7 @@ import (
 
 	"github.com/lukirs95/monika/internal/core/evaluation"
 	"github.com/lukirs95/monika/internal/core/inventory"
+	"github.com/lukirs95/monika/internal/preset"
 	"github.com/lukirs95/monika/internal/secret"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
 )
@@ -20,6 +21,7 @@ var (
 	_ inventory.Store  = (*Store)(nil)
 	_ secret.Store     = (*Store)(nil)
 	_ evaluation.Store = (*Store)(nil)
+	_ preset.Store     = (*Store)(nil)
 )
 
 // Store implementiert die Store-Interfaces der Fachpakete auf PostgreSQL.
