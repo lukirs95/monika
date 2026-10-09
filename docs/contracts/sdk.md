@@ -137,6 +137,11 @@ classDiagram
         +Unit string
         +Critical bool
     }
+    class Param {
+        <<struct>>
+        +Setting
+        +Default any
+    }
     class Condition {
         <<struct>>
         +Fact string
@@ -158,6 +163,7 @@ classDiagram
     Snapshot *-- Link
     Snapshot *-- Alarm
     Element *-- Setting
+    Param --|> Setting
     ActionDef *-- Condition
     Link *-- Endpoint
 ```
@@ -176,6 +182,8 @@ classDiagram
 | `Endpoint` | entweder `ExternalID` (Element dieser Quelle) oder `GlobalRef` (Element einer anderen Quelle, ggf. noch unbekannt) |
 | `Result.Status` | `Accepted` oder `Rejected`; ein `error` aus `Execute` bedeutet `failed` (nicht erreicht, Transportfehler) |
 | `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical` |
+| `Element.Attributes` | statische Attribute, nur zur Anzeige. Reservierter Schlüssel `params` bei Sende-Zielen (`kind = trigger`): Parameter-Schema des Aufrufs als Map auf `Param`; die UI baut daraus das Formular, der Treiber prüft die Werte bei `Execute` selbst |
+| `Param` | wie `Setting`, zusätzlich `Default` (`bool`, `float64` oder `string`) |
 | `Condition.Value` | JSON-Wert als Text, darf Platzhalter enthalten |
 | `ActionDef.Verify` | Prüfbedingung mit Platzhaltern aus den Parametern (z. B. `bitrate eq {{bitrate}}`); bei `set` erzeugt der Core sie selbst aus den gesetzten Werten |
 

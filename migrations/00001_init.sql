@@ -449,7 +449,7 @@ COMMENT ON COLUMN "element"."direction" IS 'Fähigkeit des Anschlusses; die aktu
 
 COMMENT ON COLUMN "element"."name" IS 'Name, wie das Gerät ihn meldet';
 
-COMMENT ON COLUMN "element"."attributes" IS 'statische Treiber-Attribute, nur zur Anzeige';
+COMMENT ON COLUMN "element"."attributes" IS 'statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)';
 
 COMMENT ON COLUMN "element"."position" IS 'Sortierung innerhalb des Parents';
 

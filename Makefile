@@ -16,6 +16,7 @@ DBML2SQL       := $(DOCKER) run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false \
 SQLC           := $(DOCKER) run --rm --user $$(id -u):$$(id -g) -v $(CURDIR):/src -w /src sqlc/sqlc:1.31.1
 POSTGRES_IMAGE := postgres:18-alpine
 MERMAID_IMAGE  := minlag/mermaid-cli:12.0.0
+REDOCLY_IMAGE  := redocly/cli:2.62.0
 
 DATABASE_URL ?= postgres://monika:monika@127.0.0.1:5432/monika?sslmode=disable
 
@@ -54,6 +55,10 @@ docs-check: ## Rendert alle Mermaid-Diagramme in docs/ und bricht bei Syntaxfehl
 	      if mmdc -p /puppeteer-config.json -q -i "/data/$$f" -o "/tmp/out.md" >/tmp/log 2>&1; then echo "ok    $$f"; \
 	      else echo "FEHLER $$f"; grep -m1 -A3 "Error" /tmp/log; status=1; fi; \
 	    done; exit $$status' sh $$files
+
+.PHONY: api-check
+api-check: ## Prüft die OpenAPI-Spezifikation docs/contracts/api.yaml
+	$(DOCKER) run --rm -v $(CURDIR):/spec:ro -w /spec $(REDOCLY_IMAGE) lint --format=stylish docs/contracts/api.yaml
 
 # --- Datenbank ---------------------------------------------------------------
 

@@ -1,0 +1,623 @@
+openapi: 3.0.3
+info:
+  title: Monika API
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  description: |
+    HTTP-API von Monika. Konventionen, Filter und das Abo-Modell stehen in `docs/contracts/api.md`.
+    Fehler sind Problem Details (RFC 9457) mit stabilem `code`. Zeitpunkte sind RFC 3339 in UTC,
+    IDs UUIDs, Feldnamen snake_case.
+servers:
+  - url: /api/v1
+security:
+  - session: []
+  - bearer: []
+tags:
+  - name: auth
+    description: Anmeldung, Sitzungen, TOTP, Kiosk
+  - name: state
+    description: Aktueller Stand, Fakten, Ereignisstrom und Abos
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Erster Schritt der Anmeldung mit Benutzername und Passwort
+      description: |
+        Liefert immer eine Challenge für den zweiten Schritt; ist TOTP noch nicht eingerichtet,
+        ist `needs_enrollment` gesetzt. Fehler sind für „unbekannt“ und „falsches Passwort“ gleich.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Passwort richtig, zweiter Schritt erforderlich
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginStep' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/login/totp:
+    post:
+      tags: [auth]
+      operationId: loginTOTP
+      summary: Zweiter Schritt mit TOTP-Code oder Wiederherstellungscode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecondFactorRequest' }
+      responses:
+        '204': { $ref: '#/components/responses/SessionCreated' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/totp/enroll:
+    post:
+      tags: [auth]
+      operationId: enrollTOTP
+      summary: TOTP einrichten (bei der ersten Anmeldung erzwungen)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChallengeRequest' }
+      responses:
+        '200':
+          description: Geheimnis als otpauth-URL (QR-Code) und zum Abtippen
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/totp/confirm:
+    post:
+      tags: [auth]
+      operationId: confirmTOTP
+      summary: Einrichtung mit einem Code aus der App bestätigen; schließt die Anmeldung ab
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SecondFactorRequest' }
+      responses:
+        '200':
+          description: Eingerichtet und angemeldet; Wiederherstellungscodes werden nur jetzt angezeigt
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecoveryCodes' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/kiosk:
+    post:
+      tags: [auth]
+      operationId: kioskLogin
+      summary: Kiosk-Sitzung für ein Dashboard aus einem Token mit read_only
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KioskRequest' }
+      responses:
+        '204': { $ref: '#/components/responses/SessionCreated' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Sitzung beenden
+      security:
+        - session: []
+      responses:
+        '204':
+          description: Abgemeldet; das Cookie wird gelöscht
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/ClearSessionCookie' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Der angemeldete Benutzer und seine Rechte
+      responses:
+        '200':
+          description: Angemeldeter Benutzer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /state:
+    get:
+      tags: [state]
+      operationId: getState
+      summary: Aktueller Stand ohne Fakten, gefiltert nach Rechten
+      description: |
+        Inventar und Links, Health und Rollups, aktive Befunde, laufende Läufe und der Zustand der
+        Quellen. Gelöschte Geräte und Gruppen fehlen; verschwundene Elemente sind enthalten
+        (`present = false`). Fakten gibt es pro Element bzw. per Abo.
+      responses:
+        '200':
+          description: Stand mit Version der View
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/State' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /elements/{element_id}/facts:
+    get:
+      tags: [state]
+      operationId: getElementFacts
+      summary: Aktuelle Fakten eines Elements
+      parameters:
+        - $ref: '#/components/parameters/ElementID'
+      responses:
+        '200':
+          description: Fakten mit Version der View
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ElementFacts' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /events:
+    get:
+      tags: [state]
+      operationId: getEvents
+      summary: Ereignisstrom (Server-Sent Events)
+      description: |
+        Erstes Ereignis ist `hello` mit der `stream_id`. Jedes Ereignis trägt als SSE-`id` die
+        Version der View; nach einem Abbruch sendet der Browser sie als `Last-Event-ID`. Ist sie zu
+        alt, folgt `resync`, und der Client lädt `/state` neu. `facts_changed` kommt nur für
+        beobachtete Elemente (siehe `/events/{stream_id}/watch`).
+
+        Ereignistypen (SSE `event`) und Nutzdaten (SSE `data`, JSON):
+        `hello` → EventHello, `resync` → leer, `elements_changed` → EventElementsChanged,
+        `facts_changed` → EventFactsChanged, `health_changed` → EventHealthChanged,
+        `finding_raised` / `finding_acked` → Finding, `finding_ended` → EventFindingEnded,
+        `run_changed` → RunSummary, `source_status_changed` → SourceStatus.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Strom von Ereignissen
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /events/{stream_id}/watch:
+    post:
+      tags: [state]
+      operationId: watch
+      summary: Beobachtete Geltungsbereiche eines Stroms ändern
+      description: |
+        Beobachtet werden Elemente, Geräte oder Gruppen (jeweils mit Inhalt). Die Abos gehören zum
+        Strom und enden mit ihm. Die Antwort enthält die aktuellen Fakten aller neu beobachteten
+        Elemente. Höchstens 1 000 beobachtete Elemente pro Strom.
+      parameters:
+        - name: stream_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WatchRequest' }
+      responses:
+        '200':
+          description: Abos geändert; aktuelle Fakten der neu beobachteten Elemente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: monika_session
+      description: Sitzung der UI bzw. Kiosk-Sitzung (HttpOnly, Secure, SameSite=Strict)
+    bearer:
+      type: http
+      scheme: bearer
+      description: API-Token eines Dienstkontos (`monika_…`)
+
+  parameters:
+    ElementID:
+      name: element_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  headers:
+    SetSessionCookie:
+      description: '`monika_session=…; HttpOnly; Secure; SameSite=Strict; Path=/`'
+      schema: { type: string }
+    ClearSessionCookie:
+      description: Löscht das Sitzungs-Cookie
+      schema: { type: string }
+
+  responses:
+    SessionCreated:
+      description: Angemeldet; Sitzung im Cookie
+      headers:
+        Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+    Unauthorized:
+      description: Nicht angemeldet bzw. Anmeldung fehlgeschlagen
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Unbekannt oder nicht sichtbar
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unprocessable:
+      description: Inhaltlich ungültig
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Zu viele Fehlversuche; erneut nach Retry-After
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri, example: 'https://monika.invalid/problems/device_in_use' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: Stabiler Fehlercode, z. B. `not_found`, `forbidden`, `read_only`, `device_in_use`, `invalid_target`, `watch_limit`
+        instance: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    LoginStep:
+      type: object
+      required: [challenge, needs_enrollment]
+      properties:
+        challenge: { type: string, description: 'Gültig 5 min, höchstens 5 Versuche' }
+        needs_enrollment: { type: boolean }
+    ChallengeRequest:
+      type: object
+      required: [challenge]
+      properties:
+        challenge: { type: string }
+    SecondFactorRequest:
+      type: object
+      required: [challenge, code]
+      properties:
+        challenge: { type: string }
+        code: { type: string, description: '6-stelliger TOTP-Code oder Wiederherstellungscode' }
+    Enrollment:
+      type: object
+      required: [otpauth_url, secret]
+      properties:
+        otpauth_url: { type: string }
+        secret: { type: string, description: 'Base32, zum Abtippen' }
+    RecoveryCodes:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items: { type: string }
+          minItems: 10
+          maxItems: 10
+    KioskRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, format: password }
+    Me:
+      type: object
+      required: [user_id, username, service, read_only, grants]
+      properties:
+        user_id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string }
+        service: { type: boolean }
+        read_only: { type: boolean }
+        grants:
+          type: array
+          description: Vereinigung der Rechte aller Rollen, für die UI (Knöpfe ein-/ausblenden)
+          items: { $ref: '#/components/schemas/Grant' }
+    Grant:
+      type: object
+      required: [permission]
+      properties:
+        permission:
+          type: string
+          enum: [view, acknowledge, operate, configure, critical, inventory_edit, rule_edit, preset_run, preset_edit, admin]
+        scope_element_id: { type: string, format: uuid, nullable: true }
+
+    State:
+      type: object
+      required: [version, elements, links, health, findings, runs, sources]
+      properties:
+        version: { type: integer, format: int64 }
+        elements:
+          type: array
+          items: { $ref: '#/components/schemas/Element' }
+        links:
+          type: array
+          items: { $ref: '#/components/schemas/Link' }
+        health:
+          type: array
+          items: { $ref: '#/components/schemas/ElementHealth' }
+        findings:
+          type: array
+          description: aktive Befunde
+          items: { $ref: '#/components/schemas/Finding' }
+        runs:
+          type: array
+          description: laufende Läufe
+          items: { $ref: '#/components/schemas/RunSummary' }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/SourceStatus' }
+
+    Element:
+      type: object
+      required: [id, kind, present, monitored, actions, critical_actions]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, description: 'device, group, access, module, port, …' }
+        parent_id: { type: string, format: uuid, nullable: true }
+        device_id: { type: string, format: uuid, nullable: true }
+        source_id: { type: string, format: uuid, nullable: true }
+        external_id: { type: string, nullable: true }
+        global_ref: { type: string, nullable: true }
+        transport: { type: string, nullable: true }
+        direction: { type: string, enum: [in, out, bidir], nullable: true }
+        name: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        position: { type: integer, nullable: true }
+        attributes:
+          type: object
+          additionalProperties: true
+          description: |
+            Statische Treiber-Attribute, nur zur Anzeige. Reservierter Schlüssel `params`
+            (nur bei Sende-Zielen, `kind = trigger`): Parameter-Schema des Aufrufs als Map auf
+            Param; die UI baut daraus das Formular für `trigger`.
+          properties:
+            params:
+              type: object
+              additionalProperties: { $ref: '#/components/schemas/Param' }
+        actions:
+          type: array
+          items: { type: string }
+        critical_actions:
+          type: array
+          items: { type: string }
+        settings:
+          type: object
+          nullable: true
+          description: Schreibbare Fakt-Schlüssel (für `set`); der Schlüssel ist der Fakt-Schlüssel
+          additionalProperties: { $ref: '#/components/schemas/Setting' }
+        present: { type: boolean }
+        monitored: { type: boolean }
+        first_seen_at: { type: string, format: date-time, nullable: true }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+    Setting:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: 'int, float, bool, string, enum, ipv4, …'
+        min: { type: number, nullable: true }
+        max: { type: number, nullable: true }
+        values:
+          type: array
+          description: erlaubte Werte bei `enum`
+          items: { type: string }
+        unit: { type: string, nullable: true }
+        critical: { type: boolean, description: 'Ändern erfordert zusätzlich das Recht critical' }
+    Param:
+      description: Parameter eines Sende-Ziel-Aufrufs; wie Setting, zusätzlich mit Standardwert
+      allOf:
+        - $ref: '#/components/schemas/Setting'
+        - type: object
+          properties:
+            default:
+              oneOf:
+                - type: boolean
+                - type: number
+                - type: string
+    Link:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [feeds, uses, member, represents] }
+        source_id: { type: string, format: uuid, nullable: true }
+        from_id: { type: string, format: uuid, nullable: true }
+        from_ref: { type: string, nullable: true }
+        to_id: { type: string, format: uuid, nullable: true }
+        to_ref: { type: string, nullable: true }
+        position: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+    ElementHealth:
+      type: object
+      required: [element_id]
+      properties:
+        element_id: { type: string, format: uuid }
+        health:
+          type: string
+          enum: [ok, warning, error, unknown]
+          nullable: true
+          description: null = keine Health (nicht überwacht oder verschwunden)
+        rollup: { $ref: '#/components/schemas/Rollup' }
+    Rollup:
+      type: object
+      nullable: true
+      required: [ok, warning, error, unknown, unmonitored, missing]
+      properties:
+        ok: { type: integer }
+        warning: { type: integer }
+        error: { type: integer }
+        unknown: { type: integer }
+        unmonitored: { type: integer }
+        missing: { type: integer }
+    Finding:
+      type: object
+      required: [id, element_id, origin, code, severity, raised_at]
+      properties:
+        id: { type: string, format: uuid }
+        element_id: { type: string, format: uuid }
+        origin: { type: string, enum: [rule, device, system] }
+        rule_id: { type: string, format: uuid, nullable: true }
+        code: { type: string }
+        severity: { type: string, enum: [info, warning, error] }
+        message: { type: string, nullable: true }
+        details: { type: object, additionalProperties: true, nullable: true }
+        caused_by_id: { type: string, format: uuid, nullable: true }
+        raised_at: { type: string, format: date-time }
+        cleared_at: { type: string, format: date-time, nullable: true }
+        acked_at: { type: string, format: date-time, nullable: true }
+        acked_by_id: { type: string, format: uuid, nullable: true }
+    RunSummary:
+      type: object
+      required: [id, action, status, requested_by_id, requested_at]
+      properties:
+        id: { type: string, format: uuid }
+        parent_id: { type: string, format: uuid, nullable: true }
+        preset_id: { type: string, format: uuid, nullable: true }
+        element_id: { type: string, format: uuid, nullable: true }
+        action: { type: string }
+        status: { type: string, enum: [pending, sent, rejected, failed, accepted, confirmed, unconfirmed, cancelled] }
+        critical: { type: boolean }
+        requested_by_id: { type: string, format: uuid }
+        requested_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+    SourceStatus:
+      type: object
+      required: [source_id, state]
+      properties:
+        source_id: { type: string, format: uuid }
+        state: { type: string, enum: [starting, connecting, live, unreachable, backoff, stopping, stuck, disabled] }
+        since: { type: string, format: date-time, nullable: true }
+        last_error: { type: string, nullable: true }
+
+    Facts:
+      type: object
+      description: 'Fakten eines Elements; Werte sind bool, Zahl oder String'
+      additionalProperties:
+        oneOf:
+          - type: boolean
+          - type: number
+          - type: string
+    ElementFacts:
+      type: object
+      required: [version, element_id, facts]
+      properties:
+        version: { type: integer, format: int64 }
+        element_id: { type: string, format: uuid }
+        facts: { $ref: '#/components/schemas/Facts' }
+
+    WatchRequest:
+      type: object
+      properties:
+        add:
+          type: array
+          description: Elemente, Geräte oder Gruppen
+          items: { type: string, format: uuid }
+        remove:
+          type: array
+          items: { type: string, format: uuid }
+    WatchResponse:
+      type: object
+      required: [version, watched, facts]
+      properties:
+        version: { type: integer, format: int64 }
+        watched: { type: integer, description: 'Anzahl beobachteter Elemente nach der Änderung' }
+        facts:
+          type: array
+          items: { $ref: '#/components/schemas/ElementFacts' }
+
+    EventHello:
+      type: object
+      required: [stream_id, version]
+      properties:
+        stream_id: { type: string, format: uuid }
+        version: { type: integer, format: int64 }
+    EventElementsChanged:
+      type: object
+      required: [elements, removed_links, links]
+      properties:
+        elements:
+          type: array
+          items: { $ref: '#/components/schemas/Element' }
+        links:
+          type: array
+          items: { $ref: '#/components/schemas/Link' }
+        removed_links:
+          type: array
+          items: { type: string, format: uuid }
+    EventFactsChanged:
+      type: object
+      required: [element_id, facts]
+      properties:
+        element_id: { type: string, format: uuid }
+        facts:
+          $ref: '#/components/schemas/Facts'
+        removed:
+          type: array
+          description: Schlüssel, die es nicht mehr gibt
+          items: { type: string }
+    EventHealthChanged:
+      type: object
+      required: [health]
+      properties:
+        health:
+          type: array
+          items: { $ref: '#/components/schemas/ElementHealth' }
+    EventFindingEnded:
+      type: object
+      required: [finding_id, cleared_at, reason, withdrawn]
+      properties:
+        finding_id: { type: string, format: uuid }
+        cleared_at: { type: string, format: date-time }
+        reason: { type: string, enum: [resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted] }
+        withdrawn: { type: boolean }

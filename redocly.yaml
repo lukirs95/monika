@@ -1,0 +1,7 @@
+# Konfiguration für `make api-check` (Redocly CLI).
+extends:
+  - recommended
+rules:
+  # Die Nutzdaten der SSE-Ereignisse (Event*) lassen sich in OpenAPI 3.0 keinem Endpunkt zuordnen;
+  # sie stehen als Schemas für die Code-Erzeugung bereit und sind in /events beschrieben.
+  no-unused-components: off

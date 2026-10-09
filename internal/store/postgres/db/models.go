@@ -757,7 +757,7 @@ type Element struct {
 	Direction *PortDirection
 	// Name, wie das Gerät ihn meldet
 	Name *string
-	// statische Treiber-Attribute, nur zur Anzeige
+	// statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)
 	Attributes json.RawMessage
 	// Sortierung innerhalb des Parents
 	Position *int32

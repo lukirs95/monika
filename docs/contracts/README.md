@@ -11,3 +11,4 @@ Diagramme in Mermaid: `classDiagram` für Interfaces und Typen, `sequenceDiagram
 | [`flows.md`](flows.md) | Abläufe: Start, Herunterfahren, Weiterleitung, Aktion, Preset-Lauf; Supervisor | abgestimmt 2026-10-09 |
 | [`services.md`](services.md) | Dienste: Supervisor, Executor, Preset-Runner, Weiterleitung; Zusammenspiel mit der API | abgestimmt 2026-10-09 |
 | [`auth.md`](auth.md) | Anmeldung (Passwort, TOTP, Sitzungen, Tokens, Kiosk) und Rechte (`Allowed`) | abgestimmt 2026-10-09 |
+| [`api.md`](api.md), [`api.yaml`](api.yaml) | HTTP-API: Konventionen, Abo-Modell; Endpunkte als OpenAPI 3.0.3 (`make api-check`) | Konventionen abgestimmt; Endpunkte in Arbeit |

@@ -588,7 +588,7 @@ Preset „Produktion XY – 25 Mbit“
 
 - **Jeder konfigurierte Aufruf ist ein Element** (`kind = trigger`) mit der einzigen Aktion `trigger`. Damit funktionieren Labels, Gruppen, Presets, Rechte und Audit ohne Sonderfall.
 - **Parameter gehören zum Aufruf**, nicht zum Element: `trigger {"state": "program"}`. Die Konfiguration enthält nur Vorlagen und Standardwerte (`default`).
-- **Das Parameter-Schema** (Typ, Grenzen, Standard) steht in `element.attributes`; die UI baut daraus das Formular, der Treiber prüft die Werte selbst.
+- **Das Parameter-Schema** (Typ, Grenzen, Standard) steht in `element.attributes.params`, im selben Format wie `settings`, zusätzlich mit `default`; die UI baut daraus das Formular, der Treiber prüft die Werte selbst.
 - **Keine Einstellungen, kein `set`.** Die Konfiguration ändert nur der User; der Treiber verändert sie nie.
 - **Fakten sind nur Beobachtungen über Aufrufe**, nie vermutete Zustände des Ziels: `last_ok`, `last_called_at`, `last_duration_ms` (Kern) und protokollspezifische Details wie `http.status` (Roh). Eine Regel `last_ok eq true` funktioniert damit für jedes Sende-Ziel.
 - **Ergebnis eines Laufs:** Ziel hat angenommen → `accepted`, abgelehnt → `rejected`, nicht erreicht → `failed`. Eine Prüfbedingung gibt es nicht, `accepted` ist der Endzustand.

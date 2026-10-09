@@ -239,7 +239,7 @@ Table element {
   transport     text        [note: 'sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...']
   direction     port_direction [note: 'Fähigkeit des Anschlusses; die aktuelle Richtung steht in den Fakten']
   name          text        [note: 'Name, wie das Gerät ihn meldet']
-  attributes    jsonb       [not null, default: `'{}'::jsonb`, note: 'statische Treiber-Attribute, nur zur Anzeige']
+  attributes    jsonb       [not null, default: `'{}'::jsonb`, note: 'statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)']
   position      int         [note: 'Sortierung innerhalb des Parents']
   actions       text[]      [not null, default: `'{}'`, note: 'unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}']
   critical_actions text[]   [not null, default: `'{}'`, note: 'Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)']
