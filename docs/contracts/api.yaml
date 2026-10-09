@@ -21,6 +21,10 @@ tags:
     description: Aktueller Stand, Fakten, Ereignisstrom und Abos
   - name: inventory
     description: Treiber, Geräte, Quellen, Gruppen, Elemente, Mitgliedschaften
+  - name: evaluation
+    description: Regeln und Befunde
+  - name: actions
+    description: Aktionen (Läufe) und Presets
 
 paths:
   /auth/login:
@@ -497,6 +501,255 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /rules:
+    get:
+      tags: [evaluation]
+      operationId: listRules
+      summary: Regeln, deren Geltungsbereich der Benutzer sehen darf (globale für alle)
+      responses:
+        '200':
+          description: Regeln
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Rule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [evaluation]
+      operationId: createRule
+      summary: Regel anlegen (rule_edit am Geltungsbereich, global bei Regeln ohne Geltungsbereich)
+      description: Operator und Werttyp werden geprüft (422 `invalid_rule`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuleInput' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /rules/{rule_id}:
+    put:
+      tags: [evaluation]
+      operationId: updateRule
+      summary: Regel ändern (rule_edit am alten und am neuen Geltungsbereich)
+      description: Deaktivieren zieht ihre aktiven Befunde zurück; inhaltliche Änderungen bewertet der Core neu.
+      parameters:
+        - $ref: '#/components/parameters/RuleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuleInput' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Rule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      tags: [evaluation]
+      operationId: deleteRule
+      summary: Regel löschen (rule_edit am Geltungsbereich); aktive Befunde werden zurückgezogen
+      parameters:
+        - $ref: '#/components/parameters/RuleID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /findings/{finding_id}/ack:
+    post:
+      tags: [evaluation]
+      operationId: ackFinding
+      summary: Aktiven Befund quittieren (acknowledge am Element)
+      description: Ändert nicht die Health, nur Anzeige und Meldung. Die erste Quittierung bleibt bestehen.
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Quittiert }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs:
+    post:
+      tags: [actions]
+      operationId: submitRun
+      summary: Aktion ausführen (operate bzw. bei set configure, jeweils + critical, am Ziel)
+      description: |
+        Asynchron: Die Antwort enthält die ID des Laufs, den Fortgang meldet `run_changed`.
+        Bei Aktionen für das ganze Gerät auf Geräte oder Gruppen ist `driver` Pflicht
+        (422 `driver_required`). Wird die Aktion vom Ziel nicht unterstützt: 422 `unsupported_action`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RunRequest' }
+      responses:
+        '202':
+          description: Lauf angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /runs/{run_id}:
+    get:
+      tags: [actions]
+      operationId: getRun
+      summary: Lauf mit Kindern (view am Ziel)
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Lauf
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs/{run_id}/cancel:
+    post:
+      tags: [actions]
+      operationId: cancelRun
+      summary: Noch nicht gesendete Läufe abbrechen (wer ihn ausgelöst hat oder operate am Ziel)
+      description: Bricht den Lauf und alle Kinder ab, die noch `pending` sind; Gesendetes läuft zu Ende.
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '204': { description: 'Abgebrochen, soweit möglich' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /presets:
+    get:
+      tags: [actions]
+      operationId: listPresets
+      summary: Presets ohne Schritte (preset_run oder preset_edit)
+      responses:
+        '200':
+          description: Presets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PresetSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [actions]
+      operationId: createPreset
+      summary: Preset anlegen (preset_edit)
+      description: Ziele müssen existieren und dürfen nicht gelöscht sein (422 `invalid_target`); `driver` bei Aktionen für das ganze Gerät (422 `driver_required`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PresetInput' }
+      responses:
+        '201':
+          description: Angelegt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preset' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /presets/{preset_id}:
+    get:
+      tags: [actions]
+      operationId: getPreset
+      summary: Preset mit Schritten (preset_run oder preset_edit)
+      parameters:
+        - $ref: '#/components/parameters/PresetID'
+      responses:
+        '200':
+          description: Preset
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preset' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [actions]
+      operationId: updatePreset
+      summary: Name, Beschreibung und Schritte ersetzen (preset_edit)
+      description: Schritte mit bekannter `id` bleiben dieselben Schritte; fehlende werden gelöscht, Schritte ohne `id` neu angelegt.
+      parameters:
+        - $ref: '#/components/parameters/PresetID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PresetInput' }
+      responses:
+        '200':
+          description: Geändert
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preset' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+    delete:
+      tags: [actions]
+      operationId: deletePreset
+      summary: Preset löschen (preset_edit); vergangene Läufe bleiben
+      parameters:
+        - $ref: '#/components/parameters/PresetID'
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /presets/{preset_id}/run:
+    post:
+      tags: [actions]
+      operationId: runPreset
+      summary: Preset starten (preset_run und die Rechte an allen Zielen)
+      description: |
+        Vorabprüfung aller Schritte; fehlt ein Recht, startet nichts (403 `missing_rights` mit den
+        betroffenen Schritten). Asynchron: Die Antwort enthält die ID des Wurzel-Laufs.
+      parameters:
+        - $ref: '#/components/parameters/PresetID'
+      responses:
+        '202':
+          description: Preset gestartet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Recht preset_run oder Rechte an Zielen fehlen
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemMissingRights' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     session:
@@ -527,6 +780,21 @@ components:
       schema: { type: string, format: uuid }
     LinkID:
       name: link_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RuleID:
+      name: rule_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RunID:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PresetID:
+      name: preset_id
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -717,6 +985,138 @@ components:
       properties:
         position: { type: integer, nullable: true }
         label: { type: string, nullable: true }
+
+    JSONValue:
+      description: beliebiger JSON-Wert (bool, Zahl, String, Liste)
+      oneOf:
+        - type: boolean
+        - type: number
+        - type: string
+        - type: array
+          items: {}
+    Condition:
+      type: object
+      required: [fact, op, value]
+      properties:
+        fact: { type: string }
+        op: { type: string, enum: [eq, ne, lt, lte, gt, gte, in, not_in] }
+        value: { $ref: '#/components/schemas/JSONValue' }
+    RuleInput:
+      type: object
+      required: [name, enabled, severity, fact, op, value, hold_seconds]
+      properties:
+        name: { type: string, minLength: 1 }
+        enabled: { type: boolean }
+        severity: { type: string, enum: [info, warning, error] }
+        scope_element_id: { type: string, format: uuid, nullable: true }
+        match_kind: { type: string, nullable: true }
+        match_transport: { type: string, nullable: true }
+        match_driver: { type: string, nullable: true }
+        fact: { type: string }
+        op: { type: string, enum: [eq, ne, lt, lte, gt, gte, in, not_in] }
+        value: { $ref: '#/components/schemas/JSONValue' }
+        when:
+          type: object
+          nullable: true
+          description: 'Vorbedingung; null = gilt immer'
+          allOf:
+            - $ref: '#/components/schemas/Condition'
+        clear_value: { type: number, nullable: true, description: 'Hysterese, nur numerisch' }
+        hold_seconds: { type: integer, minimum: 0 }
+    Rule:
+      allOf:
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+        - $ref: '#/components/schemas/RuleInput'
+
+    RunRequest:
+      type: object
+      required: [element_id, action]
+      properties:
+        element_id: { type: string, format: uuid, description: 'Element, Gerät oder Gruppe' }
+        action: { type: string }
+        params: { type: object, additionalProperties: true, nullable: true, description: 'bei set die Werte, bei trigger die Parameter' }
+        driver: { type: string, nullable: true, description: 'Pflicht bei Aktionen für das ganze Gerät auf Geräte oder Gruppen' }
+    RunAccepted:
+      type: object
+      required: [run_id]
+      properties:
+        run_id: { type: string, format: uuid }
+    Run:
+      allOf:
+        - $ref: '#/components/schemas/RunSummary'
+        - type: object
+          properties:
+            source_id: { type: string, format: uuid, nullable: true }
+            preset_step_id: { type: string, format: uuid, nullable: true }
+            params: { type: object, additionalProperties: true, nullable: true }
+            verify:
+              type: array
+              nullable: true
+              items: { $ref: '#/components/schemas/Condition' }
+            response: { type: object, additionalProperties: true, nullable: true }
+            sent_at: { type: string, format: date-time, nullable: true }
+            responded_at: { type: string, format: date-time, nullable: true }
+            children:
+              type: array
+              items: { $ref: '#/components/schemas/RunSummary' }
+
+    PresetStep:
+      type: object
+      required: [stage, position, delay_ms, element_id, action, continue_on_error]
+      properties:
+        id: { type: string, format: uuid, nullable: true, description: 'leer bei neuen Schritten' }
+        stage: { type: integer, minimum: 1 }
+        position: { type: integer }
+        delay_ms: { type: integer, minimum: 0 }
+        element_id: { type: string, format: uuid }
+        action: { type: string }
+        params: { type: object, additionalProperties: true, nullable: true }
+        continue_on_error: { type: boolean }
+        driver: { type: string, nullable: true }
+    PresetInput:
+      type: object
+      required: [name, steps]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/PresetStep' }
+    PresetSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        created_by_id: { type: string, format: uuid, nullable: true }
+    Preset:
+      allOf:
+        - $ref: '#/components/schemas/PresetSummary'
+        - type: object
+          required: [steps]
+          properties:
+            steps:
+              type: array
+              items: { $ref: '#/components/schemas/PresetStep' }
+    ProblemMissingRights:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [missing]
+          properties:
+            missing:
+              type: array
+              items:
+                type: object
+                required: [permission]
+                properties:
+                  step_id: { type: string, format: uuid, nullable: true, description: 'leer, wenn preset_run selbst fehlt' }
+                  element_id: { type: string, format: uuid, nullable: true }
+                  permission: { type: string }
 
     LoginRequest:
       type: object
