@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lukirs95/monika/internal/action"
+	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core/evaluation"
 	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/forward"
@@ -26,6 +27,7 @@ var (
 	_ preset.Store     = (*Store)(nil)
 	_ action.Store     = (*Store)(nil)
 	_ forward.Store    = (*Store)(nil)
+	_ auth.Store       = (*Store)(nil)
 )
 
 // Store implementiert die Store-Interfaces der Fachpakete auf PostgreSQL.

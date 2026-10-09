@@ -87,6 +87,109 @@ func (b *InsertDriverLinkBatchResults) Close() error {
 	return b.br.Close()
 }
 
+const insertGrant = `-- name: InsertGrant :batchexec
+INSERT INTO permission_grant (role_id, permission, scope_element_id)
+VALUES ($1, $2, $3)
+`
+
+type InsertGrantBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type InsertGrantParams struct {
+	RoleID         uuid.UUID
+	Permission     Permission
+	ScopeElementID *uuid.UUID
+}
+
+func (q *Queries) InsertGrant(ctx context.Context, arg []InsertGrantParams) *InsertGrantBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.RoleID,
+			a.Permission,
+			a.ScopeElementID,
+		}
+		batch.Queue(insertGrant, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &InsertGrantBatchResults{br, len(arg), false}
+}
+
+func (b *InsertGrantBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *InsertGrantBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
+const insertManualMember = `-- name: InsertManualMember :batchexec
+INSERT INTO role_member (role_id, user_id, origin)
+VALUES ($1, $2, 'manual')
+ON CONFLICT (role_id, user_id) DO NOTHING
+`
+
+type InsertManualMemberBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type InsertManualMemberParams struct {
+	RoleID uuid.UUID
+	UserID uuid.UUID
+}
+
+func (q *Queries) InsertManualMember(ctx context.Context, arg []InsertManualMemberParams) *InsertManualMemberBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.RoleID,
+			a.UserID,
+		}
+		batch.Queue(insertManualMember, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &InsertManualMemberBatchResults{br, len(arg), false}
+}
+
+func (b *InsertManualMemberBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *InsertManualMemberBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const insertRun = `-- name: InsertRun :batchexec
 INSERT INTO action_run (
   id, parent_id, preset_id, preset_step_id, element_id, source_id, action, params,
