@@ -49,7 +49,7 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
-   5. API als OpenAPI 3.1 (`docs/contracts/api.yaml`): offen
+   5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api.yaml` (OpenAPI 3.0.3, `make api-check`)
 2. **Schema nachziehen** aus den Verträgen: `user_session`, `user_totp`, `user_recovery_code`, `api_token.read_only` (`auth.md`); Store-Methoden für `action.Store`, `forward.Store`, `auth.Store`.
 3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 

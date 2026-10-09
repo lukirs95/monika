@@ -29,6 +29,8 @@ tags:
     description: Weiterleitung, Secrets, Benutzer, Rollen, Rechte, Tokens
   - name: self
     description: Eigenes Passwort und eigene Sitzungen
+  - name: history
+    description: Verlauf mit Cursor-Paginierung (neueste zuerst)
 
 paths:
   /auth/login:
@@ -1190,6 +1192,105 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /audit:
+    get:
+      tags: [history]
+      operationId: listAudit
+      summary: Audit-Einträge (admin)
+      parameters:
+        - $ref: '#/components/parameters/Before'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: object_type
+          in: query
+          schema: { type: string }
+        - name: object_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: actor
+          in: query
+          description: 'User-ID oder `monika` für Einträge ohne Akteur (z. B. Discovery)'
+          schema: { type: string }
+        - name: verb
+          in: query
+          schema: { type: string, enum: [create, update, delete, login, login_failed] }
+      responses:
+        '200':
+          description: Eine Seite
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /findings/history:
+    get:
+      tags: [history]
+      operationId: listFindingHistory
+      summary: Befunde, aktive und vergangene (nur sichtbare Elemente)
+      parameters:
+        - $ref: '#/components/parameters/Before'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/ElementFilter'
+        - $ref: '#/components/parameters/Recursive'
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warning, error] }
+        - name: origin
+          in: query
+          schema: { type: string, enum: [rule, device, system] }
+        - name: rule
+          in: query
+          schema: { type: string, format: uuid }
+        - name: state
+          in: query
+          schema: { type: string, enum: [active, cleared, withdrawn] }
+      responses:
+        '200':
+          description: Eine Seite
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FindingPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /runs/history:
+    get:
+      tags: [history]
+      operationId: listRunHistory
+      summary: Läufe, laufende und vergangene (nur sichtbare Ziele; Preset-Wurzeln mit preset_run oder preset_edit)
+      parameters:
+        - $ref: '#/components/parameters/Before'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/ElementFilter'
+        - $ref: '#/components/parameters/Recursive'
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, sent, rejected, failed, accepted, confirmed, unconfirmed, cancelled] }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: preset
+          in: query
+          schema: { type: string, format: uuid }
+        - name: requested_by
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Eine Seite
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
 components:
   securitySchemes:
     session:
@@ -1258,6 +1359,34 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    Before:
+      name: before
+      in: query
+      description: 'Cursor: nur Einträge älter als diese ID (UUIDv7); `next_before` der vorigen Seite'
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    From:
+      name: from
+      in: query
+      description: Beginn des Zeitraums (einschließlich)
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      description: Ende des Zeitraums (ausschließlich)
+      schema: { type: string, format: date-time }
+    ElementFilter:
+      name: element
+      in: query
+      schema: { type: string, format: uuid }
+    Recursive:
+      name: recursive
+      in: query
+      description: 'mit `element`: auch alle Elemente eines Geräts bzw. Mitglieder einer Gruppe'
+      schema: { type: boolean, default: false }
 
   headers:
     SetSessionCookie:
@@ -1732,6 +1861,43 @@ components:
         user_agent: { type: string, nullable: true }
         remote_addr: { type: string, nullable: true }
         current: { type: boolean, description: 'die Sitzung dieser Anfrage' }
+
+    AuditEntry:
+      type: object
+      required: [id, at, verb, object_type]
+      properties:
+        id: { type: string, format: uuid }
+        actor_id: { type: string, format: uuid, nullable: true, description: 'null = Monika selbst' }
+        at: { type: string, format: date-time }
+        verb: { type: string }
+        object_type: { type: string }
+        object_id: { type: string, format: uuid, nullable: true }
+        before: { type: object, additionalProperties: true, nullable: true }
+        after: { type: object, additionalProperties: true, nullable: true }
+    AuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEntry' }
+        next_before: { type: string, format: uuid, nullable: true, description: 'leer = letzte Seite' }
+    FindingPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Finding' }
+        next_before: { type: string, format: uuid, nullable: true }
+    RunPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RunSummary' }
+        next_before: { type: string, format: uuid, nullable: true }
 
     LoginRequest:
       type: object

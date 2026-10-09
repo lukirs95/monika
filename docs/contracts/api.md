@@ -1,6 +1,6 @@
 # Vertrag: HTTP-API
 
-**Status:** Konventionen abgestimmt am 2026-10-09; Endpunkte in Arbeit. **Spezifikation:** [`api.yaml`](api.yaml) (OpenAPI 3.0.3). **Hintergrund:** [`auth.md`](auth.md), [`services.md`](services.md) (Zusammenspiel mit der API), [`core.md`](core.md) (`View`, Ereignisse, Abonnenten).
+**Status:** abgestimmt am 2026-10-09. **Spezifikation:** [`api.yaml`](api.yaml) (OpenAPI 3.0.3). **Hintergrund:** [`auth.md`](auth.md), [`services.md`](services.md) (Zusammenspiel mit der API), [`core.md`](core.md) (`View`, Ereignisse, Abonnenten).
 
 Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket aufrufen, Fehler übersetzen. Sie schreibt nie selbst in einen Store.
 
@@ -29,7 +29,7 @@ Weitere Regeln:
 |---|---|---|
 | alle | | `from`, `to` (Zeitraum), `before`, `limit` |
 | Befunde | `GET /findings/history` | `element` (+ `recursive=true` für Gerät/Gruppe), `code`, `severity`, `origin`, `rule`, `state` (`active`, `cleared`, `withdrawn`) |
-| Läufe | `GET /runs` | `element` (+ `recursive`), `status`, `action`, `preset`, `requested_by` |
+| Läufe | `GET /runs/history` | `element` (+ `recursive`), `status`, `action`, `preset`, `requested_by` |
 | Audit | `GET /audit` | `object_type`, `object_id`, `actor` (`monika` für Einträge ohne Akteur), `verb` |
 
 ## Stand, Ereignisse und Abos
