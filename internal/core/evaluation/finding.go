@@ -1,5 +1,39 @@
 package evaluation
 
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Origin ist die Herkunft eines Befunds.
+type Origin string
+
+const (
+	OriginRule   Origin = "rule"   // verletzte Regel des Users, Code rule.violated
+	OriginDevice Origin = "device" // vom Gerät gemeldeter Alarm, Code = Alarmcode
+	OriginSystem Origin = "system" // Monika selbst, z. B. source.unreachable
+)
+
+// Finding ist eine aktive oder vergangene Abweichung an einem Element.
+type Finding struct {
+	ID         uuid.UUID
+	ElementID  uuid.UUID
+	Origin     Origin
+	RuleID     uuid.UUID // bei OriginRule; uuid.Nil, wenn die Regel gelöscht ist
+	Code       string
+	Severity   Severity
+	Message    string
+	Details    json.RawMessage
+	CausedByID uuid.UUID // uuid.Nil = Ursache, sonst Symptom dieses Befunds
+
+	RaisedAt  time.Time
+	ClearedAt time.Time // Null-Zeit = aktiv
+	AckedAt   time.Time
+	AckedByID uuid.UUID
+}
+
 // ClearReason ist der Grund, aus dem ein Befund endet; er steht in details.cleared_reason.
 // Nur ReasonResolved bedeutet „behoben“ (finding.cleared), alle anderen „zurückgezogen“
 // (finding.withdrawn): Der Befund wird dauerhaft nicht mehr bewertet.

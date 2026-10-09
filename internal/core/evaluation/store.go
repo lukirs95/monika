@@ -7,8 +7,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrNotFound bedeutet, dass die Regel bzw. der Befund nicht existiert.
-var ErrNotFound = errors.New("not found")
+var (
+	// ErrNotFound bedeutet, dass die Regel bzw. der aktive Befund nicht existiert.
+	ErrNotFound = errors.New("not found")
+	// ErrAlreadyActive bedeutet, dass derselbe Befund (Element, Code, Regel) schon aktiv ist.
+	ErrAlreadyActive = errors.New("finding already active")
+)
 
 // Store persistiert Regeln und die Ergebnisse der Bewertung. Jede Methode ist eine in sich
 // atomare Operation.
@@ -26,6 +30,19 @@ type Store interface {
 	// DeleteRule zieht die aktiven Befunde der Regel zurück (ReasonRuleDeleted) und löscht sie;
 	// ihre Befunde bleiben mit rule_id NULL erhalten.
 	DeleteRule(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
+
+	// ListActiveFindings lädt alle aktiven Befunde.
+	ListActiveFindings(ctx context.Context) ([]Finding, error)
+	// RaiseFinding legt einen Befund an; ohne RaisedAt gilt die aktuelle Zeit.
+	// Ist derselbe Befund schon aktiv: ErrAlreadyActive.
+	RaiseFinding(ctx context.Context, f Finding) error
+	// EndFinding beendet einen aktiven Befund mit Grund (behoben oder zurückgezogen).
+	EndFinding(ctx context.Context, id uuid.UUID, reason ClearReason) error
+	// SetFindingCause markiert einen aktiven Befund als Symptom von causedBy bzw. mit uuid.Nil
+	// als Ursache.
+	SetFindingCause(ctx context.Context, id, causedBy uuid.UUID) error
+	// AckFinding quittiert einen aktiven Befund; wer quittiert, steht im Befund selbst.
+	AckFinding(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 
 	// LoadHealth lädt Health und Rollup aller Elemente, die bereits bewertet wurden.
 	LoadHealth(ctx context.Context) ([]ElementHealth, error)

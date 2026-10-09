@@ -22,6 +22,7 @@ Stand: 2026-10-08
 - **Audit des Inventars** (2026-10-08): Store-Methoden, die der User auslöst, bekommen den Akteur als expliziten Parameter (`uuid.Nil` = Monika). Änderung und Audit-Eintrag laufen im selben SQL-Statement. Discovery protokolliert neue Elemente, Wechsel von `present` und Links mit `actor_id = NULL`; Löschen schreibt einen Eintrag pro Gerät/Gruppe und je einen pro Mitgelöschtem.
 - **Secret-Store** (2026-10-08): `secret.Store` in `postgres.Store` mit Audit ohne Werte; `secret.Key` (AES-256-GCM, `key_id` = Fingerabdruck, nie geloggt); `secret.Service` mit `VerifyAndRotate` beim Start. Erste Unit-Tests mit In-Memory-Attrappe (`internal/secret`).
 - **Zustand** (2026-10-08): `evaluation.Store` mit `LoadHealth`/`SaveHealth` für `element_state`; unveränderte Werte lassen die Zeile unberührt.
+- **Bewertung** (2026-10-09): Regeln und Befunde in `evaluation.Store`; Regeln mit Audit, Löschen/Deaktivieren zieht aktive Befunde zurück; Befunde mit `ErrAlreadyActive`, Ende mit Grund, Ursache, Quittierung.
 - **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
 
 ## Architektur-Durchsicht (2026-10-08)
@@ -42,14 +43,13 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 
 ## Nächste Schritte
 
-1. **Bewertung:** Queries und Store für Regeln und Befunde, als Erweiterung von `evaluation.Store` (aktive laden, anlegen, aufheben, quittieren).
-2. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
-3. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
+1. **Presets:** Queries und Store; beim Anlegen von Schritten gelöschte Geräte/Gruppen ablehnen und die Zeile mitsperren; `preset_step.driver`.
+2. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. Treiber-SDK (`sdk/`): Discovery, Fakten, Lebenszeichen, vollständiger Stand, Ausführung, Registrierung, Zähler-Helfer, reservierte Werte
    2. Core-Komponenten: Inventar, Zustand, Bewertung und wie sie einander Änderungen melden
    3. Abläufe: Start (inkl. `secret.Service.VerifyAndRotate`), Discovery-Lauf, Fakt → Befund → Weiterleitung, Aktion bis `confirmed`, Preset-Lauf
    4. Aktionen, Presets, Weiterleitung, API
-4. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
+3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken
 

@@ -7,6 +7,6 @@ Bewertung des Zustands.
 - effektives `monitored` (vererbt entlang `parent_id`)
 - Ursache vs. Symptom entlang `feeds`, `uses`, `parent`
 - Health (ohne Health, `unknown`, schlimmster Befund) und Rollup für Geräte und Gruppen
-- `evaluation.Store`: Health und Rollup laden und nur bei Änderung schreiben (`element_state`)
+- `evaluation.Store`: Regeln (Löschen/Deaktivieren zieht Befunde zurück), Befunde (auslösen, beenden mit Grund, Ursache setzen, quittieren), Health und Rollup (nur bei Änderung)
 
 Siehe `docs/ARCHITECTURE.md`, Abschnitt 8.
