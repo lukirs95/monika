@@ -183,6 +183,7 @@ Pro Hersteller bzw. Gerätetyp gibt es einen Treiber. Treiber laufen im Monika-P
 - **Abhängigkeitsrichtung:** Treiber importieren ausschließlich das öffentliche Paket `sdk/` (Interfaces, Vokabular, Registry) und ihre Gerätelibrary, nie `internal/`. Die Ordnerstruktur steht im `README.md` im Projektstamm.
 - Optional: Build-Tags pro Treiber für schlanke Builds.
 - **Treiber sind dünne Adapter.** Gerätelibraries (z. B. `goxlinkclient`) bleiben eigenständige Repositories ohne Abhängigkeit zu Monika; der Treiber übersetzt nur zwischen Library und Monika-Interfaces.
+- **Vertrag:** Typen, Interfaces und Abläufe des SDK stehen in [`contracts/sdk.md`](contracts/sdk.md).
 - **Fehlerisolation:** Jede Treiber-Goroutine läuft hinter einer `recover()`-Grenze. Ein Panic wird zum Befund `source.unreachable` mit Fehlermeldung und Neustart der Quelle, nicht zum Absturz von Monika.
 
 Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separate Prozesse per gRPC (widerspricht dem Monolithen; Isolation wird über `recover()` erreicht), WASM (für netzwerklastige Treiber nicht ausgereift).
@@ -536,6 +537,7 @@ Eine Aktion auf eine Gruppe oder ein Gerät wird auf alle Mitglieder verteilt, d
 - **Nicht überwachte Mitglieder** handeln normal; `monitored` betrifft nur die Bewertung.
 - **Status des übergeordneten Laufs:** Er endet, wenn alle Kinder beendet sind, mit dem schlechtesten Status seiner Kinder: `failed` > `rejected` > `unconfirmed` > `accepted` > `confirmed`. `cancelled` zählt nicht mit.
 - **Aktionen für das ganze Gerät** (`reboot` …) liegen an den Zugangs-Elementen. Die UI bietet sie am Gerät pro Quelle an („Neustart über XLink-API“). Zielt eine Sammelaktion oder ein Preset-Schritt mit einer solchen Aktion auf ein Gerät oder eine Gruppe, **muss der Treiber angegeben sein** („`reboot` über `videoxlink`“); ohne Angabe lässt sie sich nicht starten bzw. speichern. Die Angabe ist immer Pflicht, damit ein Preset sein Verhalten nicht still ändert, wenn eine zweite Quelle dazukommt. Geräte ohne passende Quelle werden übersprungen.
+- **Gerät als Ziel:** Mit angegebenem Treiber geht die Aktion nur an dessen Zugangs-Element (z. B. das Gerät neu starten); ohne Treiber an alle übrigen Elemente, die sie unterstützen (z. B. alle Module neu starten). Die Angabe des Treibers entscheidet, was gemeint ist.
 
 ### Kritische Aktionen
 

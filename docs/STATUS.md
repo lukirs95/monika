@@ -45,7 +45,7 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 ## Nächste Schritte
 
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
-   1. Treiber-SDK (`sdk/`): Discovery, Fakten, Lebenszeichen, vollständiger Stand, Ausführung, Registrierung, Zähler-Helfer, reservierte Werte
+   1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. Core-Komponenten: Inventar, Zustand, Bewertung und wie sie einander Änderungen melden
    3. Abläufe: Start (inkl. `secret.Service.VerifyAndRotate`), Discovery-Lauf, Fakt → Befund → Weiterleitung, Aktion bis `confirmed`, Preset-Lauf
    4. Aktionen, Presets, Weiterleitung, API

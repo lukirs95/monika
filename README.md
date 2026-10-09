@@ -14,6 +14,7 @@ Stack: Go · PostgreSQL ≥ 18 · InfluxDB · Monolith · Treiber zur Compile-Ze
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | alle verbindlichen Architekturentscheidungen |
 | [`docs/schema/monika.dbml`](docs/schema/monika.dbml) | exakte Definition des Datenbankschemas (dbdiagram.io) |
+| [`docs/contracts/`](docs/contracts/) | Verträge zwischen den Komponenten: Interfaces, Methoden, Abläufe (Mermaid) |
 
 ## Projektstruktur
 
