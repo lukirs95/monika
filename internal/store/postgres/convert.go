@@ -47,6 +47,17 @@ func nonNil[T any](s []T) []T {
 	return s
 }
 
+// affected meldet notFound, wenn eine Änderung keine Zeile getroffen hat.
+func affected(n int64, err error, notFound error) error {
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return notFound
+	}
+	return nil
+}
+
 // jsonObject ersetzt ein fehlendes JSON durch {} für Spalten mit NOT NULL.
 func jsonObject(m json.RawMessage) json.RawMessage {
 	if len(m) == 0 {

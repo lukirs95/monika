@@ -75,7 +75,7 @@ func (s *Store) ReplaceSecretValue(ctx context.Context, actor uuid.UUID, v secre
 		Nonce:      v.Nonce,
 		KeyID:      v.KeyID,
 	})
-	return secretRowsAffected(n, err)
+	return affected(n, err, secret.ErrNotFound)
 }
 
 func (s *Store) ReencryptSecret(ctx context.Context, v secret.Encrypted) error {
@@ -85,7 +85,7 @@ func (s *Store) ReencryptSecret(ctx context.Context, v secret.Encrypted) error {
 		Nonce:      v.Nonce,
 		KeyID:      v.KeyID,
 	})
-	return secretRowsAffected(n, err)
+	return affected(n, err, secret.ErrNotFound)
 }
 
 func (s *Store) DeleteSecret(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
@@ -94,16 +94,5 @@ func (s *Store) DeleteSecret(ctx context.Context, actor uuid.UUID, id uuid.UUID)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgerrcode.RestrictViolation {
 		return secret.ErrInUse
 	}
-	return secretRowsAffected(n, err)
-}
-
-// secretRowsAffected meldet secret.ErrNotFound, wenn eine Änderung keine Zeile getroffen hat.
-func secretRowsAffected(n int64, err error) error {
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return secret.ErrNotFound
-	}
-	return nil
+	return affected(n, err, secret.ErrNotFound)
 }

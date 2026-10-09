@@ -222,7 +222,7 @@ func (s *Store) CreateSource(ctx context.Context, actor uuid.UUID, src inventory
 		SecretID: nullable(src.SecretID),
 		Enabled:  src.Enabled,
 	})
-	return rowsAffected(n, err)
+	return affected(n, err, inventory.ErrNotFound)
 }
 
 func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory.Source) error {
@@ -234,7 +234,7 @@ func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory
 		SecretID: nullable(src.SecretID),
 		Enabled:  src.Enabled,
 	})
-	return rowsAffected(n, err)
+	return affected(n, err, inventory.ErrNotFound)
 }
 
 func (s *Store) CreateGroup(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
@@ -263,7 +263,7 @@ func (s *Store) UpdateUserFields(ctx context.Context, actor uuid.UUID, id uuid.U
 		Notes:     nullable(f.Notes),
 		Monitored: f.Monitored,
 	})
-	return rowsAffected(n, err)
+	return affected(n, err, inventory.ErrNotFound)
 }
 
 // AddGroupMember nimmt Lock, Zyklenprüfung und Insert in einer Transaktion vor, damit
@@ -302,23 +302,12 @@ func (s *Store) UpdateGroupMember(ctx context.Context, actor uuid.UUID, l invent
 		Position: convert(l.Position, toInt32),
 		Label:    nullable(l.Label),
 	})
-	return rowsAffected(n, err)
+	return affected(n, err, inventory.ErrNotFound)
 }
 
 func (s *Store) RemoveGroupMember(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
 	n, err := s.q.DeleteMemberLink(ctx, db.DeleteMemberLinkParams{ActorID: nullable(actor), ID: id})
-	return rowsAffected(n, err)
-}
-
-// rowsAffected meldet ErrNotFound, wenn eine Änderung keine Zeile getroffen hat.
-func rowsAffected(n int64, err error) error {
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return inventory.ErrNotFound
-	}
-	return nil
+	return affected(n, err, inventory.ErrNotFound)
 }
 
 func toElement(e db.Element) inventory.Element {
