@@ -15,6 +15,7 @@ DBML2SQL       := $(DOCKER) run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false \
                   npx --yes --loglevel=error -p @dbml/cli@10.3.0 dbml2sql --postgres
 SQLC           := $(DOCKER) run --rm --user $$(id -u):$$(id -g) -v $(CURDIR):/src -w /src sqlc/sqlc:1.31.1
 POSTGRES_IMAGE := postgres:18-alpine
+MERMAID_IMAGE  := minlag/mermaid-cli:12.0.0
 
 DATABASE_URL ?= postgres://monika:monika@127.0.0.1:5432/monika?sslmode=disable
 
@@ -40,6 +41,19 @@ test-integration: ## Integrationstests; startet PostgreSQL per testcontainers in
 vet: ## go vet, inklusive Integrationstests
 	$(GO) vet ./...
 	$(GO) vet -tags integration ./...
+
+# --- Dokumentation -----------------------------------------------------------
+
+.PHONY: docs-check
+docs-check: ## Rendert alle Mermaid-Diagramme in docs/ und bricht bei Syntaxfehlern ab
+	@files=$$(grep -rl --include='*.md' '^```mermaid' docs); \
+	$(DOCKER) run --rm --user $$(id -u):$$(id -g) -v $(CURDIR)/docs:/data/docs:ro \
+	  --entrypoint sh $(MERMAID_IMAGE) -c ' \
+	    status=0; \
+	    for f in "$$@"; do \
+	      if mmdc -p /puppeteer-config.json -q -i "/data/$$f" -o "/tmp/out.md" >/tmp/log 2>&1; then echo "ok    $$f"; \
+	      else echo "FEHLER $$f"; grep -m1 -A3 "Error" /tmp/log; status=1; fi; \
+	    done; exit $$status' sh $$files
 
 # --- Datenbank ---------------------------------------------------------------
 
