@@ -6,4 +6,5 @@ Diagramme in Mermaid: `classDiagram` für Interfaces und Typen, `sequenceDiagram
 
 | Vertrag | Inhalt | Status |
 |---|---|---|
-| [`sdk.md`](sdk.md) | Treiber-SDK: Registrierung, `Source`, `Reporter`, Scheduler, Ausführung, Zähler-Helfer | abgestimmt 2026-10-09 |
+| [`sdk.md`](sdk.md) | Treiber-SDK: Registrierung, `Source`, `Reporter`, Scheduler, Ausführung, Zähler-Helfer, Logging | abgestimmt 2026-10-09 |
+| [`core.md`](core.md) | Core-Komponenten: eine Schleife, `View`, Ereignisse, Befehle, Inventar → Fakten → Bewertung | abgestimmt 2026-10-09 |

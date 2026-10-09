@@ -150,7 +150,7 @@ Treiber ──Inventar, Fakten, Alarme, Links──▶ Core
                                               └─ 6. Push                       UI (live), Weiterleitung (gefiltert)
 ```
 
-Der Core hält Inventar, Fakten und Link-Graph **im Speicher** und bewertet dort. **Aktuelle Fakten liegen nur im Speicher**; nach einem Neustart liefern die Treiber den vollständigen Stand neu, bis dahin sind die Elemente `unknown`. PostgreSQL dient der Persistenz (Inventar, Health, Historie von Befunden und Läufen), nicht der Bewertungslogik.
+Der Core hält Inventar, Fakten und Link-Graph **im Speicher** und bewertet dort, in einer einzigen Schleife, die den Zustand besitzt (Vertrag: [`contracts/core.md`](contracts/core.md)). **Aktuelle Fakten liegen nur im Speicher**; nach einem Neustart liefern die Treiber den vollständigen Stand neu, bis dahin sind die Elemente `unknown`. PostgreSQL dient der Persistenz (Inventar, Health, Historie von Befunden und Läufen), nicht der Bewertungslogik.
 
 ### Datenfluss: Handeln
 
