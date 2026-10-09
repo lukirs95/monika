@@ -526,7 +526,7 @@ Table action_run {
   status         action_status [not null, default: 'pending']
   critical       boolean       [not null, default: false, note: 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)']
 
-  verify         jsonb         [note: 'Snapshot der Prüfbedingung, z.B. [{"fact": "bitrate", "op": "eq", "value": 20}] mit timeout_s']
+  verify         jsonb         [note: 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}']
   response       jsonb         [note: 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern']
 
   requested_by_id uuid         [not null, ref: > app_user.id, note: 'Mensch oder Dienstkonto (API-Token)']

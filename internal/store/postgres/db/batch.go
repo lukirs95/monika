@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,83 @@ func (b *InsertDriverLinkBatchResults) Exec(f func(int, error)) {
 }
 
 func (b *InsertDriverLinkBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
+const insertRun = `-- name: InsertRun :batchexec
+INSERT INTO action_run (
+  id, parent_id, preset_id, preset_step_id, element_id, source_id, action, params,
+  status, critical, verify, requested_by_id, requested_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8,
+  $9, $10, $11, $12, $13
+)
+`
+
+type InsertRunBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type InsertRunParams struct {
+	ID            uuid.UUID
+	ParentID      *uuid.UUID
+	PresetID      *uuid.UUID
+	PresetStepID  *uuid.UUID
+	ElementID     *uuid.UUID
+	SourceID      *uuid.UUID
+	Action        string
+	Params        json.RawMessage
+	Status        ActionStatus
+	Critical      bool
+	Verify        json.RawMessage
+	RequestedByID uuid.UUID
+	RequestedAt   time.Time
+}
+
+func (q *Queries) InsertRun(ctx context.Context, arg []InsertRunParams) *InsertRunBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ID,
+			a.ParentID,
+			a.PresetID,
+			a.PresetStepID,
+			a.ElementID,
+			a.SourceID,
+			a.Action,
+			a.Params,
+			a.Status,
+			a.Critical,
+			a.Verify,
+			a.RequestedByID,
+			a.RequestedAt,
+		}
+		batch.Queue(insertRun, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &InsertRunBatchResults{br, len(arg), false}
+}
+
+func (b *InsertRunBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *InsertRunBatchResults) Close() error {
 	b.closed = true
 	return b.br.Close()
 }

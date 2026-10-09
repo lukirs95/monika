@@ -622,7 +622,7 @@ COMMENT ON COLUMN "action_run"."params" IS 'bei set: zu setzende Werte; bei trig
 
 COMMENT ON COLUMN "action_run"."critical" IS 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)';
 
-COMMENT ON COLUMN "action_run"."verify" IS 'Snapshot der Prüfbedingung, z.B. [{"fact": "bitrate", "op": "eq", "value": 20}] mit timeout_s';
+COMMENT ON COLUMN "action_run"."verify" IS 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}';
 
 COMMENT ON COLUMN "action_run"."response" IS 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern';
 

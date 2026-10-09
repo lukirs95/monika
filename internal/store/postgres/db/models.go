@@ -695,7 +695,7 @@ type ActionRun struct {
 	Status ActionStatus
 	// Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)
 	Critical bool
-	// Snapshot der Prüfbedingung, z.B. [{"fact": "bitrate", "op": "eq", "value": 20}] mit timeout_s
+	// Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}
 	Verify json.RawMessage
 	// Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern
 	Response json.RawMessage
