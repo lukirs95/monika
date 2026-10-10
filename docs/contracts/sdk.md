@@ -1,6 +1,6 @@
 # Vertrag: Treiber-SDK
 
-**Status:** abgestimmt am 2026-10-09. **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
 
 Das SDK ist die einzige Schnittstelle zwischen Core und Treibern. Treiber importieren nur `sdk/` und ihre Gerätelibrary, nie `internal/`. Alles, was ein Treiber vom Core braucht, kommt über die Typen und Interfaces dieses Vertrags.
 
@@ -22,8 +22,15 @@ classDiagram
         +Name string
         +ConfigSchema json.RawMessage
         +Actions []ActionDef
-        +Heartbeat time.Duration
+        +Facts []FactDef
         +New(cfg SourceConfig) (Source, error)
+    }
+    class FactDef {
+        <<struct>>
+        +Key string
+        +Type FactType
+        +Unit string
+        +Description string
     }
     class SourceConfig {
         <<struct>>
@@ -39,6 +46,7 @@ classDiagram
     }
     class Source {
         <<interface>>
+        +Heartbeat() time.Duration
         +Run(ctx, r Reporter) error
         +Execute(ctx, c Command) (Result, error)
     }
@@ -53,6 +61,7 @@ classDiagram
     class Snapshot {
         <<struct>>
         +Identity Identity
+        +GlobalRef string
         +Elements []Element
         +Links []Link
         +Facts map~string, Facts~
@@ -136,6 +145,7 @@ classDiagram
         +Values []string
         +Unit string
         +Critical bool
+        +WriteOnly bool
     }
     class Param {
         <<struct>>
@@ -153,6 +163,7 @@ classDiagram
     SourceConfig *-- Scheduler
     Driver ..> Source : erzeugt
     Driver *-- ActionDef
+    Driver *-- FactDef
     Source ..> Reporter : meldet über
     Source ..> Command : führt aus
     Source ..> Result : liefert
@@ -170,24 +181,30 @@ classDiagram
 
 | Typ | Bedeutung |
 |---|---|
-| `sdk.Register(Driver)` | Registrierung in `init()`; doppelte Namen sind ein Programmierfehler (`panic`) |
+| `sdk.Register(Driver)` | Registrierung in `init()`. Ein Programmierfehler (`panic`) sind: doppelte Namen, ein Name außer `[a-z0-9]+` (Treibername = Paketname), ein Fakt doppelt im Katalog oder aus dem Vokabular mit anderem Typ, eine Einstellung, deren `Type` nicht zum Typ ihres Fakts passt, eine `WriteOnly`-Einstellung mit Fakt im Katalog |
 | `Driver.Actions` | **Katalog**: wie jede Aktion funktioniert, die der Treiber irgendwo anbietet (Parameter, Prüfbedingung, Timeout, `critical`). *Welches* Element sie unterstützt, steht in `Element.Actions`; `reboot` kann z. B. am Zugangs-Element (Gerät) und an einzelnen Modulen stehen |
-| `Driver.Heartbeat` | erwarteter Abstand der Lebenszeichen; ohne Lebenszeichen für das **Dreifache** gilt die Quelle als nicht erreichbar. `0` = Sende-Ziel ohne Health-Check, nie `unknown` |
+| `Driver.Facts` | **Fakt-Katalog** der Rohwerte (mit Namespace, z. B. `vxl.cpu_temp`): Typ, Einheit, Beschreibung. Kern- und bekannte Fakten stehen mit Typ im Vokabular und werden nicht wiederholt. Der Regel-Editor bietet daraus Fakten und passende Operatoren an |
+| `FactType` | `Bool`, `Number` (`float64`) oder `String` |
+| `Source.Heartbeat()` | erwarteter Abstand der Lebenszeichen **dieser Quelle**, vom Core einmal nach `New` gelesen und für die Lebensdauer der Instanz fest. Die meisten Treiber geben eine Konstante zurück, der HTTP-Treiber das Intervall seines Health-Checks aus der Konfiguration. Ohne Lebenszeichen für das **Dreifache** gilt die Quelle als nicht erreichbar. `0` = keine Überwachung der Lebenszeichen (Sende-Ziel ohne Health-Check) |
 | `SourceConfig.Logger` | vom Core pro Quelle erzeugt, mit den Attributen `driver`, `source_id` und `device_id` (siehe Logging) |
 | `SourceConfig.Secret` | entschlüsselter Klartext des Secrets der Quelle (JSON, Format legt der Treiber fest); leer ohne Secret. Nie loggen |
-| `Facts` | `map[string]any`; Werte nur `bool`, `float64` oder `string`, keine Listen oder Objekte. **Zahlen sind immer `float64`**, auch Ganzzahlen (Treiber wandeln um); exakt bis 2⁵³. Andere Werte verwirft der Core mit Log-Eintrag. Schlüssel aus dem Vokabular |
+| `Facts` | `map[string]any`; Werte nur `bool`, `float64` oder `string`, keine Listen oder Objekte. **Zahlen sind immer `float64`**, auch Ganzzahlen (Treiber wandeln um); exakt bis 2⁵³. Schlüssel aus dem Vokabular oder dem Fakt-Katalog, Wert vom deklarierten Typ. Andere Schlüssel und Werte verwirft der Core, mit `Warn`-Log einmal pro Quelle und Schlüssel |
+| `Snapshot.GlobalRef` | globale ID des Geräts aus Sicht dieser Quelle, im Namensraum des Treibers (`xlink:X8A9001`); der Core setzt sie am Zugangs-Element. Leer, wenn die Quelle keine kennt |
 | `Snapshot.Facts`, `.Alarms` | Schlüssel ist die `external_id` (`""` = Zugangs-Element) |
 | `Update.Alarms` | pro Element die **vollständige** Liste der aktuellen Alarme; sie ersetzt die vorige. Ein Element ohne Eintrag bleibt unverändert |
-| `Element.ParentID` | `external_id` des Elternelements; `""` = direkt unter dem Gerät |
-| `Endpoint` | entweder `ExternalID` (Element dieser Quelle) oder `GlobalRef` (Element einer anderen Quelle, ggf. noch unbekannt) |
+| `Element.ParentID` | `external_id` des Elternelements; `""` = direkt unter dem Zugangs-Element der Quelle |
+| `Element.GlobalRef` | global eindeutige ID mit Namensraum (`xlink:X8A9001-E1`, `nmos:<uuid>`); nur am Element im eigenen Baum, nie an Stellvertretern. Jeder Namensraum gehört einem Treiber; andere verwenden ihn nur in `Endpoint` |
+| `Endpoint` | entweder `ExternalID` (Element dieser Quelle) oder `GlobalRef` (Element einer anderen Quelle, ggf. noch unbekannt). `represents` zeigt immer per `GlobalRef` auf das Original: Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts |
 | `Result.Status` | `Accepted` oder `Rejected`; ein `error` aus `Execute` bedeutet `failed` (nicht erreicht, Transportfehler) |
-| `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical` |
+| `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical`. `WriteOnly`: Das Gerät meldet den Wert nicht zurück; es gibt keinen Fakt dazu und keine Prüfung, `accepted` ist der Endzustand |
 | `Element.Attributes` | statische Attribute, nur zur Anzeige. Reservierter Schlüssel `params` bei Sende-Zielen (`kind = trigger`): Parameter-Schema des Aufrufs als Map auf `Param`; die UI baut daraus das Formular, der Treiber prüft die Werte bei `Execute` selbst |
 | `Param` | wie `Setting`, zusätzlich `Default` (`bool`, `float64` oder `string`) |
 | `Condition.Value` | JSON-Wert als Text, darf Platzhalter enthalten |
 | `ActionDef.Verify` | Prüfbedingung mit Platzhaltern aus den Parametern (z. B. `bitrate eq {{bitrate}}`); bei `set` erzeugt der Core sie selbst aus den gesetzten Werten |
 
-**Vokabular** (`sdk/vocab`): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten, Kern-Aktionen. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`.
+**Vokabular** (`sdk/vocab`): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten **mit Typ und Einheit**, Kern-Aktionen und die Namensräume von `global_ref` (`xlink`, `nmos` …) mit dem Treiber, dem sie gehören. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`.
+
+**Verbote für Einstellungen:** Keine Einstellung, die die Adresse der eigenen Quelle ändert (z. B. die Management-IP, über die verbunden ist), und nie geheime Werte (Passwörter, Schlüssel): Parameter eines Laufs stehen im Klartext in `action_run.params`.
 
 ## Pflichten im Ablauf
 
@@ -224,7 +241,10 @@ sequenceDiagram
     S-->>-C: Run kehrt zurück
 ```
 
-- Nach **jedem** `Connected()` folgt ein **vollständiger** `Snapshot`, bevor `Update`s kommen. Der Core kennt nach einem Neustart nichts und verlässt sich darauf.
+- Nach **jedem** `Connected()` folgt ein **vollständiger** `Snapshot`, bevor `Update`s kommen. Der Core kennt nach einem Neustart nichts und verlässt sich darauf. `Update`s zwischen `Connected` und dem ersten `Snapshot` verwirft er.
+- **Live** ist die Quelle nach `Connected` und vollständigem `Snapshot`, solange ihre Lebenszeichen aktuell sind. Nur dann bewertet der Core ihre Fakten; in jedem anderen Zustand sind ihre Elemente `unknown`.
+- Ein Fakt wird gemeldet, solange das Element ihn grundsätzlich hat. Der Treiber lässt ihn nicht weg, um „kein Signal“ auszudrücken; dafür gibt es `false`. Fehlt ein Fakt im vollständigen `Snapshot`, zieht der Core Befunde dazu zurück (`fact_missing`).
+- Ein `Update` für eine unbekannte `external_id` ist ein Fehler des Treibers: Der Core verwirft es, mit `Warn`-Log einmal pro Quelle und `external_id` bis zum nächsten `Snapshot`.
 - Ändert sich die **Struktur** (Element neu oder weg, Link neu oder weg, Aktionen, Einstellungen), meldet der Treiber erneut einen vollständigen `Snapshot`. Der Core vergleicht selbst; der Treiber muss keine Differenzen bilden.
 - Jeder Aufruf am `Reporter` zählt als Lebenszeichen. `Heartbeat()` braucht nur, wer längere Zeit nichts zu melden hat (Event-Streams).
 - Reporter-Aufrufe kommen aus einer Goroutine nacheinander; der `Reporter` blockiert nicht lange.
@@ -239,7 +259,7 @@ stateDiagram-v2
     Live --> Live: Update / Heartbeat
     Live --> Connecting: Disconnected
     Live --> Unreachable: keine Lebenszeichen (3 × Heartbeat)
-    Connecting --> Unreachable: keine Verbindung (3 × Heartbeat)
+    Connecting --> Unreachable: 3 × Heartbeat seit dem letzten Lebenszeichen
     Unreachable --> Live: Connected + Snapshot
     Starting --> Backoff: New liefert Fehler
     Connecting --> Backoff: Run endet mit Fehler oder Panic
@@ -253,10 +273,11 @@ stateDiagram-v2
     Stuck --> [*]: Run kehrt doch noch zurück
 ```
 
-- **`Unreachable`** erzeugt den Befund `source.unreachable` am Zugangs-Element; alle anderen Elemente der Quelle werden `unknown`.
-- **Panic** in `Run` oder `Execute` fängt der Core (`recover`), meldet sie als `source.unreachable` mit Fehlertext und startet die Quelle nach einer Wartezeit neu.
+- **Nur `Live` wird bewertet.** In `Starting`, `Connecting`, `Backoff`, `Unreachable`, `Stopping` und `Stuck` sind alle Elemente der Quelle außer dem Zugang sofort `unknown`.
+- **`source.unreachable`** entsteht am Zugangs-Element, wenn seit dem letzten Lebenszeichen 3 × `Heartbeat()` vergangen sind, ohne dass die Quelle wieder `Live` ist; beim Start zählt die Zeit ab dem Start der Quelle. Er gilt für jeden Anlass gleich (Stille, Verbindungsabbruch, `Backoff`, `Stuck`) und endet, sobald die Quelle wieder `Live` ist. Bei `Heartbeat() = 0` entsteht er nur aus `Backoff` und `Stuck`, dann sofort.
+- **Panic** in `Run` oder `Execute` fängt der Core (`recover`), geht nach `Backoff` (Fehlertext in `source.unreachable`) und startet die Quelle nach einer Wartezeit neu.
 - **Stoppen:** Der Core bricht den `ctx` von `Run` ab (Quelle deaktiviert, Gerät gelöscht, Konfiguration oder Secret geändert, Monika beendet). `Run` muss danach zügig zurückkehren und alle Verbindungen schließen.
-- **Hängender Treiber (`Stuck`):** Kehrt `Run` nach 10 s nicht zurück, meldet der Core das als `source.unreachable` mit Grund „Treiber reagiert nicht“. Go kann die Goroutine nicht beenden; der Core startet deshalb **keine zweite Instanz**, solange die alte läuft. Sonst hätte das Gerät zwei gleichzeitige Sitzungen.
+- **Hängender Treiber (`Stuck`):** Kehrt `Run` nach 10 s nicht zurück, geht die Quelle nach `Stuck` (Grund in `source.unreachable`: „Treiber reagiert nicht“). Go kann die Goroutine nicht beenden; der Core startet deshalb **keine zweite Instanz**, solange die alte läuft. Sonst hätte das Gerät zwei gleichzeitige Sitzungen.
 - **Konfiguration oder Secret geändert:** Stoppen wie oben, danach Neustart mit der neuen `SourceConfig`. Kein Live-Update im Treiber.
 - **Wiederverbinden** ist Sache des Treibers (bzw. seiner Gerätelibrary). Der Core startet eine Quelle nur neu, wenn `Run` mit Fehler endet oder eine Panic auftritt.
 
@@ -287,7 +308,7 @@ sequenceDiagram
 
 - `Execute` kann gleichzeitig zu `Run` und für verschiedene Elemente parallel aufgerufen werden; der Treiber muss das aushalten. Für **ein** Element ruft der Core nacheinander auf (FIFO).
 - `Execute` prüft Parameter gegen die Grenzen aus `settings` bzw. das Parameter-Schema und lehnt ungültige mit `Rejected` ab.
-- **Sammelaktionen auf ein Gerät:** Mit angegebenem Treiber („`reboot` über `videoxlink`“) geht die Aktion nur an das Zugangs-Element dieses Treibers (das Gerät); ohne Treiber an alle übrigen Elemente, die sie unterstützen (z. B. alle Module). Der Treiber sieht davon nur einzelne `Execute`-Aufrufe.
+- **Sammelaktionen auf ein Gerät oder eine Gruppe:** Mit `device_level` geht die Aktion an die Zugangs-Elemente (das Gerät selbst, Treiber Pflicht: „`reboot` über `videoxlink`“), ohne an alle übrigen Elemente, die sie unterstützen (z. B. alle Module); `driver` filtert in beiden Fällen nach Quelle. Der Treiber sieht davon nur einzelne `Execute`-Aufrufe.
 - Erfolg ist der beobachtete Zustand, nicht die Antwort: Die Wirkung meldet der Treiber über `Update`, der Core prüft.
 
 ## Scheduler für abfragende Treiber
@@ -372,11 +393,15 @@ Eine Isolation pro Library gibt es in einem Prozess nicht (keine Goroutine-lokal
 |---|---|---|
 | S1 | Wer treibt? | Der Treiber (`Run` + `Reporter`); für abfragende Treiber gibt es den `Scheduler` des Core |
 | S2 | Struktur als vollständiger `Snapshot` oder als Differenz? | vollständiger `Snapshot`; der Core vergleicht |
-| S3 | Wo steht der erwartete Abstand der Lebenszeichen? | fest pro Treiber (`Driver.Heartbeat`), nicht konfigurierbar; nicht erreichbar nach dem Dreifachen |
+| S3 | Wo steht der erwartete Abstand der Lebenszeichen? | pro Quelle (`Source.Heartbeat()`), vom Treiber bestimmt, ggf. aus seiner Konfiguration; keine eigene Einstellung des Users; nicht erreichbar nach dem Dreifachen, `0` = keine Überwachung |
 | S4 | Wie kommen Secret- und Konfigurationsänderungen an? | Neustart der Quelle mit neuer `SourceConfig` |
 | S5 | `Execute` an der `Source` oder eigenes Interface? | an der `Source` |
 | S6 | Typ der Fakt-Werte | `bool`, `float64` oder `string`; Zahlen immer `float64`, damit z. B. Temperaturen nicht gerundet werden und Vergleiche eindeutig sind; andere verwirft der Core |
 | S7 | Wer verbindet neu? | der Treiber bzw. seine Gerätelibrary |
 | S8 | Hängender Treiber | 10 s nach dem Stopp `Stuck`; keine zweite Instanz, solange die alte läuft |
-| S9 | Sammelaktion auf ein Gerät | mit Treiber an das Zugangs-Element, ohne Treiber an die übrigen Elemente |
+| S9 | Sammelaktion auf ein Gerät | `device_level` wählt Zugangs-Elemente (Treiber Pflicht) oder übrige Elemente; `driver` ist ein Filter |
 | S10 | Logging | nur über `SourceConfig.Logger` (mit `driver`, `source_id`, `device_id`); Gerätelibraries nehmen einen `*slog.Logger` an; `log`-Ausgaben fremder Libraries landen global über `slog.SetDefault` |
+| S11 | Typen der Fakten | fester Typ pro Schlüssel: Vokabular für Kern und bekannt, `Driver.Facts` für Rohwerte; der Core verwirft alles andere |
+| S12 | Eltern ohne `ParentID` | das Zugangs-Element der Quelle (echte Wurzel) |
+| S13 | Identität des Geräts für Links | `Snapshot.GlobalRef` am Zugangs-Element; `global_ref` immer mit Namensraum |
+| S14 | Wann wird bewertet? | nur, wenn die Quelle `Live` ist; sonst sind ihre Elemente `unknown` |

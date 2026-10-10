@@ -1,6 +1,6 @@
 # Vertrag: Anmeldung und Rechte
 
-**Status:** abgestimmt am 2026-10-09. **Paket:** `internal/auth`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 12; [`services.md`](services.md) (Zusammenspiel mit der API).
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Paket:** `internal/auth`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 12; [`services.md`](services.md) (Zusammenspiel mit der API).
 
 `auth` beantwortet zwei getrennte Fragen: **Wer bist du?** (Anmeldung, Sitzung, Token) und **Was darfst du?** (Rollen, Rechte, Geltungsbereich). Benutzer, Rollen, Rechte, Tokens und Sitzungen ändert nur `auth`; die API ruft es auf.
 
@@ -8,7 +8,7 @@
 
 | # | Entscheidung |
 |---|---|
-| P1 | API als JSON über HTTP, Vertrag als OpenAPI 3.1 (`api.yaml`, eigener Vertrag) |
+| P1 | API als JSON über HTTP, Vertrag als OpenAPI 3.0.3 (`api.yaml`, eigener Vertrag; Version siehe [`api.md`](api.md), R1) |
 | P2 | Live-Push per Server-Sent Events; die Event-ID ist `View.Version` |
 | P3 | Sitzungen der UI auf dem Server (Tabelle), Token im `HttpOnly`-Cookie; lokale Anmeldung mit **TOTP** als zweitem Faktor |
 | P4 | Dienstkonten melden sich mit API-Token an: `Authorization: Bearer …` |
@@ -207,9 +207,11 @@ sequenceDiagram
 ## Rechte prüfen (`Allowed`)
 
 - Rechte des Benutzers = Vereinigung der Rechte aller seiner Rollen (nur Erlauben, kein Verbieten).
-- Ein Recht mit Geltungsbereich S gilt für Element E, wenn E im Bereich von S liegt (`docs/ARCHITECTURE.md` Abschnitt 12): S ist NULL; S ist E; S ist ein Vorfahre von E über `parent_id`; S ist das Gerät von E; S ist eine Gruppe, die E oder ein Gerät bzw. einen Vorfahren von E rekursiv enthält. Aufgelöst über die `View`.
+- Ein Recht mit Geltungsbereich S gilt für Element E, wenn `View.InScope(S, E)` (`core.md`): S ist NULL; S ist E oder ein Vorfahre von E über `parent_id` (das Gerät ist der fernste); S ist eine Gruppe, die E oder einen Vorfahren von E rekursiv enthält. Dieselbe Auflösung gilt für Regeln, Weiterleitung, Verlauf und Watch.
+- **Aktionen an Stellvertretern:** Geprüft wird das Recht am Stellvertreter, nicht am Original (das Recht folgt dem Weg, `docs/ARCHITECTURE.md` Abschnitt 7).
 - **Kritische Aktionen:** `Allowed(base) && Allowed(critical)` für dasselbe Element; die beiden Rechte dürfen aus verschiedenen Rollen kommen.
-- Globale Rechte (`preset_run`, `preset_edit`, `admin`) haben immer Geltungsbereich NULL.
+- Globale Rechte (`preset_run`, `preset_edit`, `source_edit`, `admin`) haben immer Geltungsbereich NULL.
+- **`source_edit`** braucht, wer Quellen anlegt, ändert (Treiber, Adresse, Konfiguration, Secret, aktiviert) oder löscht. Es ist global, weil Secrets geteilt werden: Wer eine Quelle mit Secret umlenken darf, kommt an die Zugangsdaten aller Quellen mit diesem Secret.
 
 ## Neue Tabellen
 

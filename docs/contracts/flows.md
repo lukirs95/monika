@@ -1,6 +1,6 @@
 # Vertrag: Abläufe
 
-**Status:** abgestimmt am 2026-10-09. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 9, 10, 12, 13 und 14; Bausteine aus [`sdk.md`](sdk.md) und [`core.md`](core.md).
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 9, 10, 12, 13 und 14; Bausteine aus [`sdk.md`](sdk.md) und [`core.md`](core.md).
 
 Discovery-Lauf und „Fakt → Befund“ stehen in `core.md` (Abläufe: Meldungen eines Treibers). Hier stehen die Abläufe, die mehrere Komponenten verbinden.
 
@@ -16,7 +16,7 @@ Discovery-Lauf und „Fakt → Befund“ stehen in `core.md` (Abläufe: Meldunge
 | Weiterleitung | `internal/forward` | Ereignisse filtern und an syslog/webhook senden |
 | Influx-Schreiber | `internal/history/influx` | Fakten und Health im festen Takt aus der `View` |
 | Rechte | `internal/auth` | `Allowed(view, user, permission, element)` für API und Preset-Runner |
-| API | `internal/api` | Anmeldung, Rechte, Befehle an Core/Executor/Preset-Runner, Live-Push |
+| API | `internal/api` | Anmeldung, Rechte, Befehle an Core/Executor/Preset-Runner, Live-Push über einen Verteiler mit einem Abo am Core |
 
 ## Start
 
@@ -44,13 +44,13 @@ sequenceDiagram
     M->>C: Laden: Inventar, Regeln, aktive Befunde, Health
     M->>+C: go Run(ctx)
     M->>X: go Run(ctx) (abonnieren Ereignisse)
-    C->>Sup: Start(alle aktiven Quellen nicht gelöschter Geräte)
+    C->>Sup: Start(alle aktivierten Quellen)
     loop pro Quelle
         Sup->>Sec: Value(secret_id)
         Sup->>Sup: Driver.New(SourceConfig), go Run(ctx, Reporter)
     end
     M->>A: Listen (zuletzt)
-    Note over C: alle Elemente unknown, bis ihre Quelle einen Snapshot meldet
+    Note over C: Elemente einer Quelle sind unknown, bis sie Live ist (Connected + Snapshot)
 ```
 
 - **Abbruch statt Warten:** Ist die Konfiguration ungültig, die Datenbank nicht erreichbar, eine Migration fehlerhaft oder ein Secret nicht lesbar, beendet sich Monika mit Fehler. Neustarts übernimmt die Umgebung (Docker, systemd).
@@ -71,12 +71,22 @@ sequenceDiagram
 
     M->>M: SIGTERM / SIGINT
     M->>A: Shutdown (keine neuen Anfragen, laufende beenden, Frist)
-    M->>P: Stopp: keine neuen Läufe, laufende enden als unterbrochen
+    M->>P: Stopp: keine neuen Läufe und Stufen, offene Läufe abschließen (höchstens 5 s)
     M->>Sup: alle Quellen stoppen (ctx), höchstens 10 s je Quelle
     M->>C: Schleife beenden: Rest verarbeiten, letztes SaveHealth
     M->>X: Rest senden bzw. schreiben (kurze Frist)
     M->>DB: Pool schließen
 ```
+
+**Offene Läufe beim Stopp** enden wie nach einem Neustart (F2), nur mit Grund „Monika gestoppt“; `cancelled` bleibt dem Abbrechen durch User oder Preset vorbehalten:
+
+| Status beim Stopp | Ende |
+|---|---|
+| `pending` (nie gesendet) | `failed` |
+| `sent` | auf die Antwort des Treibers warten, gemeinsam höchstens 5 s; dann der echte Status (`accepted`, `rejected`, `failed`), ohne Antwort `failed`. Ein abgebrochenes `Execute` ließe offen, ob das Gerät den Befehl ausgeführt hat |
+| `accepted` (Prüfbedingung läuft) | `unconfirmed` |
+
+Der Preset-Runner startet keine weiteren Stufen; der Wurzellauf endet mit dem schlechtesten Status seiner Kinder.
 
 ## Weiterleitung
 
@@ -89,7 +99,7 @@ sequenceDiagram
     participant Z as Ziel (syslog/webhook)
     participant S as Store
 
-    C-->>F: FindingRaised / FindingEnded / FindingAcked / ActionFinished
+    C-->>F: FindingRaised / FindingEnded / FindingAcked / RunChanged (Endzustand)
     F->>F: pro Ziel filtern: Ereignistyp, Mindest-Schweregrad, Geltungsbereich (über die View)
     F->>F: in die Warteschlange des Ziels
     F->>Sec: Value(secret_id) (bei Bedarf, z. B. Token)
@@ -103,7 +113,8 @@ sequenceDiagram
 ```
 
 - Eine Warteschlange **pro Ziel**: ein langsames Ziel hält die anderen nicht auf. Ist sie voll, werden die ältesten Ereignisse verworfen und geloggt (best effort).
-- `FindingEnded` wird je nach `cleared_reason` als `finding.cleared` (behoben) oder `finding.withdrawn` gesendet.
+- `FindingEnded` wird je nach `cleared_reason` als `finding.cleared` (behoben) oder `finding.withdrawn` gesendet; `RunChanged` mit Endzustand als `action.finished`. `FindingCauseChanged` wird nicht weitergeleitet.
+- Der Geltungsbereich eines Ziels wird über `View.InScope` aufgelöst, wie bei Regeln und Rechten.
 
 ## Aktion
 
@@ -118,8 +129,8 @@ sequenceDiagram
     participant C as Core (View, Ereignisse)
 
     A->>A: Rechte: operate bzw. configure (+ critical) am Ziel
-    A->>X: Submit(Lauf: Ziel, Aktion, Parameter, Treiber?)
-    X->>X: Ziel auflösen: Element, Sammelaktion (Gerät, Gruppe), Zugangs-Element
+    A->>X: Submit(Lauf: Ziel, Aktion, Parameter, device_level, Treiber?)
+    X->>X: Ziel auflösen: Element selbst oder Verteilung über View.InScope (Zugänge bzw. übrige Elemente, Treiber als Filter)
     X->>S: action_run anlegen (pending), bei Sammelaktion mit Kindern
     X-->>A: Lauf-ID
     Note over X: Warteschlange pro Element (FIFO)
@@ -144,15 +155,15 @@ sequenceDiagram
             end
         end
     end
-    X-->>C: ActionFinished (für Weiterleitung und UI)
+    X-)C: Post(RunChanged) nach jeder Statusänderung (für UI, Preset-Runner, Weiterleitung)
 ```
 
 ```mermaid
 stateDiagram-v2
     [*] --> pending: angelegt
     pending --> sent: an der Reihe, an den Treiber
-    pending --> cancelled: abgebrochen (Preset abgebrochen, Monika gestoppt)
-    pending --> failed: Ziel verschwunden oder Quelle fehlt
+    pending --> cancelled: abgebrochen (User oder Preset)
+    pending --> failed: Ziel verschwunden, Quelle fehlt, Monika gestoppt oder neu gestartet
     sent --> rejected: Gerät lehnt ab
     sent --> failed: nicht erreicht
     sent --> accepted: Gerät nimmt an
@@ -166,9 +177,19 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-- **Sammelaktion:** ein übergeordneter Lauf mit einem Kind pro Element; er endet, wenn alle Kinder enden, mit dem schlechtesten Status (`failed` > `rejected` > `unconfirmed` > `accepted` > `confirmed`, `docs/ARCHITECTURE.md` Abschnitt 9).
+- **Sammelaktion:** ein übergeordneter Lauf mit einem Kind pro Element; er endet, wenn alle Kinder enden, mit dem schlechtesten Status (`failed` > `rejected` > `unconfirmed` > `accepted` > `confirmed`, `docs/ARCHITECTURE.md` Abschnitt 9). Wurde er selbst abgebrochen, endet er als `cancelled`.
+- **Ziel:** Ein Element, das die Aktion selbst unterstützt, bekommt sie selbst. Geräte und Gruppen verteilen: `device_level = true` an die Zugangs-Elemente (Treiber Pflicht), sonst an alle übrigen Elemente; `driver` filtert nach Quelle. Bei `set` bekommt nur ein Element einen Kind-Lauf, das **alle** gesetzten Schlüssel hat; übersprungene Mitglieder nennt die Zusammenfassung im übergeordneten Lauf.
+- **`WriteOnly`-Einstellungen** erzeugen keine Prüfbedingung; der Lauf endet mit `accepted`.
 - **Kritisch:** `action_run.critical` friert ein, ob die Aktion (Definition oder `critical_actions`) oder ein gesetzter Schlüssel kritisch war.
-- **Unterbrochen durch Neustart:** Nach einem Neustart wird nichts erneut an Geräte gesendet. Monika schließt offene Läufe nur ab: `pending` und `sent` als `failed`, `accepted` als `unconfirmed`, jeweils mit Grund „Monika neu gestartet“. Wer die Aktion wiederholen will, löst sie neu aus.
+- **Unterbrochen durch Neustart:** Nach einem Neustart wird nichts erneut an Geräte gesendet. Monika schließt offene Läufe nur ab: `pending` und `sent` als `failed`, `accepted` als `unconfirmed`, jeweils mit Grund „Monika neu gestartet“. Wer die Aktion wiederholen will, löst sie neu aus. Beim geordneten Stopp gilt dasselbe (siehe Herunterfahren).
+- **Abbrechen** (`POST /runs/{id}/cancel`): Die API leitet nach Art des Laufs weiter:
+
+| Lauf | Weg | Wirkung |
+|---|---|---|
+| Wurzel eines Presets (`action = preset`) | `Runner.Cancel(root)` | keine weiteren Stufen, laufende Wartezeiten (`delay_ms`) enden; danach `Executor.Cancel` für die offenen Kinder |
+| übergeordneter Lauf einer Sammelaktion | `Executor.Cancel` | alle Kinder, die noch `pending` sind, werden `cancelled` |
+| einzelner Lauf, auch innerhalb eines Presets | `Executor.Cancel` | nur dieser Lauf; ein Preset läuft weiter |
+| Lauf im Endzustand | – | `409` mit `code = run_finished` |
 - **Endzustände sind endgültig.** Ein Lauf ist Verlauf, kein Zustand: Er hält fest, was bei dieser einen Ausführung passiert ist. Nichts setzt `unconfirmed` (oder einen anderen Endzustand) später zurück oder auf `confirmed`; ob eine spätere Wirkung von diesem Befehl kam, ist nicht feststellbar. Den aktuellen Zustand eines Elements zeigen immer die Fakten.
 - **Prüfbedingung:** Der Executor abonniert `FactsChanged` und prüft bei jeder Änderung des Elements gegen die `View`; nach dem Neuanmelden (`core.md`, Abonnenten) prüft er einmal direkt.
 - **Rechte** prüft nur die API beim Absenden (bzw. der Preset-Runner vorab); der Executor prüft nicht erneut. Zwischen Absenden und Senden liegen nur Warteschlange und Preset-Stufen, keine zeitgesteuerte Ausführung.
@@ -186,7 +207,8 @@ sequenceDiagram
     A->>A: Recht preset_run
     A->>P: Run(preset, user)
     P->>S: GetPreset
-    P->>P: Vorabprüfung: Rechte für jeden Schritt am Ziel (inkl. critical)
+    P->>P: Ziele einfrieren: jeden Schritt über die View in Element-Listen auflösen
+    P->>P: Vorabprüfung: Rechte an jedem eingefrorenen Ziel (inkl. critical)
     alt ein Recht fehlt
         P-->>A: abgelehnt, nichts gestartet
     end
@@ -195,7 +217,7 @@ sequenceDiagram
     loop Stufen nacheinander
         par Schritte der Stufe parallel
             P->>P: delay_ms abwarten
-            P->>X: Submit(Schritt-Lauf, parent = Wurzel)
+            P->>X: Submit(Schritt-Lauf mit eingefrorenen Zielen, parent = Wurzel)
         end
         P->>P: auf Endzustand aller Läufe der Stufe warten
         alt ein Schritt fehlgeschlagen ohne continue_on_error
@@ -207,13 +229,14 @@ sequenceDiagram
 ```
 
 - „Fehlgeschlagen“ heißt für die Stufe: `failed` oder `rejected`. `unconfirmed` bricht nicht ab (das Gerät hat angenommen, die Wirkung ist nur nicht beobachtet).
+- **Eingefrorene Ziele:** Was ein Preset tut, steht beim Start fest. Wer während des Laufs in eine Zielgruppe kommt, wird nicht bedient; ein eingefrorenes Element, das beim Einreichen verschwunden ist, bekommt einen Lauf, der als `failed` endet. Die Listen liegen nur im Speicher des Runners; ein unterbrochenes Preset wird nicht fortgesetzt (F2).
 
 ## Neue Store-Methoden, die diese Abläufe brauchen
 
 | Interface | Methoden |
 |---|---|
-| `action.Store` | `CreateRun(ctx, run)` (mit Kindern), `UpdateRunStatus(ctx, id, status, response)`, `FinishInterruptedRuns(ctx, reason)` |
-| `forward.Store` | `ListTargets(ctx)`, `SetTargetResult(ctx, id, sentAt, lastError)`; Ziele anlegen/ändern/löschen mit Audit |
+| `action.Store` | `CreateRuns(ctx, runs)` (mit Kindern), `UpdateRun(ctx, run)`, `FinishInterruptedRuns(ctx, reason)` |
+| `forward.Store` | `ListTargets(ctx)`, `SetTargetResults(ctx, results)`; Ziele anlegen/ändern/löschen mit Audit |
 | `auth.Store` | Benutzer, Rollen, Rechte laden; initialen Admin anlegen (eigener Vertrag mit der API) |
 
 ## Entscheidungen
@@ -227,3 +250,6 @@ sequenceDiagram
 | F5 | Wiederholungen der Weiterleitung | 3 Wiederholungen (1 s, 5 s, 30 s), Warteschlange pro Ziel, bei Überlauf die ältesten verwerfen |
 | F6 | Wie wartet der Executor auf die Prüfbedingung? | Ereignisse (`FactsChanged`) abonnieren; wer auf Änderungen reagiert, abonniert (`core.md`) |
 | F7 | Was bricht eine Preset-Stufe ab? | `failed` und `rejected`, nicht `unconfirmed`; Endzustände von Läufen sind endgültig |
+| F8 | Offene Läufe beim geordneten Stopp | wie F2, Grund „Monika gestoppt“; `sent` wartet höchstens 5 s auf die Antwort; `cancelled` nur bei echtem Abbrechen |
+| F9 | Wann werden Preset-Ziele aufgelöst? | beim Start, eingefroren; die Vorabprüfung gilt genau diesen Zielen |
+| F10 | Preset abbrechen | Wurzellauf über `Runner.Cancel`, alles andere über `Executor.Cancel`; ein abgebrochener übergeordneter Lauf endet als `cancelled` |

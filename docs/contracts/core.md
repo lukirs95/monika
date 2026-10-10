@@ -1,6 +1,6 @@
 # Vertrag: Core-Komponenten
 
-**Status:** abgestimmt am 2026-10-09. **Pakete:** `internal/core` mit `inventory/`, `state/`, `evaluation/`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 3 (Datenfluss), 5, 6, 8 und 14; Treiberseite: [`sdk.md`](sdk.md).
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Pakete:** `internal/core` mit `inventory/`, `state/`, `evaluation/`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 3 (Datenfluss), 5, 6, 8 und 14; Treiberseite: [`sdk.md`](sdk.md).
 
 Der Core hält Inventar, Fakten, Regeln, aktive Befunde und Health im Speicher und bewertet dort. Er ist der einzige, der über die Store-Interfaces schreibt (siehe `CLAUDE.md`).
 
@@ -8,11 +8,12 @@ Der Core hält Inventar, Fakten, Regeln, aktive Befunde und Health im Speicher u
 
 - **Eine Schleife besitzt den Zustand.** Alle Eingaben (Meldungen der Treiber, Befehle der API, Timer) laufen als Nachrichten in **eine** Goroutine, die sie nacheinander verarbeitet. Kein Zustand im Speicher wird von zwei Goroutinen gleichzeitig angefasst; es braucht keine Locks, und jede Verarbeitung sieht einen in sich stimmigen Stand.
 - **Die Komponenten sind Logik, keine Dienste.** `inventory`, `state` und `evaluation` haben keine eigenen Goroutinen. Die Schleife ruft sie in fester Reihenfolge auf und reicht die Änderungen der einen an die nächste weiter.
-- **Dienste laufen nebenher.** Supervisor (Quellen), Executor, Preset-Runner, Weiterleitung und Influx-Schreiber haben eigene Goroutinen und eigenen Zustand, aber nie Zugriff auf den Zustand der Schleife. Sie sprechen mit ihr nur über Nachrichten (`Do`, `Reporter`, Aufträge an den Supervisor), Ereignisse und die `View` (siehe [`flows.md`](flows.md)).
+- **Dienste laufen nebenher.** Supervisor (Quellen), Executor, Preset-Runner, Weiterleitung und Influx-Schreiber haben eigene Goroutinen und eigenen Zustand, aber nie Zugriff auf den Zustand der Schleife. Sie sprechen mit ihr nur über Nachrichten (`Do`, `Post`, `Reporter`, Aufträge an den Supervisor), Ereignisse und die `View` (siehe [`flows.md`](flows.md), [`services.md`](services.md)).
 - **Lesen ohne Schleife.** Nach jeder Verarbeitung veröffentlicht die Schleife eine unveränderliche Ansicht (`View`). API, Influx-Schreiber und Aktions-Executor lesen sie ohne Wartezeit.
 - **Reagieren über Ereignisse, abtasten über die `View`.** Wer auf eine Änderung reagiert (UI-Push, Weiterleitung, Prüfbedingung des Executors), abonniert Ereignisse und fragt nicht ab. Wer im festen Takt einen Stand abtastet (Influx-Schreiber), liest die `View` im Takt. Einmal lesen nach dem Anmelden gehört zum Abonnieren (siehe Abonnenten).
 - **Änderungen werden als Ereignisse verteilt.** Wer reagieren muss (UI-Push, Weiterleitung, Aktions-Executor), abonniert sie.
 - **Erst die Datenbank, dann der Speicher.** Inventar und Befunde werden geschrieben, bevor der Speicher sie übernimmt. Scheitert das Schreiben, bleibt der Speicher unverändert.
+- **Die Datenbank hält die Schleife nie an.** Jedes Schreiben in der Schleife hat ein Timeout (2 s). Ein gescheiterter Befehl liefert seinen Fehler an `Do`; ein gescheitertes Entstehen oder Enden eines Befunds bleibt im Evaluator offen und wird im Takt wiederholt; ein gescheiterter `Snapshot` wird gemerkt und wiederholt (siehe unten). Fakten im Speicher, `View`, Ereignisse und InfluxDB laufen weiter. Den Zustand der Datenbank führt die `View` (`DB`).
 
 ## Typen und Interfaces
 
@@ -27,15 +28,35 @@ classDiagram
         +Subscribe(buffer int) (<-chan Event, func())
         +Reporter(sourceID) sdk.Reporter
         +Do(ctx, cmd Command) error
+        +Post(m Message)
     }
     class View {
         <<struct, unveränderlich>>
         +Version uint64
         +Elements map~ID, Element~
+        +Links Links
         +Facts map~ID, Facts~
         +Health map~ID, ElementHealth~
         +Findings map~ID, Finding~
+        +Rules map~ID, Rule~
+        +Runs map~ID, Run~
         +Sources map~ID, SourceStatus~
+        +DB DBStatus
+        +InScope(scope, element ID) bool
+        +EffectiveRules(element ID) []RuleSet
+    }
+    class SourceStatus {
+        <<struct>>
+        +State SourceState
+        +Heartbeat time.Duration
+        +LastSeen time.Time
+        +Error string
+    }
+    class Message {
+        <<interface>>
+        SourceStarted, SourceStopped
+        SourceFailed, SourceStuck
+        RunChanged
     }
     class Event {
         <<interface>>
@@ -45,18 +66,21 @@ classDiagram
         FindingRaised
         FindingEnded
         FindingAcked
+        FindingCauseChanged
         HealthChanged
+        RunChanged
         SourceStatusChanged
     }
     class Command {
         <<interface>>
         CreateDevice, DeleteDevice
-        CreateSource, UpdateSource
+        CreateSource, UpdateSource, DeleteSource
         CreateGroup, DeleteGroup
         UpdateUserFields
-        AddGroupMember, RemoveGroupMember
+        AddGroupMember, UpdateGroupMember, RemoveGroupMember
         CreateRule, UpdateRule, DeleteRule
         AckFinding
+        ReplaceSecret
     }
 
     class Inventory {
@@ -115,6 +139,8 @@ classDiagram
     Core ..> View : veröffentlicht
     Core ..> Event : verteilt
     Core ..> Command : nimmt an
+    Core ..> Message : nimmt an
+    View *-- SourceStatus
     Inventory ..> Diff
     Facts ..> Changed
     Evaluator ..> FindingChange
@@ -123,11 +149,19 @@ classDiagram
 | Typ | Bedeutung |
 |---|---|
 | `Core.Reporter(sourceID)` | die Umsetzung von `sdk.Reporter` für eine Quelle: verpackt jede Meldung als Nachricht an die Schleife |
-| `Core.Do(ctx, cmd)` | Befehl der API (bzw. des Aktions-Executors); wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
+| `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
+| `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}` |
+| `View.Links` | alle Links mit Index pro Element (ausgehend und eingehend, nach Typ); für `GET /state`, Ursache/Symptom und die Anzeige von Verbindungen über `represents` |
+| `View.Rules`, `View.Runs` | alle Regeln; laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
+| `View.InScope(scope, element)` | **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
+| `View.EffectiveRules(element)` | pro Fakt und Richtung die geltenden und die überschriebenen Regeln (für die UI) |
+| `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
+| `View.DB` | ob die letzten Schreibvorgänge gelangen; die API meldet sonst `503` an `GET /healthz`, die UI zeigt ein Banner |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Diff` | was die Discovery bzw. ein Befehl am Inventar geändert hat; `Missing`/`Returned` sind Wechsel von `present` |
 | `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben |
-| `Evaluator.Tick` | regelmäßig: Haltezeiten (`hold_seconds`) laufen ab, Lebenszeichen fehlen |
+| `Evaluator.Tick` | regelmäßig: Haltezeiten (`hold_seconds`, `clear_hold_seconds`) laufen ab, Lebenszeichen fehlen, offene Schreibvorgänge werden wiederholt |
+| `FindingChange.CauseSet` | neue Zuordnung von Ursache und Symptom (auch auf „keine Ursache“), siehe unten |
 
 ## Ablauf: Meldungen eines Treibers
 
@@ -163,9 +197,12 @@ sequenceDiagram
     Note over L,S: Health geht gesammelt im Takt an SaveHealth, nicht pro Meldung
 ```
 
+- `ApplySnapshot` setzt für `ParentID ""` das Zugangs-Element der Quelle als Eltern und `Snapshot.GlobalRef` an den Zugang.
+- **Struktur unverändert:** Der Core vergleicht den `Snapshot` im Speicher mit dem vorigen. Ohne Strukturänderung schreibt er nur `last_seen_at`, höchstens alle 5 min, und übernimmt nur die Fakten.
 - `Replace` ersetzt alle Fakten der Quelle: Was im `Snapshot` fehlt, ist weg. `Update` dagegen ergänzt (`Merge`).
+- Mit dem ersten übernommenen `Snapshot` nach `Connected` ist die Quelle `Live`; erst dann wird bewertet.
 - Bewertet werden nur betroffene Elemente: geänderte Fakten, neue, verschwundene und zurückgekehrte Elemente, sowie Elemente, deren Links sich geändert haben (Ursache und Symptom).
-- Schlägt `ApplyDiscovery` fehl, verwirft die Schleife den ganzen `Snapshot` und loggt; der nächste vollständige Stand des Treibers versucht es erneut.
+- **Schlägt `ApplyDiscovery` fehl** (Datenbank, Konflikt der `global_ref`), merkt sich die Schleife den `Snapshot` pro Quelle. Folgende `Update`s mischt sie in den gemerkten Stand, ein neuerer `Snapshot` ersetzt ihn. Sie wiederholt mit steigender Wartezeit (höchstens 1 min) und erzeugt `source.discovery_failed` am Zugang (`system`, `error`, Fehlertext in `details`), der mit dem ersten Erfolg als behoben endet. Bis dahin ist die Quelle nicht `Live`. Das Gerät wird dafür nicht erneut abgefragt.
 
 ### Änderung (`Update`) und Lebenszeichen
 
@@ -183,7 +220,7 @@ sequenceDiagram
     L->>F: Touch(sourceID, now)
     L->>F: Merge(u.Facts)
     F-->>L: Changed (nur echte Änderungen)
-    opt etwas hat sich geändert
+    opt Quelle Live und etwas hat sich geändert
         L->>E: Evaluate(Changed, View)
         E-->>L: FindingChanges
         L->>S: Befunde schreiben
@@ -193,13 +230,16 @@ sequenceDiagram
 
     loop Takt der Schleife (1 s)
         L->>F: Expired(now)
-        F-->>L: Quellen ohne Lebenszeichen seit 3 × Heartbeat
+        F-->>L: Quellen nicht Live seit 3 × Heartbeat nach dem letzten Lebenszeichen
         L->>E: Tick(now, View)
-        E-->>L: FindingChanges (source.unreachable, abgelaufene Haltezeiten)
+        E-->>L: FindingChanges (source.unreachable, abgelaufene Haltezeiten, Wiederholungen)
         L->>S: Befunde schreiben, SaveHealth (gesammelt)
         L->>B: Ereignisse
     end
 ```
+
+- Ein `Update` einer Quelle, die nicht `Live` ist, wird übernommen (Fakten „zuletzt gemeldet“), aber nicht bewertet; vor dem ersten `Snapshot` nach `Connected` wird es verworfen. Fakten an einer unbekannten `external_id` verwirft die Schleife mit `Warn`-Log einmal pro Quelle und `external_id` bis zum nächsten `Snapshot`.
+- Ist die Quelle nicht `Live`, sind ihre Elemente außer dem Zugang `unknown`; ihre aktiven Befunde bleiben unverändert.
 
 **Zusagen bei Last.** Läuft die Schleife hinterher, fasst der Reporter aufeinanderfolgende `Update`s einer Quelle zusammen. Wie er das tut, ist Sache der Implementierung; zugesagt ist:
 
@@ -229,16 +269,26 @@ sequenceDiagram
     L-)L: Supervisor beauftragen: Quellen des Geräts stoppen
     L->>E: Befunde und Health der betroffenen Elemente
     L->>L: neue View
-    L->>B: Ereignisse (u. a. FindingEnded mit device_deleted)
+    L->>B: Ereignisse (u. a. FindingEnded mit deleted)
     L-->>-A: nil bzw. Fehler
 ```
 
 - Jeder Befehl ist eine Transaktion im Store **und** ein Schritt der Schleife. Die API sieht nach `Do` die neue `View`.
-- Befehle, die Quellen betreffen (Gerät löschen, Quelle ändern, Secret ersetzen), beauftragen den Supervisor mit Start bzw. Stopp der Quelle (`sdk.md`, Stoppen). Die Schleife wartet nicht darauf; Panics und hängende Quellen meldet der Supervisor als Nachricht zurück.
+- Befehle, die Quellen betreffen (Gerät löschen, Quelle anlegen, ändern oder löschen, Secret ersetzen), beauftragen den Supervisor mit Start bzw. Stopp der Quelle (`sdk.md`, Stoppen). Die Schleife wartet nicht darauf; Start, Stopp, Fehler, Panics und hängende Quellen meldet der Supervisor per `Post` zurück.
+- `ReplaceSecret` schreibt über `secret.Service` und startet danach alle Quellen neu, die das Secret verwenden (aus der `View`). Anlegen und Löschen von Secrets betreffen keine laufende Quelle und gehen direkt an `secret.Service`.
+
+Prüfungen im Core, zusätzlich zur Datenbank:
+
+| Befehl | Prüfung |
+|---|---|
+| `CreateSource`, `UpdateSource` | Gerät existiert; Treiber registriert; Neustart beim Supervisor |
+| `DeleteDevice`, `DeleteSource`, `DeleteGroup` | kein Preset-Schritt zielt darauf (bei Gerät und Quelle: auf eines ihrer Elemente); aktive Befunde werden vorher zurückgezogen (`deleted`) |
+| `AddGroupMember`, `UpdateGroupMember` | Ziel hat `kind = group`; Zyklusprüfung im Store |
+| `CreateRule`, `UpdateRule` | Operator und Werttyp gegen den Fakt-Katalog |
 
 ## Abonnenten
 
-Abonnenten (UI-Push pro Browserfenster, Weiterleitung, Aktions-Executor) bekommen Ereignisse über einen gepufferten Kanal. Die Schleife wartet nie auf einen Abonnenten und verwirft nie still ein Ereignis: Ist ein Puffer voll, **hängt sie den Abonnenten ab** und schließt seinen Kanal. Er merkt das, meldet sich neu an und liest die vollständige `View`.
+Abonnenten (Verteiler der API für alle Browserfenster, Weiterleitung, Aktions-Executor, Preset-Runner) bekommen Ereignisse über einen gepufferten Kanal. Die Schleife wartet nie auf einen Abonnenten und verwirft nie still ein Ereignis: Ist ein Puffer voll, **hängt sie den Abonnenten ab** und schließt seinen Kanal. Er merkt das, meldet sich neu an und liest die vollständige `View`.
 
 ```mermaid
 sequenceDiagram
@@ -262,7 +312,7 @@ sequenceDiagram
 ```
 
 - Erst anmelden, dann die `View` lesen; über `Version` geht dazwischen nichts verloren.
-- **UI-Push:** Ein abgehängtes Browserfenster lädt den Stand neu.
+- **UI-Push:** Die API hält **ein** Abo und verteilt an die Browser-Ströme (`api.md`); ein abgehängter Verteiler schickt allen Strömen `resync`.
 - **Aktions-Executor:** prüft Bedingungen ohnehin gegen die `View`; nach dem Neuanmelden prüft er erneut.
 - **Weiterleitung:** bekommt einen großen Puffer, weil jedes Ereignis zählt. Wird sie doch abgehängt, gehen die Ereignisse dazwischen verloren (best effort, `docs/ARCHITECTURE.md` Abschnitt 13); das wird geloggt.
 
@@ -275,14 +325,27 @@ stateDiagram-v2
     Pending --> Ok: wieder erfüllt vor Ablauf der Haltezeit
     Pending --> Active: hold_seconds abgelaufen (RaiseFinding)
     Ok --> Active: Regel verletzt, hold_seconds = 0
-    Active --> Ok: erfüllt, bei Hysterese erst ab clear_value (EndFinding resolved)
-    Active --> Ended: dauerhaft nicht mehr bewertet (EndFinding withdrawn)
-    Active --> Active: Quelle nicht erreichbar (bleibt aktiv, Health unknown)
+    Active --> Clearing: erfüllt (auch durch unerfülltes when), bei Hysterese erst ab clear_value
+    Clearing --> Active: wieder verletzt
+    Clearing --> Ok: clear_hold_seconds abgelaufen (EndFinding resolved)
+    Active --> Ok: erfüllt, clear_hold_seconds = 0 (EndFinding resolved)
+    Active --> Ended: Regel gilt nicht mehr (EndFinding withdrawn)
+    Clearing --> Ended: Regel gilt nicht mehr (EndFinding withdrawn)
+    Active --> Active: Quelle nicht Live (keine Bewertung, Health unknown)
     Ended --> [*]
 ```
 
-- `Pending` existiert nur im Speicher. Nach einem Neustart beginnen Haltezeiten neu.
+- **Regel gilt** am Element: Geltungsbereich und Filter passen, Element überwacht, `fact` (bei `when` auch `when_fact`) vorhanden, und sie gehört zur gewinnenden Stufe für Fakt und Richtung (`docs/ARCHITECTURE.md` Abschnitt 8). Gründe für das Zurückziehen: `rule_deleted`, `rule_disabled`, `rule_changed`, `unmonitored`, `element_missing`, `fact_missing`, `source_disabled`, `deleted`.
+- `Pending` und `Clearing` existieren nur im Speicher. Nach einem Neustart beginnen Haltezeiten neu; ein aktiver Befund bleibt so lange aktiv.
 - Befunde aus Gerätealarmen entstehen ohne Haltezeit, sobald der Alarm in der Liste steht, und enden (behoben), sobald er fehlt.
+
+## Ursache und Symptom
+
+Die Zuordnung ist eine Ableitung über den Link-Graphen der `View`, kein Zustand vom Entstehen.
+
+- **Auslöser:** Ein Befund entsteht oder endet, oder Links ändern sich. Der Evaluator ordnet dann alle aktiven Befunde neu zu, die von dort flussabwärts erreichbar sind (Breitensuche: `feeds` A→B wirkt auf B, `uses` A→B auf A, `parent` auf die Kinder).
+- **Regel:** Ein aktiver Befund ist Symptom, wenn flussaufwärts ein aktiver Befund mit `warning` oder `error` liegt; `caused_by_id` zeigt auf die Wurzel. Bei mehreren Wurzeln gewinnt die schwerere, dann die ältere. Kreise sind abgefangen, dort ist der älteste Befund die Wurzel.
+- Jede Änderung wird als `FindingChange.CauseSet` geschrieben (`SetFindingCause`) und als `FindingCauseChanged` verteilt; die Weiterleitung verwendet es nicht.
 
 ## Entscheidungen
 
@@ -290,8 +353,12 @@ stateDiagram-v2
 |---|---|---|
 | C1 | Nebenläufigkeit | eine Schleife besitzt den gesamten Zustand im Speicher; `inventory`, `state`, `evaluation` sind Logik ohne eigene Goroutinen; Dienste (Supervisor, Executor …) laufen nebenher und sprechen nur über Nachrichten, Ereignisse und die `View` |
 | C2 | Lesen | unveränderliche `View` nach jeder Verarbeitung, ohne Locks lesbar |
-| C3 | Schreiben in die Datenbank | Inventar und Befunde sofort und synchron in der Schleife; Health gesammelt im Takt |
+| C3 | Schreiben in die Datenbank | Inventar und Befunde sofort und synchron in der Schleife, mit Timeout; Befunde werden bei Fehlern im Takt wiederholt; Health gesammelt im Takt; `last_seen_at` ohne Strukturänderung höchstens alle 5 min |
 | C4 | Rückstau bei Last | Reporter fasst `Update`s zusammen (neuester Wert gilt, Zwischenwerte können entfallen, Reihenfolge bleibt); das Verfahren ist Sache der Implementierung |
 | C5 | Takt der Schleife | 1 s für Lebenszeichen, Haltezeiten und `SaveHealth`; InfluxDB über einen eigenen Schreiber aus der `View` |
 | C6 | Langsame Abonnenten | werden abgehängt, melden sich neu an und lesen die `View` (über `Version` lückenlos); Weiterleitung mit großem Puffer |
 | C7 | Größe der `View` | strukturell geteilt: unveränderte Teile werden übernommen, nicht kopiert |
+| C8 | Ursache und Symptom | bei jeder Befund- und Link-Änderung neu abgeleitet; `caused_by_id` zeigt auf die Wurzel und wird persistiert |
+| C9 | Gescheiterter `Snapshot` | gemerkt und mit steigender Wartezeit wiederholt, ohne das Gerät; `source.discovery_failed` am Zugang |
+| C10 | Datenbank nicht erreichbar | Monika läuft weiter, Zustandswechsel warten; sichtbar über `View.DB`, Banner und `GET /healthz` |
+| C11 | Nachrichten der Dienste | `Post` ohne Warten; `Do` nur für Befehle mit Fehlerrückgabe |

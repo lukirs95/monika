@@ -3,7 +3,7 @@
 Zwischenstand der Implementierung, damit die Arbeit in einer neuen Sitzung nahtlos weitergeht.
 Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 
-Stand: 2026-10-08
+Stand: 2026-10-10
 
 ## Erledigt
 
@@ -26,7 +26,8 @@ Stand: 2026-10-08
 - **Presets** (2026-10-09): `preset.Store`; Ziele und ihre Geräte werden beim Speichern gesperrt und auf Löschung geprüft (Race mit `DeleteDevice`/`DeleteGroup` per Test abgesichert); Schritte behalten beim Ändern ihre IDs; Audit mit Schritten am Ende der Transaktion. **Damit ist der Store vorerst vollständig.**
 - **Verträge** (2026-10-09): `docs/contracts/` – SDK, Core, Abläufe, Dienste, Anmeldung, API (OpenAPI 3.0.3); `make docs-check`, `make api-check`.
 - **Schema und Stores aus den Verträgen** (2026-10-09): Tabellen `user_session`, `user_totp`, `user_recovery_code`, `api_token.read_only`; `action.Store`, `forward.Store`, `auth.Store` (Benutzer, Rollen, Rechte, Sitzungen, Tokens, TOTP); `secret.Vault` für die gemeinsame Rotation von Secrets und TOTP.
-- **Entscheidungen vom 2026-10-07:** Geräte weich löschen; `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
+- **Entscheidungen vom 2026-10-07:** ~~Geräte weich löschen~~ (überholt durch das Audit); `FinishDiscovery` (ein Statement pro Lauf); Gruppen-Zyklenprüfung unter Advisory Lock.
+- **Architektur-Audit** (2026-10-10): alle Befunde mit dem User durchgegangen und in ARCHITECTURE, DBML und allen Verträgen nachgezogen (siehe unten). Nur Dokumente; der Code folgt in Schritt 2.
 
 ## Architektur-Durchsicht (2026-10-08)
 
@@ -44,6 +45,21 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
 - **Sende-Ziele** (verallgemeinert aus dem HTTP-Treiber): nur `trigger`, kein `set`, Fakten nur über Aufrufe.
 - Neue Spalten `element.critical_actions`, `preset_step.driver`; Regel-Präzedenz und Geltungsbereich der Rechte präzisiert.
 
+## Architektur-Audit (2026-10-10)
+
+Ein externes Audit hat Widersprüche und Lücken gefunden; alle Punkte sind entschieden und dokumentiert. Kurzfassung:
+
+- **Health:** Element ohne geltende Regel ist *ungeprüft* (keine Health, Rollup `unchecked`); Zugang mit Heartbeat > 0 gilt als geprüft. Deaktivierte Quelle = nicht überwacht. Leere Menge bei Gerät/Gruppe = keine Health; `unknown` nur aus einer Quelle, die nicht Live ist.
+- **Live:** Elemente sind `unknown`, sobald ihre Quelle nicht Live ist; Fakten dann nicht bewertet, nicht nach InfluxDB. `source.unreachable` nach 3 × Heartbeat seit dem letzten Lebenszeichen, für jeden Anlass gleich.
+- **SDK:** `Source.Heartbeat()` statt `Driver.Heartbeat`; Fakt-Katalog `Driver.Facts` mit festem Typ; `Snapshot.GlobalRef` am Zugang; `global_ref` mit Namensraum; `ParentID ""` = Zugang (echte Wurzel); `Setting.WriteOnly`; keine Einstellungen für die eigene Adresse und keine geheimen Werte; Treibername = Paketname (`ravio`).
+- **Bewertung:** Regel gilt, wenn Fakt (und `when_fact`) existieren; unerfülltes `when` = erfüllt; Präzedenz pro Element, Fakt und Richtung; neue Gründe `fact_missing`, `deleted` (statt `device_deleted`); `clear_hold_seconds`; Ursache/Symptom bei jeder Änderung neu abgeleitet (Wurzel). Ein Geltungsbereich für alles (`View.InScope`), Regeln vererben an Kinder.
+- **Löschen:** keine Vorab-Elemente mehr; Geräte, Gruppen und Quellen werden **hart** gelöscht (CASCADE); Historie ohne Fremdschlüssel mit `element_path`. `deleted_at` entfällt.
+- **Rechte:** neues globales Recht `source_edit` für Quellen und Secret-Zuweisung.
+- **Aktionen:** `device_level` + `driver` als Filter; `set` nur an Elemente mit allen Schlüsseln; Preset-Ziele beim Start eingefroren; Abbrechen über Runner bzw. Executor, abgebrochene übergeordnete Läufe `cancelled`; Stopp wie Neustart (`sent` wartet ≤ 5 s).
+- **Core:** `Post`, Nachrichten des Supervisors, `View` mit Links, Runs, Rules, `DB`; Ereignisse `RunChanged`, `FindingCauseChanged`; Befehle `DeleteSource`, `UpdateGroupMember`, `ReplaceSecret`; gescheiterte Snapshots gemerkt und wiederholt (`source.discovery_failed`); DB-Timeouts, `/healthz`.
+- **API:** Verteiler mit einem Abo, sofort schreiben und bei Rückstau zusammenfassen, Ringpuffer (100, ohne Fakten) für Netzaussetzer.
+- **Bewusst akzeptiert:** PostgreSQL in der Schleife (mit Absicherung), wiederverwendete IDs (nur dokumentiert), Rechte an Stellvertretern folgen dem Weg; Management-IP und Zugangsdaten ändern später als gekoppelte Abläufe (ARCHITECTURE §17).
+
 ## Nächste Schritte
 
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
@@ -52,13 +68,19 @@ Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbm
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
    5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api.yaml` (OpenAPI 3.0.3, `make api-check`)
-2. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
+2. **Code an das Audit anpassen** (Schema und Stores, bevor der Core entsteht):
+   - `make db-generate`, `make db-gen-go`; Migration `00003` bleibt.
+   - `deleted_at`, `CreatePlannedElement` entfernen; `DeleteDevice` und `DeleteGroup` hart löschen (CASCADE, Audit vorher), `DeleteSource` neu; Presets blockieren weiterhin.
+   - `finding.element_path`, `action_run.element_path` (Namens-Snapshot), Queries ohne Fremdschlüssel auf `element`.
+   - `rule.clear_hold_seconds`, `preset_step.device_level`, `permission` `source_edit` (`auth.Permission.Global`).
+   - `ApplyDiscovery`: Eltern `""` = Zugang, `global_ref` am Zugang.
+   - `evaluation.ClearReason`: `fact_missing`, `deleted`; `Rollup.Unchecked`.
+3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken
 
 - `inventory.Source` kennt die ID ihres Zugangs-Elements nicht; die API (`Source.access_element_id`) braucht sie.
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
-- `CreatePlannedElement` nimmt auch Elemente gelöschter Geräte an und prüft keine reservierten `kind`-Werte (Prüfung gehört in den Core).
 - Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
 - `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.
 - Kein Linter festgelegt: `CLAUDE.md` verlangt einen, es gibt aber noch kein `make lint` (Vorschlag: golangci-lint).

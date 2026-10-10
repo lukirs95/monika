@@ -155,6 +155,16 @@ paths:
               schema: { $ref: '#/components/schemas/Me' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /healthz:
+    get:
+      tags: [state]
+      operationId: getHealthz
+      summary: Betriebsbereitschaft für Docker-Healthcheck und externe Überwachung (ohne Anmeldung)
+      security: []
+      responses:
+        '200': { description: 'Monika läuft, die Datenbank ist erreichbar' }
+        '503': { description: 'Die Datenbank ist nicht erreichbar; Zustandswechsel warten' }
+
   /state:
     get:
       tags: [state]
@@ -162,8 +172,8 @@ paths:
       summary: Aktueller Stand ohne Fakten, gefiltert nach Rechten
       description: |
         Inventar und Links, Health und Rollups, aktive Befunde, laufende Läufe und der Zustand der
-        Quellen. Gelöschte Geräte und Gruppen fehlen; verschwundene Elemente sind enthalten
-        (`present = false`). Fakten gibt es pro Element bzw. per Abo.
+        Quellen. Verschwundene Elemente sind enthalten (`present = false`). Fakten gibt es pro
+        Element bzw. per Abo.
       responses:
         '200':
           description: Stand mit Version der View
@@ -195,15 +205,19 @@ paths:
       summary: Ereignisstrom (Server-Sent Events)
       description: |
         Erstes Ereignis ist `hello` mit der `stream_id`. Jedes Ereignis trägt als SSE-`id` die
-        Version der View; nach einem Abbruch sendet der Browser sie als `Last-Event-ID`. Ist sie zu
-        alt, folgt `resync`, und der Client lädt `/state` neu. `facts_changed` kommt nur für
-        beobachtete Elemente (siehe `/events/{stream_id}/watch`).
+        Version der View, zu der es den Stand seines Objekts beschreibt; nach einem Abbruch sendet
+        der Browser sie als `Last-Event-ID`. Liegt sie im Ringpuffer (letzte 100 Ereignisse ohne
+        `facts_changed`), folgen die späteren Ereignisse daraus; sonst folgt `resync`, und der Client
+        lädt `/state` neu. Danach meldet der Client seine Watches neu an. `facts_changed` kommt nur
+        für beobachtete Elemente (siehe `/events/{stream_id}/watch`). Bei Rückstau fasst der Server
+        Ereignisse nach Objekt zusammen; es gilt der neueste Stand (`docs/contracts/api.md`).
 
         Ereignistypen (SSE `event`) und Nutzdaten (SSE `data`, JSON):
         `hello` → EventHello, `resync` → leer, `elements_changed` → EventElementsChanged,
         `facts_changed` → EventFactsChanged, `health_changed` → EventHealthChanged,
         `finding_raised` / `finding_acked` → Finding, `finding_ended` → EventFindingEnded,
-        `run_changed` → RunSummary, `source_status_changed` → SourceStatus.
+        `finding_cause_changed` → EventFindingCauseChanged, `run_changed` → RunSummary,
+        `source_status_changed` → SourceStatus.
       parameters:
         - name: Last-Event-ID
           in: header
@@ -223,7 +237,8 @@ paths:
       operationId: watch
       summary: Beobachtete Geltungsbereiche eines Stroms ändern
       description: |
-        Beobachtet werden Elemente, Geräte oder Gruppen (jeweils mit Inhalt). Die Abos gehören zum
+        Beobachtet werden Geltungsbereiche: Elemente mit Nachfahren, Gruppen mit Mitgliedern und deren
+        Nachfahren (wie bei Regeln und Rechten). Die Abos gehören zum
         Strom und enden mit ihm. Die Antwort enthält die aktuellen Fakten aller neu beobachteten
         Elemente. Höchstens 1 000 beobachtete Elemente pro Strom.
       parameters:
@@ -285,10 +300,11 @@ paths:
     delete:
       tags: [inventory]
       operationId: deleteDevice
-      summary: Gerät weich löschen (inventory_edit global)
+      summary: Gerät löschen (inventory_edit global)
       description: |
-        Entfernt Mitgliedschaften, löscht Regeln, Rechte und Weiterleitungen mit diesem
-        Geltungsbereich, zieht aktive Befunde zurück und stoppt die Quellen. Solange ein
+        Löscht das Gerät mit seinen Quellen und Elementen, entfernt Mitgliedschaften, löscht Regeln,
+        Rechte und Weiterleitungen mit diesem Geltungsbereich, zieht aktive Befunde zurück
+        (`deleted`) und stoppt die Quellen. Befunde und Läufe bleiben im Verlauf. Solange ein
         Preset-Schritt auf das Gerät oder eines seiner Elemente zielt: 409 `device_in_use`.
       parameters:
         - $ref: '#/components/parameters/DeviceID'
@@ -319,7 +335,7 @@ paths:
     post:
       tags: [inventory]
       operationId: createSource
-      summary: Quelle anlegen, mit Zugangs-Element (inventory_edit am Gerät)
+      summary: Quelle anlegen, mit Zugangs-Element (source_edit)
       description: |
         Die Konfiguration wird gegen das Schema des Treibers geprüft. Pro Gerät höchstens eine
         Quelle je Treiber (409 `source_exists`).
@@ -343,10 +359,29 @@ paths:
         '422': { $ref: '#/components/responses/Unprocessable' }
 
   /sources/{source_id}:
+    delete:
+      tags: [inventory]
+      operationId: deleteSource
+      summary: Quelle löschen (source_edit)
+      description: |
+        Stoppt die Quelle und löscht sie mit ihrem Zugangs-Element, ihren Elementen und Links;
+        Konfiguration mit Geltungsbereich darin wird mitgelöscht, aktive Befunde werden zurückgezogen
+        (`deleted`). Solange ein Preset-Schritt auf eines ihrer Elemente zielt: 409 `source_in_use`.
+      parameters:
+        - name: source_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Gelöscht }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
     put:
       tags: [inventory]
       operationId: updateSource
-      summary: Adresse, Konfiguration, Secret und Aktivierung ändern (inventory_edit am Gerät)
+      summary: Adresse, Konfiguration, Secret und Aktivierung ändern (source_edit)
       description: Die Quelle wird mit der neuen Konfiguration neu gestartet.
       parameters:
         - name: source_id
@@ -393,7 +428,7 @@ paths:
     delete:
       tags: [inventory]
       operationId: deleteGroup
-      summary: Gruppe weich löschen (inventory_edit global)
+      summary: Gruppe löschen (inventory_edit global)
       description: Solange ein Preset-Schritt auf die Gruppe zielt, 409 `group_in_use`.
       parameters:
         - $ref: '#/components/parameters/GroupID'
@@ -460,29 +495,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-
-  /elements:
-    post:
-      tags: [inventory]
-      operationId: createPlannedElement
-      summary: Treiber-Element vorab anlegen, bevor der Treiber es sieht (inventory_edit am Gerät)
-      description: Reservierte `kind`-Werte (`device`, `group`, `access`) ergeben 422 `reserved_kind`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PlannedElementCreate' }
-      responses:
-        '201':
-          description: Angelegt
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Element' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/Unprocessable' }
 
   /elements/{element_id}/user-fields:
     put:
@@ -600,8 +612,11 @@ paths:
       summary: Aktion ausführen (operate bzw. bei set configure, jeweils + critical, am Ziel)
       description: |
         Asynchron: Die Antwort enthält die ID des Laufs, den Fortgang meldet `run_changed`.
-        Bei Aktionen für das ganze Gerät auf Geräte oder Gruppen ist `driver` Pflicht
-        (422 `driver_required`). Wird die Aktion vom Ziel nicht unterstützt: 422 `unsupported_action`.
+        Ein Element, das die Aktion unterstützt, bekommt sie selbst. Geräte und Gruppen verteilen:
+        `device_level = true` an die Zugangs-Elemente (dann ist `driver` Pflicht, 422
+        `driver_required`), sonst an alle übrigen Elemente; `driver` filtert nach Quelle. Bei `set`
+        werden Elemente übersprungen, die nicht alle Schlüssel haben. Wird die Aktion von keinem Ziel
+        unterstützt: 422 `unsupported_action`.
       requestBody:
         required: true
         content:
@@ -639,7 +654,10 @@ paths:
       tags: [actions]
       operationId: cancelRun
       summary: Noch nicht gesendete Läufe abbrechen (wer ihn ausgelöst hat oder operate am Ziel)
-      description: Bricht den Lauf und alle Kinder ab, die noch `pending` sind; Gesendetes läuft zu Ende.
+      description: |
+        Bricht den Lauf und alle Kinder ab, die noch `pending` sind; Gesendetes läuft zu Ende. Bei
+        einem Preset-Wurzellauf startet keine weitere Stufe. Ein abgebrochener übergeordneter Lauf
+        endet als `cancelled`. Lauf im Endzustand: 409 `run_finished`.
       parameters:
         - $ref: '#/components/parameters/RunID'
       responses:
@@ -647,6 +665,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /presets:
     get:
@@ -667,7 +686,7 @@ paths:
       tags: [actions]
       operationId: createPreset
       summary: Preset anlegen (preset_edit)
-      description: Ziele müssen existieren und dürfen nicht gelöscht sein (422 `invalid_target`); `driver` bei Aktionen für das ganze Gerät (422 `driver_required`).
+      description: Ziele müssen existieren (422 `invalid_target`); `driver` bei `device_level = true` (422 `driver_required`).
       requestBody:
         required: true
         content:
@@ -828,7 +847,7 @@ paths:
     get:
       tags: [admin]
       operationId: listSecrets
-      summary: Secrets ohne Wert (admin oder inventory_edit, zum Zuweisen an Quellen)
+      summary: Secrets ohne Wert (admin oder source_edit, zum Zuweisen an Quellen)
       responses:
         '200':
           description: Secrets
@@ -1110,7 +1129,7 @@ paths:
       tags: [admin]
       operationId: setRoleGrants
       summary: Rechte einer Rolle ersetzen (admin)
-      description: preset_run, preset_edit und admin nur ohne Geltungsbereich (422 `global_permission`).
+      description: preset_run, preset_edit, source_edit und admin nur ohne Geltungsbereich (422 `global_permission`).
       parameters:
         - $ref: '#/components/parameters/RoleID'
       requestBody:
@@ -1228,7 +1247,7 @@ paths:
     get:
       tags: [history]
       operationId: listFindingHistory
-      summary: Befunde, aktive und vergangene (nur sichtbare Elemente)
+      summary: Befunde, aktive und vergangene (nur sichtbare Elemente; zu gelöschten Elementen nur mit view global)
       parameters:
         - $ref: '#/components/parameters/Before'
         - $ref: '#/components/parameters/Limit'
@@ -1263,7 +1282,7 @@ paths:
     get:
       tags: [history]
       operationId: listRunHistory
-      summary: Läufe, laufende und vergangene (nur sichtbare Ziele; Preset-Wurzeln mit preset_run oder preset_edit)
+      summary: Läufe, laufende und vergangene (nur sichtbare Ziele, zu gelöschten nur mit view global; Preset-Wurzeln mit preset_run oder preset_edit)
       parameters:
         - $ref: '#/components/parameters/Before'
         - $ref: '#/components/parameters/Limit'
@@ -1474,14 +1493,25 @@ components:
 
     Driver:
       type: object
-      required: [name, config_schema, actions, heartbeat_seconds]
+      required: [name, config_schema, actions, facts]
       properties:
-        name: { type: string }
+        name: { type: string, pattern: '^[a-z0-9]+$' }
         config_schema: { type: object, additionalProperties: true, description: 'JSON-Schema für SourceCreate.config' }
-        heartbeat_seconds: { type: number, description: '0 = Sende-Ziel ohne Health-Check' }
         actions:
           type: array
           items: { $ref: '#/components/schemas/ActionDef' }
+        facts:
+          type: array
+          description: Fakt-Katalog des Treibers (Rohwerte); Kern- und bekannte Fakten aus dem Vokabular sind enthalten
+          items: { $ref: '#/components/schemas/FactDef' }
+    FactDef:
+      type: object
+      required: [key, type]
+      properties:
+        key: { type: string }
+        type: { type: string, enum: [bool, number, string] }
+        unit: { type: string, nullable: true }
+        description: { type: string, nullable: true }
     ActionDef:
       type: object
       required: [name, critical]
@@ -1502,17 +1532,6 @@ components:
       required: [label]
       properties:
         label: { type: string, minLength: 1 }
-        notes: { type: string, nullable: true }
-    PlannedElementCreate:
-      type: object
-      required: [kind, device_id, source_id, external_id]
-      properties:
-        kind: { type: string }
-        device_id: { type: string, format: uuid }
-        source_id: { type: string, format: uuid }
-        parent_id: { type: string, format: uuid, nullable: true, description: 'Standard: das Gerät' }
-        external_id: { type: string, minLength: 1 }
-        label: { type: string, nullable: true }
         notes: { type: string, nullable: true }
     UserFields:
       type: object
@@ -1612,6 +1631,7 @@ components:
             - $ref: '#/components/schemas/Condition'
         clear_value: { type: number, nullable: true, description: 'Hysterese, nur numerisch' }
         hold_seconds: { type: integer, minimum: 0 }
+        clear_hold_seconds: { type: integer, minimum: 0, default: 0, description: 'Sollzustand muss so lange anliegen, bevor der Befund endet' }
     Rule:
       allOf:
         - type: object
@@ -1627,7 +1647,8 @@ components:
         element_id: { type: string, format: uuid, description: 'Element, Gerät oder Gruppe' }
         action: { type: string }
         params: { type: object, additionalProperties: true, nullable: true, description: 'bei set die Werte, bei trigger die Parameter' }
-        driver: { type: string, nullable: true, description: 'Pflicht bei Aktionen für das ganze Gerät auf Geräte oder Gruppen' }
+        device_level: { type: boolean, default: false, description: 'nur bei Gerät oder Gruppe: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente' }
+        driver: { type: string, nullable: true, description: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true' }
     RunAccepted:
       type: object
       required: [run_id]
@@ -1664,7 +1685,8 @@ components:
         action: { type: string }
         params: { type: object, additionalProperties: true, nullable: true }
         continue_on_error: { type: boolean }
-        driver: { type: string, nullable: true }
+        device_level: { type: boolean, default: false, description: 'wie RunRequest.device_level' }
+        driver: { type: string, nullable: true, description: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true' }
     PresetInput:
       type: object
       required: [name, steps]
@@ -1961,7 +1983,7 @@ components:
       properties:
         permission:
           type: string
-          enum: [view, acknowledge, operate, configure, critical, inventory_edit, rule_edit, preset_run, preset_edit, admin]
+          enum: [view, acknowledge, operate, configure, critical, inventory_edit, source_edit, rule_edit, preset_run, preset_edit, admin]
         scope_element_id: { type: string, format: uuid, nullable: true }
 
     State:
@@ -2000,7 +2022,7 @@ components:
         device_id: { type: string, format: uuid, nullable: true }
         source_id: { type: string, format: uuid, nullable: true }
         external_id: { type: string, nullable: true }
-        global_ref: { type: string, nullable: true }
+        global_ref: { type: string, nullable: true, description: 'mit Namensraum, z. B. xlink:X8A9001-E1; am Zugang die des Geräts' }
         transport: { type: string, nullable: true }
         direction: { type: string, enum: [in, out, bidir], nullable: true }
         name: { type: string, nullable: true }
@@ -2048,6 +2070,7 @@ components:
           items: { type: string }
         unit: { type: string, nullable: true }
         critical: { type: boolean, description: 'Ändern erfordert zusätzlich das Recht critical' }
+        write_only: { type: boolean, description: 'Gerät meldet den Wert nicht zurück: kein Fakt, keine Prüfung, Endzustand accepted' }
     Param:
       description: Parameter eines Sende-Ziel-Aufrufs; wie Setting, zusätzlich mit Standardwert
       allOf:
@@ -2081,32 +2104,35 @@ components:
           type: string
           enum: [ok, warning, error, unknown]
           nullable: true
-          description: null = keine Health (nicht überwacht oder verschwunden)
+          description: null = keine Health (nicht überwacht, verschwunden oder ungeprüft; bei Gerät und Gruppe auch leere Menge)
         rollup: { $ref: '#/components/schemas/Rollup' }
     Rollup:
       type: object
       nullable: true
-      required: [ok, warning, error, unknown, unmonitored, missing]
+      required: [ok, warning, error, unknown, unchecked, unmonitored, missing]
       properties:
         ok: { type: integer }
         warning: { type: integer }
         error: { type: integer }
         unknown: { type: integer }
+        unchecked: { type: integer, description: 'ohne geltende Regel' }
         unmonitored: { type: integer }
         missing: { type: integer }
     Finding:
       type: object
-      required: [id, element_id, origin, code, severity, raised_at]
+      required: [id, element_id, element_path, origin, code, severity, raised_at]
       properties:
         id: { type: string, format: uuid }
         element_id: { type: string, format: uuid }
+        element_path: { type: string, description: 'Anzeigename des Elements beim Entstehen' }
+        element_deleted: { type: boolean, description: 'nur im Verlauf: das Element existiert nicht mehr' }
         origin: { type: string, enum: [rule, device, system] }
         rule_id: { type: string, format: uuid, nullable: true }
         code: { type: string }
         severity: { type: string, enum: [info, warning, error] }
         message: { type: string, nullable: true }
         details: { type: object, additionalProperties: true, nullable: true }
-        caused_by_id: { type: string, format: uuid, nullable: true }
+        caused_by_id: { type: string, format: uuid, nullable: true, description: 'Wurzel-Ursache; null = selbst Ursache' }
         raised_at: { type: string, format: date-time }
         cleared_at: { type: string, format: date-time, nullable: true }
         acked_at: { type: string, format: date-time, nullable: true }
@@ -2119,6 +2145,8 @@ components:
         parent_id: { type: string, format: uuid, nullable: true }
         preset_id: { type: string, format: uuid, nullable: true }
         element_id: { type: string, format: uuid, nullable: true }
+        element_path: { type: string, nullable: true, description: 'Anzeigename des Ziels beim Anlegen' }
+        element_deleted: { type: boolean, description: 'nur im Verlauf: das Ziel existiert nicht mehr' }
         action: { type: string }
         status: { type: string, enum: [pending, sent, rejected, failed, accepted, confirmed, unconfirmed, cancelled] }
         critical: { type: boolean }
@@ -2130,7 +2158,8 @@ components:
       required: [source_id, state]
       properties:
         source_id: { type: string, format: uuid }
-        state: { type: string, enum: [starting, connecting, live, unreachable, backoff, stopping, stuck, disabled] }
+        state: { type: string, enum: [starting, connecting, live, unreachable, backoff, stopping, stuck, disabled], description: 'nur live wird bewertet' }
+        heartbeat_seconds: { type: number, nullable: true, description: 'erwarteter Abstand der Lebenszeichen der laufenden Instanz; 0 = keine Überwachung' }
         since: { type: string, format: date-time, nullable: true }
         last_error: { type: string, nullable: true }
 
@@ -2178,11 +2207,15 @@ components:
         version: { type: integer, format: int64 }
     EventElementsChanged:
       type: object
-      required: [elements, removed_links, links]
+      required: [elements, removed_elements, removed_links, links]
       properties:
         elements:
           type: array
           items: { $ref: '#/components/schemas/Element' }
+        removed_elements:
+          type: array
+          description: gelöschte Elemente (Gerät, Quelle oder Gruppe gelöscht)
+          items: { type: string, format: uuid }
         links:
           type: array
           items: { $ref: '#/components/schemas/Link' }
@@ -2213,5 +2246,11 @@ components:
       properties:
         finding_id: { type: string, format: uuid }
         cleared_at: { type: string, format: date-time }
-        reason: { type: string, enum: [resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted] }
+        reason: { type: string, enum: [resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, fact_missing, source_disabled, deleted] }
         withdrawn: { type: boolean }
+    EventFindingCauseChanged:
+      type: object
+      required: [finding_id]
+      properties:
+        finding_id: { type: string, format: uuid }
+        caused_by_id: { type: string, format: uuid, nullable: true, description: 'neue Wurzel-Ursache; null = selbst Ursache' }

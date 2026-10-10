@@ -1,6 +1,6 @@
 # Vertrag: Dienste
 
-**Status:** abgestimmt am 2026-10-09. **Hintergrund:** [`core.md`](core.md) (Schleife, `View`, Ereignisse), [`flows.md`](flows.md) (Abläufe), [`sdk.md`](sdk.md).
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Hintergrund:** [`core.md`](core.md) (Schleife, `View`, Ereignisse), [`flows.md`](flows.md) (Abläufe), [`sdk.md`](sdk.md).
 
 Dienste laufen neben der Schleife des Core, mit eigenen Goroutinen und eigenem Zustand. Mit dem Core sprechen sie nur über Nachrichten, Ereignisse und die `View`. Abhängigkeiten bekommen sie als kleine Interfaces, definiert beim Verwender.
 
@@ -44,7 +44,7 @@ classDiagram
         +Post(m Message)
     }
 
-    Supervisor ..> Core : Reporter, Post(SourceFailed, SourceStuck)
+    Supervisor ..> Core : Reporter, Post(SourceStarted, SourceStopped, SourceFailed, SourceStuck)
     Core ..> Supervisor : Start / Stop
     Executor ..> Supervisor : Execute
     Executor ..> Core : View, Subscribe(FactsChanged), Post(RunChanged)
@@ -80,8 +80,8 @@ classDiagram
 ```
 
 - `Start` und `Stop` kommen aus der Schleife und kehren sofort zurück; der Supervisor arbeitet sie in eigener Goroutine ab. Für dieselbe Quelle gilt die Reihenfolge der Aufträge.
-- `Start` holt den Klartext des Secrets (`secret.Service` erfüllt `SecretValues`), erzeugt `SourceConfig` mit Logger (`driver`, `source_id`, `device_id`) und Scheduler und startet `Run` hinter einer `recover`-Grenze.
-- Er meldet der Schleife `SourceFailed{sourceID, err}` (Fehler, Panic) und `SourceStuck{sourceID}` (`sdk.md`, Stoppen) und startet nach `Backoff` neu, nie zwei Instanzen derselben Quelle.
+- `Start` holt den Klartext des Secrets (`secret.Service` erfüllt `SecretValues`), erzeugt `SourceConfig` mit Logger (`driver`, `source_id`, `device_id`) und Scheduler, liest `Source.Heartbeat()` und startet `Run` hinter einer `recover`-Grenze.
+- Er meldet der Schleife per `Post` `SourceStarted{sourceID, heartbeat}`, `SourceStopped{sourceID}`, `SourceFailed{sourceID, err, panic}` (Fehler, Panic, führt zu `Backoff`) und `SourceStuck{sourceID}` (`sdk.md`, Stoppen) und startet nach `Backoff` neu, nie zwei Instanzen derselben Quelle.
 - `Execute` ruft `Source.Execute` hinter einer `recover`-Grenze; läuft die Quelle nicht: `ErrSourceNotRunning` (der Lauf endet als `failed`).
 
 ## Executor (`internal/action`)
@@ -95,6 +95,8 @@ classDiagram
         +Action string
         +Params json.RawMessage
         +Driver string
+        +DeviceLevel bool
+        +Targets []ID
         +ParentID ID
         +PresetID ID
         +PresetStepID ID
@@ -106,6 +108,7 @@ classDiagram
         +PresetID ID
         +PresetStepID ID
         +ElementID ID
+        +ElementPath string
         +SourceID ID
         +Action string
         +Params json.RawMessage
@@ -129,18 +132,20 @@ classDiagram
     Request ..> Run : Submit legt an
 ```
 
-- `Submit` löst das Ziel über die `View` auf (Element; Sammelaktion auf Gerät oder Gruppe mit bzw. ohne Treiber, `docs/ARCHITECTURE.md` Abschnitt 9), legt den Lauf mit allen Kindern in **einer** Transaktion an (`CreateRuns`) und reiht die Element-Läufe in die Warteschlange ihres Elements ein. Der Aufrufer bekommt sofort die ID.
-- `Critical` und `Verify` friert `Submit` ein: aus der Aktionsdefinition (`Catalog`, aus der Treiber-Registry), `critical_actions` des Elements bzw. bei `set` aus den gesetzten Schlüsseln.
+- `Submit` löst das Ziel über die `View` auf (`docs/ARCHITECTURE.md` Abschnitt 9): ein Element, das die Aktion selbst unterstützt; sonst Verteilung über `View.InScope` an die Zugangs-Elemente (`DeviceLevel`, `Driver` Pflicht) bzw. an alle übrigen Elemente, `Driver` als Filter; bei `set` nur an Elemente mit **allen** Schlüsseln. Vorgegebene `Targets` (eingefroren vom Preset-Runner) ersetzen die Auflösung. Er legt den Lauf mit allen Kindern in **einer** Transaktion an (`CreateRuns`, mit `ElementPath` als Namens-Snapshot) und reiht die Element-Läufe in die Warteschlange ihres Elements ein. Übersprungene Mitglieder stehen in der Zusammenfassung des übergeordneten Laufs. Der Aufrufer bekommt sofort die ID.
+- `Critical` und `Verify` friert `Submit` ein: aus der Aktionsdefinition (`Catalog`, aus der Treiber-Registry), `critical_actions` des Elements bzw. bei `set` aus den gesetzten Schlüsseln; `WriteOnly`-Schlüssel bekommen keine Prüfbedingung.
 - Jede Statusänderung: erst `UpdateRun`, dann `Core.Post(RunChanged)`. Die Schleife nimmt laufende Läufe in die `View` auf und verteilt `RunChanged` (Endzustand = `action.finished` für die Weiterleitung).
-- Übergeordnete Läufe (Sammelaktion, Preset-Schritt) aktualisiert der Executor, sobald alle Kinder enden: schlechtester Status.
-- `Cancel` beendet Läufe, die noch `pending` sind, als `cancelled`; bereits gesendete laufen zu Ende.
+- Übergeordnete Läufe (Sammelaktion, Preset-Schritt) aktualisiert der Executor, sobald alle Kinder enden: schlechtester Status, bzw. `cancelled`, wenn der übergeordnete Lauf selbst abgebrochen wurde.
+- `Cancel` beendet Läufe, die noch `pending` sind, als `cancelled`; bereits gesendete laufen zu Ende. Für einen übergeordneten Lauf betrifft das alle seine offenen Kinder.
+- **Stopp:** keine neuen Läufe; `pending` → `failed`, `sent` wartet gemeinsam höchstens 5 s auf die Antwort, `accepted` → `unconfirmed`, Grund „Monika gestoppt“ (`flows.md`, F8).
 - `FinishInterruptedRuns` ruft der Bootstrap beim Start (F2).
 
 ## Preset-Runner (`internal/preset`)
 
-- `Start` prüft das Recht `preset_run` nicht selbst (das tut die API), wohl aber die **Vorabprüfung** aller Schritte (`auth.Allowed` gegen die `View`, inkl. `critical`). Fehlt ein Recht: Fehler, nichts gestartet.
-- Danach legt er den Wurzel-Lauf an (`Submit` mit `Action = "preset"`) und arbeitet die Stufen in eigener Goroutine ab (`flows.md`, Preset-Lauf). Auf das Ende der Läufe einer Stufe wartet er über `RunChanged`-Ereignisse.
-- Presets anlegen, ändern und löschen laufen ebenfalls über den Preset-Runner (er besitzt `preset.Store`); die Prüfung, ob `driver` bei Aktionen für das ganze Gerät angegeben ist, gehört dorthin.
+- `Start` prüft das Recht `preset_run` nicht selbst (das tut die API). Er **friert die Ziele ein** (jeder Schritt über die `View` in eine Element-Liste aufgelöst) und macht gegen genau diese die **Vorabprüfung** (`auth.Allowed`, inkl. `critical`). Fehlt ein Recht: Fehler, nichts gestartet.
+- Danach legt er den Wurzel-Lauf an (`Submit` mit `Action = "preset"`) und arbeitet die Stufen in eigener Goroutine ab (`flows.md`, Preset-Lauf), jeden Schritt mit seinen eingefrorenen `Targets`. Auf das Ende der Läufe einer Stufe wartet er über `RunChanged`-Ereignisse.
+- `Cancel(rootRunID)` startet keine weiteren Stufen, beendet laufende Wartezeiten und ruft `Executor.Cancel` für die offenen Kinder; der Wurzellauf endet als `cancelled`.
+- Presets anlegen, ändern und löschen laufen ebenfalls über den Preset-Runner (er besitzt `preset.Store`); dorthin gehört die Prüfung, dass `device_level = true` einen `driver` hat.
 
 ## Weiterleitung (`internal/forward`)
 
@@ -202,10 +207,10 @@ Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket au
 | Bereich | Die API ruft auf |
 |---|---|
 | Inventar, Regeln, Befunde quittieren | `Core.Do` |
-| Aktionen | `Executor.Submit` |
+| Aktionen | `Executor.Submit`; Abbrechen über `Executor.Cancel`, beim Preset-Wurzellauf über `preset.Runner.Cancel` |
 | Presets (bearbeiten, starten) | `preset.Runner` |
 | Weiterleitungsziele | `forward.Forwarder` |
-| Secrets | `secret.Service` |
+| Secrets | anlegen, auflisten, löschen: `secret.Service`; **ersetzen: `Core.Do(ReplaceSecret)`**, weil Quellen mit diesem Secret neu starten |
 | Benutzer, Rollen, Rechte, Tokens, Sitzungen | `auth` |
 
 Lesen: aktueller Stand aus der `View` bzw. vom Fachpaket; Verlauf (Audit, vergangene Läufe und Befunde) über eigene, rein lesende Queries.
@@ -218,3 +223,5 @@ Lesen: aktueller Stand aus der `View` bzw. vom Fachpaket; Verlauf (Audit, vergan
 | D2 | Wer besitzt die Konfiguration der Dienste? | der jeweilige Dienst über seinen Store; die API ruft den Dienst auf, nie den Store |
 | D3 | Woher kennt der Executor die Aktionsdefinitionen? | aus der Treiber-Registry über das Interface `Catalog` |
 | D4 | `Cancel` bei gesendeten Läufen | nur `pending` wird `cancelled`; Gesendetes läuft zu Ende |
+| D5 | Secret ersetzen | als Core-Befehl `ReplaceSecret`: Die Schleife schreibt über `secret.Service` und startet die betroffenen Quellen neu; Quellen startet nur die Schleife |
+| D6 | Preset-Ziele | beim Start eingefroren (`Request.Targets`); die Vorabprüfung gilt genau diesen |
