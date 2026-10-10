@@ -33,43 +33,56 @@ Project monika {
              Hierarchie nur über element_link (type = member).
   - Zugang:  kind = access. Wurzel einer Quelle im Gerät, vom Core beim Anlegen
              der Quelle erzeugt; parent = Gerät, keine external_id, genau eines
-             pro Quelle. Trägt Fakten und Aktionen für das ganze Gerät und den
-             Befund source.unreachable.
+             pro Quelle. Alle Treiber-Elemente der Quelle hängen darunter.
+             Trägt Fakten und Aktionen für das ganze Gerät, die Befunde
+             source.unreachable und source.discovery_failed und optional die
+             global_ref des Geräts im Namensraum des Treibers.
   - Treiber: alle anderen kinds. Gehören einer Quelle, haben device_id,
              external_id (eindeutig pro Quelle) und einen parent (mindestens
-             das Gerät selbst). Auch vom User vorab angelegte Elemente gehören
-             dieser Klasse an (source_id gesetzt, first_seen_at = NULL).
+             das Zugangs-Element). Entstehen nur durch die Discovery.
   - device, group und access sind reserviert; nur der Core legt sie an.
-  - Geräte und Gruppen werden weich gelöscht (deleted_at), Treiber-Elemente
-    verschwinden nur (present = false). Kein Element wird hart gelöscht.
+  - Treiber-Elemente verschwinden (present = false). Geräte, Gruppen und
+    Quellen werden hart gelöscht, mit allem, was an ihnen hängt.
+  - Historie (finding, action_run, audit_log) verweist ohne Fremdschlüssel auf
+    Elemente und trägt einen Namens-Snapshot (element_path); sie bleibt lesbar,
+    wenn das Element gelöscht ist.
 
   Bewertung
   - Fakten: flache Map mit Punkt-Schlüsseln (running, signal_present,
     format.rate, ptp_offset, vxl.cpu_temp). Vokabular in Go, drei Stufen:
     Kern (Pflicht), bekannte Metriken, Rohwerte mit Namespace.
-  - Regeln beschreiben den Sollzustand: fact <op> value, optional when.
-    Fakt existiert nicht am Element oder when nicht erfüllt → Regel gilt dort nicht.
+  - Jeder Fakt-Schlüssel hat einen festen Typ (bool, number, string) aus dem
+    Fakt-Katalog des SDK bzw. des Treibers; andere Werte verwirft der Core.
+  - Regeln beschreiben den Sollzustand: fact <op> value, optional when
+    (gelesen als: wenn when, dann fact <op> value).
+  - Eine Regel gilt an einem Element, wenn Geltungsbereich und Filter passen,
+    das Element überwacht ist und fact (bei when auch when_fact) dort existiert.
+    Unerfülltes when = Sollzustand erfüllt.
   - present ist ein reservierter Fakt: der Core blendet element.present ein.
   - Zähler: Raten berechnet der Treiber (<fakt>.rate, pro Sekunde), nie die Regel.
-  - Pro Element und Fakt gewinnt die spezifischste Regel: Geltungsbereich
-    (Element > Gerät > Gruppe > global, nähere Gruppe vor fernerer), dann mehr
-    Filter (match_*). Gleich spezifische Regeln gelten alle.
+  - Pro Element, Fakt und Richtung (Obergrenze lt/lte, Untergrenze gt/gte,
+    Gleichheit eq/ne/in/not_in) gewinnt der spezifischste Geltungsbereich
+    (Element > Vorfahren, nähere zuerst > Gruppe, kürzerer Weg zuerst > global),
+    dann mehr Filter (match_*). Alle Regeln der gewinnenden Stufe gelten.
   - Befunde entstehen aus Regeln (vom User), Gerätealarmen (automatisch)
-    und Systemzuständen (source.unreachable).
-  - Ein Befund endet als behoben (finding.cleared) oder zurückgezogen
-    (finding.withdrawn), sobald er dauerhaft nicht mehr bewertet wird
+    und Systemzuständen (source.unreachable, source.discovery_failed).
+  - Ein Befund endet als behoben (finding.cleared), wenn die Regel erfüllt ist,
+    oder als zurückgezogen (finding.withdrawn), wenn sie dort nicht mehr gilt
     (Regel gelöscht/deaktiviert/geändert, Element nicht überwacht oder
-    verschwunden, Quelle deaktiviert, Gerät gelöscht). Grund in
-    details.cleared_reason.
-  - Health = schlimmster aktiver Befund (warning, error), sonst ok.
-    Liefert die Quelle nicht → unknown, nie error. Nicht überwachte und
-    verschwundene Elemente haben keine Health.
-  - monitored vererbt sich entlang parent_id; Gruppen vererben nicht.
+    verschwunden, Fakt fehlt, Quelle deaktiviert, Gerät oder Quelle gelöscht).
+    Grund in details.cleared_reason.
+  - Health = schlimmster aktiver Befund (warning, error), sonst ok – aber nur,
+    wenn am Element eine Regel gilt (bzw. beim Zugang: die Quelle hat
+    Lebenszeichen). Ist die Quelle nicht Live → unknown, nie error. Nicht
+    überwachte, verschwundene und ungeprüfte Elemente haben keine Health.
+  - monitored vererbt sich entlang parent_id; zusätzlich gilt ein Element einer
+    deaktivierten Quelle als nicht überwacht. Gruppen vererben nicht.
   - Ursache vs. Symptom über Links: feeds A→B wirkt auf B, uses A→B wirkt
     auf A, parent wirkt auf Kinder; member und represents wirken nicht.
+    Die Zuordnung wird bei jeder Befundänderung neu abgeleitet.
   - Geräte und Gruppen: Health = schlimmster Zustand der Elemente bzw.
-    Mitglieder (error > warning > unknown > ok), leere Menge → unknown.
-    Keine Redundanzlogik.
+    Mitglieder mit Health (error > warning > unknown > ok); leere Menge →
+    keine Health. Keine Redundanzlogik.
 
   Aktionen
   - Aktionen sind einmalige Befehle mit "Übernehmen", nie Regler mit Live-Wirkung.
@@ -85,7 +98,9 @@ Project monika {
     (z.B. Uplink-Interface), niemals feeds-Links (Sender ↔ Receiver).
   - Läufe an einem Element werden vom Core nacheinander abgearbeitet (FIFO).
   - Aktionen für das ganze Gerät liegen an den Zugangs-Elementen. Auf Geräte
-    oder Gruppen verteilt, muss der Treiber angegeben sein (preset_step.driver).
+    oder Gruppen verteilt, wählt device_level: true = an die Zugangs-Elemente
+    (dann ist driver Pflicht), false = an alle übrigen Elemente; driver
+    filtert zusätzlich nach Quelle.
   - Übergeordnete Läufe enden mit dem schlechtesten Status ihrer Kinder.
   - Presets sind gespeicherte Befehlsfolgen, kein Sollzustand.
     Monika gleicht nach dem Ausführen nichts ab.
@@ -102,7 +117,8 @@ Project monika {
   - Ergebnis: angenommen → accepted (Endzustand), abgelehnt → rejected,
     nicht erreicht → failed.
   - Kritische Aufrufe pro Aufruf in der Konfiguration → element.critical_actions.
-  - Optionaler Health-Check als Lebenszeichen; ohne ihn nie unknown.
+  - Optionaler Health-Check als Lebenszeichen; ohne ihn nie unreachable wegen
+    Stille, und das Zugangs-Element ist ungeprüft.
   - Zugangsdaten nur über secret_id (Secret-Store), nie in config.
 
   Benutzer und Rechte
@@ -110,12 +126,13 @@ Project monika {
     OIDC (user_identity), Rechte immer in Monika (role, permission_grant).
   - Rechte werden an Rollen vergeben, nie direkt an Benutzer. Nur Erlauben,
     kein Verbieten; Rechte aus mehreren Rollen addieren sich.
-  - Geltungsbereich ohne Filter: NULL = überall; Gruppe = Mitglieder rekursiv
-    (bei Geräten mit allen Elementen); Gerät = alle seine Elemente;
-    Element = das Element und seine Kinder.
-    preset_run, preset_edit und admin sind nur global.
+  - Geltungsbereich (für Regeln, Rechte, Weiterleitung, Verlauf gleich):
+    NULL = überall; Element (auch Gerät, Zugang) = das Element und alle
+    Nachfahren über parent_id; Gruppe = Mitglieder rekursiv, jeweils mit allen
+    Nachfahren. preset_run, preset_edit, source_edit und admin sind nur global.
   - Mitgliedschaften ändern: inventory_edit an Gruppe UND Element.
     Geräte und Gruppen anlegen und löschen: inventory_edit global.
+    Quellen anlegen, ändern, löschen und Secrets zuweisen: source_edit.
   - critical ist ein Zusatzrecht: kritische Aktionen brauchen das Grundrecht
     (operate bzw. configure) UND critical im selben Bereich.
     Kritisch ist, was bei einem Fehlgriff viel kaputt macht und lange zur
@@ -152,7 +169,7 @@ Enum link_type {
   feeds      [note: 'Signalfluss: from speist to (z.B. SDI-In → Encoder, Remote-E1 → D1)']
   uses       [note: 'Ressourcenbindung ohne Signalrichtung (Unit → Port, Stream → Interface, D1 → Peer)']
   member     [note: 'Gruppenmitgliedschaft: from = Gruppe, to = Mitglied']
-  represents [note: 'Perspektive: from ist Stellvertreter von to (Peer → Remote-Gerät)']
+  represents [note: 'Perspektive: from ist Stellvertreter von to (Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts); nur über global_ref adressiert']
 }
 
 Enum port_direction {
@@ -202,7 +219,8 @@ Enum permission {
   operate        [note: 'Scope: Befehle (start, stop, trigger, ...)']
   configure      [note: 'Scope: Einstellungen (set)']
   critical       [note: 'Scope: Zusatzrecht für kritische Befehle und Einstellungen']
-  inventory_edit [note: 'Scope: Labels, Gruppen, Geräte und Quellen']
+  inventory_edit [note: 'Scope: Labels, Notizen, monitored, Gruppen und Mitgliedschaften; global: Geräte und Gruppen anlegen und löschen']
+  source_edit    [note: 'global: Quellen anlegen, ändern (Treiber, Adresse, Konfiguration, Secret, aktiviert) und löschen']
   rule_edit      [note: 'Scope: Regeln']
   preset_run     [note: 'global: Presets ausführen (plus Rechte an allen Zielen)']
   preset_edit    [note: 'global: Presets bearbeiten']
@@ -222,7 +240,7 @@ Enum forward_kind {
 Enum finding_origin {
   rule   [note: 'vom User definierte Regel verletzt']
   device [note: 'vom Gerät selbst gemeldeter Alarm']
-  system [note: 'Monika selbst: Quelle nicht erreichbar (source.unreachable)']
+  system [note: 'Monika selbst: Quelle nicht erreichbar (source.unreachable), Discovery nicht übernommen (source.discovery_failed)']
 }
 
 // ---------------------------------------------------------------------------
@@ -232,13 +250,13 @@ Enum finding_origin {
 Table element {
   id            uuid        [pk, default: `uuidv7()`]
   kind          text        [not null, note: 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger']
-  parent_id     uuid        [ref: > element.id, note: 'nur physische/strukturelle Hierarchie']
-  device_id     uuid        [ref: > element.id, note: 'zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen']
-  source_id     uuid        [ref: > device_source.id, note: 'besitzende Quelle; NULL bei Gerät und Gruppe']
+  parent_id     uuid        [note: 'nur physische/strukturelle Hierarchie; Treiber-Elemente ohne Eltern im Treiber hängen am Zugangs-Element']
+  device_id     uuid        [note: 'zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen']
+  source_id     uuid        [note: 'besitzende Quelle; NULL bei Gerät und Gruppe']
 
   // --- Identität, vom Treiber ---
   external_id   text        [note: 'stabile ID innerhalb der Quelle, z.B. Slot-Pfad oder UnitID; NULL nur beim Zugangs-Element']
-  global_ref    text        [unique, note: 'global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern']
+  global_ref    text        [unique, note: 'global eindeutige ID mit Namensraum (xlink:X8A9001-E1, nmos:<uuid>); am Zugangs-Element die des Geräts (xlink:X8A9001). Nur am Element im eigenen Baum, nie an Stellvertretern']
 
   // --- Beschreibung, vom Treiber ---
   transport     text        [note: 'sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...']
@@ -251,15 +269,14 @@ Table element {
   settings      jsonb       [note: 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}']
 
   // --- Lebenszyklus, vom Core ---
-  present       boolean     [not null, default: true, note: 'false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar']
-  first_seen_at timestamptz [note: 'NULL = vom User vorab angelegt, vom Treiber noch nie gesehen']
-  last_seen_at  timestamptz
+  present       boolean     [not null, default: true, note: 'false = verschwunden; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar']
+  first_seen_at timestamptz
+  last_seen_at  timestamptz [note: 'zuletzt in einem Snapshot gesehen; ohne Strukturänderung höchstens alle 5 min geschrieben']
 
   // --- vom User gepflegt, nie vom Treiber überschrieben ---
   label         text
   notes         text
-  monitored     boolean     [not null, default: true, note: 'false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id']
-  deleted_at    timestamptz [note: 'weich gelöscht (nur Gerät und Gruppe); Zeilen bleiben für Läufe, Befunde und Audit']
+  monitored     boolean     [not null, default: true, note: 'false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id; eine deaktivierte Quelle wirkt wie false']
 
   created_at    timestamptz [not null, default: `now()`]
   updated_at    timestamptz [not null, default: `now()`]
@@ -287,7 +304,6 @@ Table element {
     (kind NOT IN ('device', 'group', 'access')
        AND device_id IS NOT NULL AND parent_id IS NOT NULL
        AND source_id IS NOT NULL AND external_id IS NOT NULL)` [name: 'element_class_check']
-    `deleted_at IS NULL OR kind IN ('device', 'group')` [name: 'element_deleted_check']
     `critical_actions <@ actions` [name: 'element_critical_actions_check']
   }
 
@@ -304,17 +320,24 @@ Table element {
   CREATE UNIQUE INDEX element_source_external_uq
     ON element (source_id, external_id) NULLS NOT DISTINCT
     WHERE source_id IS NOT NULL;
+
+  Löschen: Ein Gerät löscht seine Quellen und Elemente, eine Quelle ihre
+  Elemente (CASCADE). Was mitgelöscht wird, steht im Audit des Löschens.
   '''
 }
 
+Ref: element.parent_id > element.id [delete: cascade]
+Ref: element.device_id > element.id [delete: cascade]
+Ref: element.source_id > device_source.id [delete: cascade]
+
 Table device_source {
   id         uuid    [pk, default: `uuidv7()`]
-  device_id  uuid    [not null, ref: > element.id, note: 'Element mit kind = device (gesichert in der Anwendung)']
-  driver     text    [not null, note: 'videoxlink, embrionix, directout-ravio, ipmi, ...']
+  device_id  uuid    [not null, note: 'Element mit kind = device (gesichert in der Anwendung)']
+  driver     text    [not null, note: 'Treibername = Paketname, nur [a-z0-9]: videoxlink, embrionix, ravio, http, ipmi, ...']
   address    text    [note: 'Management-Host/IP']
   config     jsonb   [not null, default: `'{}'::jsonb`, note: 'treiberspezifische Verbindungsparameter, keine Geheimnisse']
   secret_id  uuid    [note: 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen']
-  enabled    boolean [not null, default: true, note: 'false = deaktiviert: kein Befund, Elemente der Quelle unknown']
+  enabled    boolean [not null, default: true, note: 'false = deaktiviert: Treiber läuft nicht, Elemente gelten als nicht überwacht (keine Health)']
 
   // Identität des Geräts aus Sicht dieser Quelle, vom Treiber
   vendor     text
@@ -336,18 +359,21 @@ Table device_source {
   Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle
   besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
   Zu jeder Quelle legt der Core ein Zugangs-Element (kind = access) an.
-  Quellen werden nie gelöscht, nur deaktiviert. Verbindungszustand und
-  Lebenszeichen liegen im Speicher des Core; ein Ausfall steht als Befund
-  source.unreachable am Zugangs-Element.
+  Eine Quelle kann deaktiviert oder gelöscht werden; Löschen entfernt ihre
+  Elemente und Links. Verbindungszustand und Lebenszeichen liegen im Speicher
+  des Core; ein Ausfall steht als Befund source.unreachable am Zugangs-Element.
+  Ändern erfordert source_edit (global), weil eine Quelle mit Secret sonst
+  Zugangsdaten an einen beliebigen Host schicken könnte.
   '''
 }
 
+Ref: device_source.device_id > element.id [delete: cascade]
 Ref: device_source.secret_id > secret.id [delete: restrict]
 
 Table element_link {
   id         uuid      [pk, default: `uuidv7()`]
   type       link_type [not null]
-  source_id  uuid      [ref: > device_source.id, note: 'meldende Quelle; NULL = vom User (member)']
+  source_id  uuid      [note: 'meldende Quelle; NULL = vom User (member)']
 
   from_id    uuid
   from_ref   text      [note: 'global_ref der Quelle, solange nicht aufgelöst']
@@ -389,6 +415,7 @@ Table element_link {
 
 Ref: element_link.from_id > element.id [delete: cascade]
 Ref: element_link.to_id > element.id [delete: cascade]
+Ref: element_link.source_id > device_source.id [delete: cascade]
 
 // ---------------------------------------------------------------------------
 // Bewertung
@@ -401,7 +428,7 @@ Table rule {
   severity         severity [not null, default: 'error']
 
   // Geltungsbereich — alle NULL = global
-  scope_element_id uuid     [ref: > element.id, note: 'Element, Gerät (inkl. Kinder) oder Gruppe (inkl. Mitglieder, rekursiv)']
+  scope_element_id uuid     [note: 'Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren)']
   match_kind       text
   match_transport  text
   match_driver     text
@@ -419,6 +446,7 @@ Table rule {
   // Entprellung
   clear_value      jsonb    [note: 'Hysterese, nur numerisch: Befund endet erst, wenn dieser Wert erreicht ist']
   hold_seconds     int      [not null, default: 0, note: 'Verletzung muss so lange anliegen, bevor ein Befund entsteht']
+  clear_hold_seconds int    [not null, default: 0, note: 'Sollzustand muss so lange ununterbrochen anliegen, bevor der Befund endet (gegen Flattern); Zurückziehen wirkt sofort']
 
   created_at       timestamptz [not null, default: `now()`]
   updated_at       timestamptz [not null, default: `now()`]
@@ -431,25 +459,29 @@ Table rule {
   checks {
     `(when_fact IS NULL AND when_op IS NULL AND when_value IS NULL)
     OR (when_fact IS NOT NULL AND when_op IS NOT NULL AND when_value IS NOT NULL)` [name: 'rule_when_check']
-    `hold_seconds >= 0` [name: 'rule_hold_check']
+    `hold_seconds >= 0 AND clear_hold_seconds >= 0` [name: 'rule_hold_check']
   }
 
   Note: '''
   Alle Regeln kommen vom User; es gibt keine mitgelieferten Standardregeln.
-  Operator und Typ von value werden in Go beim Speichern geprüft.
+  Operator und Typ von value werden in Go beim Speichern gegen den
+  Fakt-Katalog geprüft.
   '''
 }
 
+Ref: rule.scope_element_id > element.id [delete: cascade]
+
 Table finding {
   id           uuid           [pk, default: `uuidv7()`]
-  element_id   uuid           [not null, ref: > element.id]
+  element_id   uuid           [not null, note: 'ohne Fremdschlüssel: die Historie überlebt das Löschen des Elements']
+  element_path text           [not null, note: 'Anzeigename des Elements beim Entstehen, z.B. L1 · X8A1001 / D1']
   origin       finding_origin [not null]
   rule_id      uuid           [note: 'bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt']
-  code         text           [not null, note: 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable']
+  code         text           [not null, note: 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, source.discovery_failed']
   severity     severity       [not null]
   message      text           [note: 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds']
-  details      jsonb          [note: 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted)']
-  caused_by_id uuid           [ref: > finding.id, note: 'NULL = Ursache, sonst Symptom']
+  details      jsonb          [note: 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, fact_missing, source_disabled, deleted)']
+  caused_by_id uuid           [ref: > finding.id, note: 'NULL = Ursache, sonst Symptom: zeigt auf die Wurzel; wird bei jeder Befundänderung neu abgeleitet und friert mit dem Ende ein']
 
   raised_at    timestamptz    [not null]
   cleared_at   timestamptz    [note: 'NULL = aktiv']
@@ -496,7 +528,8 @@ Table preset_step {
   action            text    [not null, note: 'start, stop, set, reboot, trigger, vxl.*']
   params            jsonb   [note: 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides']
   continue_on_error boolean [not null, default: false, note: 'false = Fehler bricht das Preset ab']
-  driver            text    [note: 'Pflicht bei Aktionen für das ganze Gerät (an Zugangs-Elementen) auf Geräte oder Gruppen, z.B. reboot über videoxlink']
+  device_level      boolean [not null, default: false, note: 'nur bei Gerät oder Gruppe als Ziel: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente']
+  driver            text    [note: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true, z.B. reboot über videoxlink']
 
   indexes {
     (preset_id, stage, position)
@@ -507,7 +540,7 @@ Table preset_step {
     `stage >= 1 AND delay_ms >= 0` [name: 'preset_step_check']
   }
 
-  Note: 'Ein Element mit Preset-Schritten ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.'
+  Note: 'Ein Element mit Preset-Schritten (bei Geräten und Quellen: auf eines ihrer Elemente) ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.'
 }
 
 Ref: preset_step.preset_id > preset.id [delete: cascade]
@@ -519,15 +552,16 @@ Table action_run {
   preset_id      uuid          [note: 'gesetzt am Wurzel-Lauf eines Presets']
   preset_step_id uuid
 
-  element_id     uuid          [ref: > element.id, note: 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf']
-  source_id      uuid          [ref: > device_source.id, note: 'ausführende Quelle; NULL bei übergeordneten Läufen']
+  element_id     uuid          [note: 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf. Ohne Fremdschlüssel: die Historie überlebt das Löschen']
+  element_path   text          [note: 'Anzeigename des Ziels beim Anlegen; NULL nur am Preset-Wurzel-Lauf']
+  source_id      uuid          [note: 'ausführende Quelle; NULL bei übergeordneten Läufen. Ohne Fremdschlüssel']
   action         text          [not null, note: 'start, stop, set, reboot, vxl.*; am Preset-Wurzel-Lauf: preset']
   params         jsonb         [note: 'bei set: zu setzende Werte; bei trigger: Overrides nur für diesen Aufruf']
   status         action_status [not null, default: 'pending']
   critical       boolean       [not null, default: false, note: 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)']
 
   verify         jsonb         [note: 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}']
-  response       jsonb         [note: 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern']
+  response       jsonb         [note: 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern; bei übergeordneten Läufen die Zusammenfassung inkl. übersprungener Mitglieder']
 
   requested_by_id uuid         [not null, ref: > app_user.id, note: 'Mensch oder Dienstkonto (API-Token)']
   requested_at   timestamptz   [not null, default: `now()`]
@@ -551,7 +585,8 @@ Table action_run {
 
   Note: '''
   Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
-  Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
+  Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen;
+  ein selbst abgebrochener übergeordneter Lauf endet als cancelled.
   Gelöschte Presets und Schritte lassen die Läufe stehen (preset_id, preset_step_id werden NULL).
   '''
 }
@@ -618,7 +653,7 @@ Table permission_grant {
   id               uuid       [pk, default: `uuidv7()`]
   role_id          uuid       [not null]
   permission       permission [not null]
-  scope_element_id uuid       [note: 'Gruppe (Mitglieder rekursiv), Gerät (alle Elemente) oder Element (mit Kindern); NULL = überall']
+  scope_element_id uuid       [note: 'Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren); NULL = überall']
   created_at       timestamptz [not null, default: `now()`]
 
   indexes {
@@ -628,7 +663,7 @@ Table permission_grant {
   }
 
   checks {
-    `permission NOT IN ('preset_run', 'preset_edit', 'admin')
+    `permission NOT IN ('preset_run', 'preset_edit', 'source_edit', 'admin')
     OR scope_element_id IS NULL` [name: 'permission_grant_global_check']
   }
 }
@@ -737,7 +772,7 @@ Table forward_target {
   // Filter
   events           text[]       [not null, note: 'finding.raised, finding.cleared, finding.withdrawn, finding.acked, action.finished']
   min_severity     severity     [note: 'nur für finding.*; NULL = alle']
-  scope_element_id uuid         [ref: > element.id, note: 'Gerät oder Gruppe, rekursiv; NULL = alles']
+  scope_element_id uuid         [note: 'Geltungsbereich wie bei Regeln und Rechten; NULL = alles']
 
   // Zustand (best effort)
   last_sent_at     timestamptz
@@ -749,6 +784,7 @@ Table forward_target {
 }
 
 Ref: forward_target.secret_id > secret.id [delete: restrict]
+Ref: forward_target.scope_element_id > element.id [delete: cascade]
 
 // ---------------------------------------------------------------------------
 // Geheimnisse
@@ -770,7 +806,8 @@ Table secret {
   Ver- und Entschlüsselung nur in Go, nie per pgcrypto (Schlüssel würde im SQL landen).
   Associated Data = id, damit Werte nicht zwischen Zeilen vertauscht werden können.
   Werte werden nie angezeigt, geloggt oder ins Audit geschrieben.
-  Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: inventory_edit.
+  Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: source_edit.
+  Ersetzen startet alle Quellen mit diesem Secret neu.
   '''
 }
 
@@ -780,9 +817,9 @@ Table secret {
 // ---------------------------------------------------------------------------
 
 Table element_state {
-  element_id  uuid        [pk, ref: - element.id]
-  health      health      [note: 'vom Core; NULL = keine Health (nicht überwacht oder verschwunden)']
-  rollup      jsonb       [note: 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}']
+  element_id  uuid        [pk]
+  health      health      [note: 'vom Core; NULL = keine Health (nicht überwacht, verschwunden oder ungeprüft)']
+  rollup      jsonb       [note: 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unchecked": 40, "unmonitored": 2, "missing": 1}']
   updated_at  timestamptz [not null, default: `now()`, note: 'Zeitpunkt des Schreibens']
 
   indexes {
@@ -791,3 +828,5 @@ Table element_state {
 
   Note: 'Nur, was der Core ableitet. Aktuelle Fakten liegen nur im Speicher des Core und gehen im festen Takt nach InfluxDB.'
 }
+
+Ref: element_state.element_id > element.id [delete: cascade]
