@@ -245,3 +245,11 @@ sequenceDiagram
 | A6 | Passwörter | argon2id (m = 19 MiB, t = 2, p = 1), Mindestlänge 12 |
 | A7 | Format der API-Tokens | `monika_` + 32 zufällige Bytes (base64url), gespeichert nur als SHA-256 |
 | A8 | Wiederherstellungscodes | 10 Stück, je einmal gültig, nur einmal angezeigt; Admin kann TOTP zurücksetzen (Audit) |
+| M1 | Schließen Rechte einander ein? | nein; jedes Recht steht für sich (`operate` ohne `view` sieht nichts); die UI kann Rollenvorlagen anbieten |
+| M2 | Begrenzung der Fehlversuche (A5) | pro (Benutzername, IP) im Speicher; ab dem 5. Fehlversuch Wartezeit 30 s, jeweils verdoppelt bis höchstens 15 min; währenddessen wird das Passwort nicht geprüft (`ErrThrottled`, API 429); Erfolg setzt zurück, Einträge verfallen nach 1 h ohne Versuch |
+| M3 | TOTP | RFC 6238: SHA-1, 6 Ziffern, 30 s, ±1 Zeitschritt; Issuer „Monika“, Label `Monika:<benutzername>` |
+| M4 | Format der Wiederherstellungscodes | 10 Zeichen base32 als `xxxxx-xxxxx`, gespeichert als SHA-256; Groß-/Kleinschreibung und Bindestrich egal |
+| M5 | Sitzungs-Token und Aktivität | 32 zufällige Bytes base64url, gespeichert als SHA-256; `last_seen_at`/`last_used_at` gesammelt im Speicher, jede Minute geschrieben; Leerlauf gegen den Wert im Speicher geprüft |
+| M6 | Länge von Passwörtern | mindestens 12 Zeichen, höchstens 1 024 Bytes |
+| M7 | Challenge | 32 zufällige Bytes, im Speicher, 5 min, höchstens 5 Versuche; danach neu anmelden |
+| M8 | Initialer Admin | Benutzer aus `MONIKA_ADMIN_*` und Rolle „Administratoren“ mit allen Rechten global, nur ohne vorhandene Benutzer; TOTP bei der ersten Anmeldung (A1) |

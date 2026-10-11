@@ -116,7 +116,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~9a Influx-Schreiber~~ (Punkte pro Element und Measurement, Raten nur ohne Zähler, Health, Rollup, `monika`; gzip, Batches, 1 min Puffer, `InfluxStatus`, Rest beim Stopp): erledigt
       - ~~9b Weiterleitung~~ (Format, Vorlagen, Syslog RFC 5424 über udp/tcp/tls, Webhook; Filter nach Typ, Schwere und Geltungsbereich, Ende auch nach dem Löschen; Warteschlange und Wiederholungen pro Ziel, gesammelte Ergebnisse): erledigt
       - ~~9c Aufbewahrung~~ (Queries `retention.sql`, `retention.Store` in `postgres` mit Integrationstest, `Cleaner` 1 min nach dem Start und täglich 03:30 Uhr in Batches): erledigt
-   10. Anmeldung und Rechte (`internal/auth`)
+   10. Anmeldung und Rechte (`internal/auth`); Festlegungen M1–M8 vom 2026-10-11 in `auth.md`:
+      - ~~10a Zugangsdaten~~ (argon2id, API- und Sitzungs-Tokens, TOTP nach RFC 6238, Wiederherstellungscodes, Begrenzung der Fehlversuche): erledigt
+      - 10b Anmeldung und Sitzungen
+      - 10c Rechte und Verwaltung, initialer Admin
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
