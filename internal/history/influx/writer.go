@@ -46,7 +46,9 @@ type Config struct {
 // Writer tastet im Takt die View ab und schreibt sie nach InfluxDB; ist InfluxDB nicht
 // erreichbar, puffert er höchstens eine Minute an Takten.
 type Writer struct {
-	cfg Config
+	cfg      Config
+	enc      *encoder // nur in der Goroutine von Run
+	lastSize int      // Größe des vorigen Takts, um den Puffer passend anzulegen
 
 	mu      sync.Mutex
 	buffer  []takt
@@ -55,9 +57,11 @@ type Writer struct {
 	ok      bool
 }
 
+// takt ist ein Takt im Puffer, gzip-komprimiert in Stücken von höchstens batchLines Zeilen; so
+// hält der Puffer auch bei 1000 Geräten eine Minute in wenigen hundert MB.
 type takt struct {
-	at    time.Time
-	lines []string
+	at     time.Time
+	chunks [][]byte
 }
 
 // New liefert einen Schreiber.
@@ -65,7 +69,7 @@ func New(cfg Config) *Writer {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{}
 	}
-	return &Writer{cfg: cfg, ok: true}
+	return &Writer{cfg: cfg, enc: newEncoder(cfg.Field, cfg.Gauges), ok: true}
 }
 
 // Run bildet jeden Takt einen Satz Zeilen und schreibt in eigener Goroutine, damit ein langsames
@@ -108,10 +112,14 @@ func (w *Writer) add(t time.Time) {
 	w.mu.Lock()
 	me := own{buffered: int64(len(w.buffer)), dropped: w.dropped}
 	w.mu.Unlock()
-	ls := lines(w.cfg.Core.View(), t, w.cfg.Field, me, w.cfg.Gauges)
+	tk, err := w.build(t, me)
+	if err != nil {
+		w.cfg.Log.Error("influx interval not built", "err", err)
+		return
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.buffer = append(w.buffer, takt{at: t, lines: ls})
+	w.buffer = append(w.buffer, tk)
 	drop := 0
 	for drop < len(w.buffer) && t.Sub(w.buffer[drop].at) > bufferAge {
 		drop++
@@ -123,6 +131,23 @@ func (w *Writer) add(t time.Time) {
 	}
 }
 
+// build bildet die Zeilen eines Takts und komprimiert sie in Stücken von höchstens batchLines.
+func (w *Writer) build(t time.Time, me own) (takt, error) {
+	data, _ := w.enc.encode(make([]byte, 0, w.lastSize), w.cfg.Core.View(), t, me)
+	w.lastSize = len(data)
+	tk := takt{at: t}
+	for rest := data; len(rest) > 0; {
+		chunk := cutLines(rest, batchLines)
+		rest = rest[len(chunk):]
+		z, err := compress(chunk)
+		if err != nil {
+			return takt{}, err
+		}
+		tk.chunks = append(tk.chunks, z)
+	}
+	return tk, nil
+}
+
 // flush schreibt die gepufferten Takte in Batches; gesendete fallen aus dem Puffer, bei einem
 // Fehler bleibt der Rest für den nächsten Versuch.
 func (w *Writer) flush(ctx context.Context) {
@@ -132,18 +157,15 @@ func (w *Writer) flush(ctx context.Context) {
 	sent := 0
 	var err error
 	for sent < len(pending) && err == nil {
-		// Ganze Takte zu einem Batch bis batchLines; ein großer Takt wird geteilt.
-		var batch []string
-		n := 0
-		for n < len(pending)-sent && (len(batch) == 0 || len(batch)+len(pending[sent+n].lines) <= batchLines) {
-			batch = append(batch, pending[sent+n].lines...)
-			n++
-		}
-		for i := 0; i < len(batch) && err == nil; i += batchLines {
-			err = w.write(ctx, batch[i:min(i+batchLines, len(batch))])
+		// Ein Takt gilt erst als geschrieben, wenn alle Stücke angekommen sind; sonst wird er
+		// ganz wiederholt (gleiche Serie und Zeit überschreiben sich in InfluxDB).
+		for _, chunk := range pending[sent].chunks {
+			if err = w.write(ctx, chunk); err != nil {
+				break
+			}
 		}
 		if err == nil {
-			sent += n
+			sent++
 		}
 	}
 	w.mu.Lock()
@@ -168,16 +190,37 @@ func (w *Writer) flush(ctx context.Context) {
 	w.cfg.Core.Post(status)
 }
 
-// write sendet Zeilen per POST /api/v2/write, gzip-komprimiert, Zeitstempel in Millisekunden.
-func (w *Writer) write(ctx context.Context, ls []string) error {
+// cutLines liefert den Anfang von data mit höchstens n Zeilen.
+func cutLines(data []byte, n int) []byte {
+	end := 0
+	for range n {
+		i := bytes.IndexByte(data[end:], '\n')
+		if i < 0 {
+			return data
+		}
+		end += i + 1
+	}
+	return data[:end]
+}
+
+// compress komprimiert mit der schnellsten Stufe von gzip.
+func compress(data []byte) ([]byte, error) {
 	var body bytes.Buffer
-	zw := gzip.NewWriter(&body)
-	if _, err := io.WriteString(zw, strings.Join(ls, "\n")); err != nil {
-		return err
+	zw, err := gzip.NewWriterLevel(&body, gzip.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := zw.Write(data); err != nil {
+		return nil, err
 	}
 	if err := zw.Close(); err != nil {
-		return err
+		return nil, err
 	}
+	return body.Bytes(), nil
+}
+
+// write sendet ein komprimiertes Stück per POST /api/v2/write, Zeitstempel in Millisekunden.
+func (w *Writer) write(ctx context.Context, gz []byte) error {
 	u := *w.cfg.URL
 	u.Path = strings.TrimSuffix(u.Path, "/") + "/api/v2/write"
 	q := url.Values{"bucket": {w.cfg.Bucket}, "precision": {"ms"}}
@@ -187,7 +230,7 @@ func (w *Writer) write(ctx context.Context, ls []string) error {
 	u.RawQuery = q.Encode()
 	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(gz))
 	if err != nil {
 		return err
 	}

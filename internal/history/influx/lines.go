@@ -3,6 +3,7 @@
 package influx
 
 import (
+	"cmp"
 	"math"
 	"slices"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lukirs95/monika/internal/core"
 	"github.com/lukirs95/monika/internal/core/evaluation"
+	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/sdk/vocab"
 )
 
@@ -28,77 +30,162 @@ type own struct {
 	buffered, dropped int64
 }
 
-// lines bildet alle Zeilen eines Takts mit dem Zeitstempel t.
-func lines(v *core.View, t time.Time, field Vocabulary, me own, gauges Gauges) []string {
-	ts := strconv.FormatInt(t.UnixMilli(), 10)
-	var out []string
-	g := v.Graph
-	ids := slices.SortedFunc(func(yield func(uuid.UUID) bool) {
-		for id := range g.All() {
-			if !yield(id) {
-				return
-			}
-		}
-	}, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
-	for _, id := range ids {
-		el, _ := g.Element(id)
-		src, _ := g.Source(el.SourceID)
+// encoder baut die Zeilen eines Takts direkt in einen Puffer. Die Reihenfolge der Elemente und
+// ihre Tags hält er pro Graph zwischen den Takten, die Felder des Vokabulars pro Schlüssel; er
+// gehört der Goroutine, die die Takte bildet.
+type encoder struct {
+	field  Vocabulary
+	gauges Gauges
+
+	graph   *inventory.Graph
+	ids     []uuid.UUID
+	tags    map[uuid.UUID]elementTags
+	fields  map[string]fieldInfo
+	scratch []factValue
+}
+
+type elementTags struct {
+	facts, health, rollup string // ",tag=wert…", leere Tags weggelassen, escapt
+}
+
+type fieldInfo struct {
+	ok                bool
+	measurement, name string // escapt
+	rateOf            string
+}
+
+type factValue struct {
+	measurement, name string
+	value             any
+}
+
+func newEncoder(field Vocabulary, gauges Gauges) *encoder {
+	return &encoder{field: field, gauges: gauges, fields: map[string]fieldInfo{}}
+}
+
+// encode hängt alle Zeilen eines Takts mit dem Zeitstempel t an buf an und liefert die Zahl der
+// Zeilen.
+func (e *encoder) encode(buf []byte, v *core.View, t time.Time, me own) ([]byte, int) {
+	if v.Graph != e.graph {
+		e.reset(v.Graph)
+	}
+	ts := strconv.AppendInt(nil, t.UnixMilli(), 10)
+	n := 0
+	for _, id := range e.ids {
+		el, _ := v.Graph.Element(id)
+		tags := e.tagsOf(v.Graph, el)
 		if el.SourceID != uuid.Nil && v.Sources[el.SourceID].State == core.StateLive {
-			tags := tagSet{{"element_id", id.String()}, {"device_id", el.DeviceID.String()}, {"source_id", el.SourceID.String()},
-				{"driver", src.Driver}, {"kind", string(el.Kind)}, {"transport", el.Transport}}
-			out = append(out, factLines(v.Facts[id], tags, ts, field)...)
+			var k int
+			buf, k = e.facts(buf, v.Facts[id], tags.facts, ts)
+			n += k
 		}
 		h, ok := v.Health[id]
 		if !ok {
 			continue
 		}
 		if level, ok := healthLevel(h.Health); ok {
-			tags := tagSet{{"element_id", id.String()}, {"device_id", nonNil(el.DeviceID)}, {"kind", string(el.Kind)}}
-			out = append(out, line("health", tags, []string{"level=" + level}, ts))
+			buf = append(buf, "health"...)
+			buf = append(buf, tags.health...)
+			buf = append(buf, " level="...)
+			buf = append(buf, level...)
+			buf = endLine(buf, ts)
+			n++
 		}
 		if r := h.Rollup; r != nil {
-			tags := tagSet{{"element_id", id.String()}, {"kind", string(el.Kind)}}
-			out = append(out, line("rollup", tags, []string{
-				intField("ok", r.OK), intField("warning", r.Warning), intField("error", r.Error), intField("unknown", r.Unknown),
-				intField("unchecked", r.Unchecked), intField("unmonitored", r.Unmonitored), intField("missing", r.Missing),
-			}, ts))
+			buf = append(buf, "rollup"...)
+			buf = append(buf, tags.rollup...)
+			buf = appendInt(buf, " ok=", r.OK)
+			buf = appendInt(buf, ",warning=", r.Warning)
+			buf = appendInt(buf, ",error=", r.Error)
+			buf = appendInt(buf, ",unknown=", r.Unknown)
+			buf = appendInt(buf, ",unchecked=", r.Unchecked)
+			buf = appendInt(buf, ",unmonitored=", r.Unmonitored)
+			buf = appendInt(buf, ",missing=", r.Missing)
+			buf = endLine(buf, ts)
+			n++
 		}
 	}
-	return append(out, monikaLine(v, me, gauges, ts))
+	return e.monika(buf, v, me, ts), n + 1
 }
 
-// factLines bildet pro Measurement einen Punkt mit allen historisierten Feldern; eine Rate nur,
+// reset übernimmt einen neuen Graph: Reihenfolge der Elemente neu, Tags verwerfen.
+func (e *encoder) reset(g *inventory.Graph) {
+	e.graph = g
+	e.ids = e.ids[:0]
+	for id := range g.All() {
+		e.ids = append(e.ids, id)
+	}
+	slices.SortFunc(e.ids, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
+	e.tags = make(map[uuid.UUID]elementTags, len(e.ids))
+}
+
+func (e *encoder) tagsOf(g *inventory.Graph, el inventory.Element) elementTags {
+	if t, ok := e.tags[el.ID]; ok {
+		return t
+	}
+	src, _ := g.Source(el.SourceID)
+	id, kind := el.ID.String(), string(el.Kind)
+	t := elementTags{
+		facts: tags(tagSet{{"element_id", id}, {"device_id", nonNil(el.DeviceID)}, {"source_id", nonNil(el.SourceID)},
+			{"driver", src.Driver}, {"kind", kind}, {"transport", el.Transport}}),
+		health: tags(tagSet{{"element_id", id}, {"device_id", nonNil(el.DeviceID)}, {"kind", kind}}),
+		rollup: tags(tagSet{{"element_id", id}, {"kind", kind}}),
+	}
+	e.tags[el.ID] = t
+	return t
+}
+
+func (e *encoder) fieldOf(key string) fieldInfo {
+	if fi, ok := e.fields[key]; ok {
+		return fi
+	}
+	f, ok := e.field(key)
+	fi := fieldInfo{ok: ok && f.Historized, measurement: escapeMeasurement(f.Measurement), name: escapeKey(f.Name), rateOf: f.RateOf}
+	e.fields[key] = fi
+	return fi
+}
+
+// facts schreibt pro Measurement einen Punkt mit allen historisierten Feldern; eine Rate nur,
 // wenn das Element ihren Zähler nicht meldet. Rohe Fakten nie.
-func factLines(facts map[string]any, tags tagSet, ts string, field Vocabulary) []string {
-	byMeasurement := map[string][]string{}
+func (e *encoder) facts(buf []byte, facts map[string]any, tags string, ts []byte) ([]byte, int) {
+	e.scratch = e.scratch[:0]
 	for key, value := range facts {
-		f, ok := field(key)
-		if !ok || !f.Historized {
+		fi := e.fieldOf(key)
+		if !fi.ok || !validValue(value) {
 			continue
 		}
-		if _, counter := facts[f.RateOf]; f.RateOf != "" && counter {
+		if _, counter := facts[fi.rateOf]; fi.rateOf != "" && counter {
 			continue
 		}
-		if v, ok := fieldValue(value); ok {
-			byMeasurement[f.Measurement] = append(byMeasurement[f.Measurement], escapeKey(f.Name)+"="+v)
-		}
+		e.scratch = append(e.scratch, factValue{fi.measurement, fi.name, value})
 	}
-	var out []string
-	for _, m := range slices.Sorted(func(yield func(string) bool) {
-		for m := range byMeasurement {
-			if !yield(m) {
-				return
+	slices.SortFunc(e.scratch, func(a, b factValue) int {
+		return cmp.Or(strings.Compare(a.measurement, b.measurement), strings.Compare(a.name, b.name))
+	})
+	n := 0
+	for i, f := range e.scratch {
+		if i == 0 || f.measurement != e.scratch[i-1].measurement {
+			if i > 0 {
+				buf = endLine(buf, ts)
 			}
+			buf = append(buf, f.measurement...)
+			buf = append(buf, tags...)
+			buf = append(buf, ' ')
+			n++
+		} else {
+			buf = append(buf, ',')
 		}
-	}) {
-		fields := byMeasurement[m]
-		slices.Sort(fields)
-		out = append(out, line(m, tags, fields, ts))
+		buf = append(buf, f.name...)
+		buf = append(buf, '=')
+		buf = appendValue(buf, f.value)
 	}
-	return out
+	if n > 0 {
+		buf = endLine(buf, ts)
+	}
+	return buf, n
 }
 
-func monikaLine(v *core.View, me own, gauges Gauges, ts string) string {
+func (e *encoder) monika(buf []byte, v *core.View, me own, ts []byte) []byte {
 	live, notLive := 0, 0
 	for _, s := range v.Sources {
 		switch s.State {
@@ -117,13 +204,27 @@ func monikaLine(v *core.View, me own, gauges Gauges, ts string) string {
 		intField("events", st.Events), "db_ok=" + strconv.FormatBool(v.DB.OK),
 		intField("influx_buffered", me.buffered), intField("influx_dropped", me.dropped),
 	}
-	if gauges != nil {
-		for name, value := range gauges() {
-			fields = append(fields, intField(name, value))
+	if e.gauges != nil {
+		for name, value := range e.gauges() {
+			fields = append(fields, intField(escapeKey(name), value))
 		}
 	}
 	slices.Sort(fields)
-	return line(vocab.MeasurementMonika, nil, fields, ts)
+	buf = append(buf, vocab.MeasurementMonika+" "...)
+	buf = append(buf, strings.Join(fields, ",")...)
+	return endLine(buf, ts)
+}
+
+func endLine(buf, ts []byte) []byte {
+	buf = append(buf, ' ')
+	buf = append(buf, ts...)
+	return append(buf, '\n')
+}
+
+func appendInt(buf []byte, prefix string, v int) []byte {
+	buf = append(buf, prefix...)
+	buf = strconv.AppendInt(buf, int64(v), 10)
+	return append(buf, 'i')
 }
 
 // healthLevel: 0 ok, 1 warning, 2 error, 3 unknown; ohne Health kein Punkt.
@@ -141,24 +242,34 @@ func healthLevel(h evaluation.Health) (string, bool) {
 	return "", false
 }
 
-// fieldValue formatiert einen Wert für das Line Protocol; NaN und Unendlich gehen nicht.
-func fieldValue(v any) (string, bool) {
+// validValue meldet, ob ein Wert ins Line Protocol passt; NaN und Unendlich gehen nicht.
+func validValue(v any) bool {
+	switch v := v.(type) {
+	case bool, int64, int, string:
+		return true
+	case float64:
+		return !math.IsNaN(v) && !math.IsInf(v, 0)
+	}
+	return false
+}
+
+// appendValue hängt einen gültigen Wert im Format des Line Protocol an.
+func appendValue(buf []byte, v any) []byte {
 	switch v := v.(type) {
 	case bool:
-		return strconv.FormatBool(v), true
+		return strconv.AppendBool(buf, v)
 	case int64:
-		return strconv.FormatInt(v, 10) + "i", true
+		return append(strconv.AppendInt(buf, v, 10), 'i')
 	case int:
-		return strconv.Itoa(v) + "i", true
+		return append(strconv.AppendInt(buf, int64(v), 10), 'i')
 	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return "", false
-		}
-		return strconv.FormatFloat(v, 'g', -1, 64), true
+		return strconv.AppendFloat(buf, v, 'g', -1, 64)
 	case string:
-		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`, true
+		buf = append(buf, '"')
+		buf = append(buf, fieldStringEscaper.Replace(v)...)
+		return append(buf, '"')
 	}
-	return "", false
+	return buf
 }
 
 func intField[T ~int | ~int64 | ~uint64](name string, v T) string {
@@ -167,21 +278,19 @@ func intField[T ~int | ~int64 | ~uint64](name string, v T) string {
 
 type tagSet [][2]string
 
-// line baut eine Zeile; leere Tags fallen weg, Tags in fester Reihenfolge.
-func line(measurement string, tags tagSet, fields []string, ts string) string {
+// tags baut den Teil ",tag=wert…" einer Zeile; leere Tags fallen weg.
+func tags(ts tagSet) string {
 	var b strings.Builder
-	b.WriteString(escapeMeasurement(measurement))
-	for _, t := range tags {
-		if t[1] == "" {
-			continue
+	for _, t := range ts {
+		if t[1] != "" {
+			b.WriteString("," + escapeKey(t[0]) + "=" + escapeKey(t[1]))
 		}
-		b.WriteString("," + escapeKey(t[0]) + "=" + escapeKey(t[1]))
 	}
-	b.WriteString(" " + strings.Join(fields, ",") + " " + ts)
 	return b.String()
 }
 
 var (
+	fieldStringEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	keyEscaper         = strings.NewReplacer(",", `\,`, "=", `\=`, " ", `\ `)
 	measurementEscaper = strings.NewReplacer(",", `\,`, " ", `\ `)
 )

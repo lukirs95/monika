@@ -1,0 +1,10 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/history/influx
+cpu: Apple M4 Max
+BenchmarkTakt/devices=10-14         	    1028	   1100904 ns/op	        31.67 gzip-KiB	       759.3 raw-KiB	 2055862 B/op	      60 allocs/op
+BenchmarkTakt/devices=50-14         	     212	   5534697 ns/op	       158.4 gzip-KiB	      3796 raw-KiB	 9359988 B/op	     565 allocs/op
+BenchmarkTakt/devices=100-14        	     108	  10899380 ns/op	       316.5 gzip-KiB	      7592 raw-KiB	18866106 B/op	    1940 allocs/op
+BenchmarkTakt/devices=200-14        	      49	  23958285 ns/op	       633.3 gzip-KiB	     15183 raw-KiB	38862566 B/op	    7917 allocs/op
+BenchmarkTakt/devices=400-14        	      21	  50973637 ns/op	      1266 gzip-KiB	     30366 raw-KiB	81630498 B/op	   35569 allocs/op
+BenchmarkTakt/devices=1000-14       	       7	 147582768 ns/op	      3166 gzip-KiB	     75915 raw-KiB	248440809 B/op	  261981 allocs/op

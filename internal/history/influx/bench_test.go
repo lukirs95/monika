@@ -1,10 +1,8 @@
 package influx
 
 import (
-	"bytes"
-	"compress/gzip"
 	"fmt"
-	"strings"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,22 +10,25 @@ import (
 	"github.com/lukirs95/monika/sdk/vocab"
 )
 
-// BenchmarkTakt: alle Zeilen eines Takts bilden und gzip-komprimieren, wie der Schreiber es jede
-// Sekunde tut.
+// BenchmarkTakt: einen Takt bilden und in Stücken komprimieren, wie der Schreiber es jede
+// Sekunde tut; gzip-KiB ist, was davon eine Minute lang im Puffer läge.
 func BenchmarkTakt(b *testing.B) {
 	for _, n := range coretest.Sizes {
 		b.Run(fmt.Sprintf("devices=%d", n), func(b *testing.B) {
-			w := coretest.NewWorld(n)
-			var size, count int
+			world := coretest.NewWorld(n)
+			w := New(Config{Core: &fakeCore{view: world.View}, Field: vocab.Lookup, Log: slog.New(slog.DiscardHandler)})
+			var size int
 			for b.Loop() {
-				ls := lines(w.View, time.Now(), vocab.Lookup, own{}, nil)
-				var buf bytes.Buffer
-				zw := gzip.NewWriter(&buf)
-				_, _ = zw.Write([]byte(strings.Join(ls, "\n")))
-				_ = zw.Close()
-				size, count = buf.Len(), len(ls)
+				tk, err := w.build(time.Now(), own{})
+				if err != nil {
+					b.Fatal(err)
+				}
+				size = 0
+				for _, c := range tk.chunks {
+					size += len(c)
+				}
 			}
-			b.ReportMetric(float64(count), "lines")
+			b.ReportMetric(float64(w.lastSize)/1024, "raw-KiB")
 			b.ReportMetric(float64(size)/1024, "gzip-KiB")
 		})
 	}

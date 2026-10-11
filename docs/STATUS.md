@@ -127,6 +127,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 
 - **Ausgangsstand:** Commit `adfc843`, `docs/benchmarks/baseline.txt`. Bei 200 Geräten 6,9 ms pro einzelner Meldung, 97 % davon im Rollup der großen Gruppen.
 - **Optimiert (2026-10-11):** Rollup inkrementell, `Monitored` im Graph vorberechnet, Indizes pro Quelle und `global_ref` im Inventar, kein Neubau des Graphs bei reinem `last_seen_at`; `docs/benchmarks/incremental-rollup.txt`. Bei 200 Geräten 0,18 ms pro einzelner Meldung, 11 µs pro Meldung mit Bündelung; bei 1000 Geräten 0,96 ms bzw. 15 µs; `ApplySnapshot` größenunabhängig 47 µs. Zurück zum Ausgangsstand: diesen Commit per `git revert` zurücknehmen.
+- **Dienste (Schritt 9):** `docs/benchmarks/step9.txt` (Commit `3edd0fb`). Weiterleitung konstant 4,5 µs pro Ereignis, Planung einer Sammelaktion auf alles 21 ms bei 200 Geräten. Der Influx-Takt war die neue Grenze (87 ms bei 200, 459 ms bei 1000 Geräten); mit Encoder in einen Puffer, zwischengespeicherten Tags und gzip `BestSpeed` jetzt 23 bzw. 147 ms (`docs/benchmarks/influx-encoder.txt`). Gepuffert wird komprimiert (1 min bei 1000 Geräten ≈ 190 MB statt 4,5 GB).
 - **Bewusst O(Anzahl Elemente) pro Runde:** Kopie der Map der Fakten für die `View` und die Health-Map (copy-on-write), bei 1000 Geräten etwa 5 MB und knapp 1 ms pro Runde; der Neubau des Graphs bei Strukturänderungen (61 ms bei 1000 Geräten). Erst angehen, wenn es im Betrieb stört.
 
 ## Bekannte Lücken

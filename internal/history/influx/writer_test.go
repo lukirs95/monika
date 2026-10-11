@@ -62,6 +62,12 @@ func testView(state core.SourceState) *core.View {
 	}
 }
 
+// lines bildet die Zeilen eines Takts mit einem neuen Encoder.
+func lines(v *core.View, t time.Time, field Vocabulary, me own, gauges Gauges) []string {
+	data, _ := newEncoder(field, gauges).encode(nil, v, t, me)
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
 func TestLines(t *testing.T) {
 	got := lines(testView(core.StateLive), t0, vocab.Lookup, own{buffered: 2}, func() map[string]int64 { return map[string]int64{"api_streams": 5} })
 	tags := "element_id=" + port.String() + ",device_id=" + device.String() + ",source_id=" + source.String() + ",driver=videoxlink,kind=port,transport=sdi"
@@ -239,5 +245,18 @@ func TestShutdownFlushes(t *testing.T) {
 	stop()
 	if srv.count() == before {
 		t.Error("buffered intervals not written on shutdown")
+	}
+}
+
+func TestCutLines(t *testing.T) {
+	data := []byte("a 1\nb 2\nc 3\n")
+	tests := []struct {
+		n    int
+		want string
+	}{{1, "a 1\n"}, {2, "a 1\nb 2\n"}, {3, string(data)}, {9, string(data)}}
+	for _, tt := range tests {
+		if got := string(cutLines(data, tt.n)); got != tt.want {
+			t.Errorf("cutLines(%d) = %q, want %q", tt.n, got, tt.want)
+		}
 	}
 }

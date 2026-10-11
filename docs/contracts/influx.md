@@ -84,7 +84,7 @@ health,element_id=…,device_id=…,kind=port level=0i 1760097600000
 
 - **Nur Line Protocol über HTTP** (`POST /api/v2/write`, von InfluxDB v2 und v3 verstanden), gzip-komprimiert, in Batches von höchstens 5 000 Zeilen. Abfragen sind Sache der Werkzeuge, nicht von Monika.
 - **Takt** `MONIKA_INFLUX_INTERVAL`, Standard 1 s. Läuft ein Schreiben länger als ein Takt, wird der nächste Takt trotzdem gebildet und gepuffert, nicht ausgelassen; geschrieben wird, sobald die Verbindung frei ist.
-- **Puffer** höchstens 1 min an Takten im Speicher; darüber werden die ältesten verworfen und mit Anzahl geloggt.
+- **Puffer** höchstens 1 min an Takten im Speicher; darüber werden die ältesten verworfen und mit Anzahl geloggt. Gepuffert wird **komprimiert**: Jeder Takt wird beim Bilden in Stücken von höchstens 5 000 Zeilen mit gzip (schnellste Stufe) komprimiert, jedes Stück ist eine Anfrage. Bei 1000 Geräten sind das etwa 3 MB pro Takt, rund 190 MB für die Minute (unkomprimiert wären es 4,5 GB). Ein Takt, der nur zum Teil angekommen ist, wird ganz wiederholt; gleiche Serie und Zeit überschreiben sich in InfluxDB.
 - **Zustand** meldet der Writer per `Core.Post(InfluxStatus)`; die `View` führt ihn, die UI zeigt bei Fehlern „Historie wird nicht geschrieben“. `/healthz` bleibt davon unberührt, weil das Monitoring weiterläuft.
 - **Aufbewahrung** stellt der Betreiber in InfluxDB ein (z. B. 30 Tage bei 1 s Takt), nicht Monika.
 - **Ohne `MONIKA_INFLUX_URL`** startet der Writer nicht.
