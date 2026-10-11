@@ -21,11 +21,11 @@ classDiagram
         +LogLevel slog.Level
         +LogFormat LogFormat
         +DatabaseURL Secret
-        +MasterKey secret.Key
-        +MasterKeyPrevious secret.Key
+        +Keys secret.Keys
         +Influx InfluxConfig
         +Retention RetentionConfig
         +Admin *AdminBootstrap
+        +Warnings []string
     }
     class InfluxConfig {
         <<struct>>
@@ -64,7 +64,10 @@ classDiagram
 | `config.Load(environ []string, envFile string) (Config, error)` | liest `.env` und Umgebung, prüft alles und liefert **alle** Fehler auf einmal (`errors.Join`), nicht nur den ersten |
 | `Secret` | geheimer Text (Datenbank-URL mit Passwort, Influx-Token, Admin-Passwort): `String`, `GoString`, `LogValue` und `MarshalText` liefern `[redacted]`; den Klartext gibt nur `Reveal()` an genau der Stelle heraus, die ihn braucht |
 | `InfluxConfig.URL` | leer = keine Zeitreihen; der Influx-Schreiber startet dann nicht |
-| `Admin` | `nil`, wenn die Variablen fehlen |
+| `Admin` | `nil`, wenn die Variablen fehlen; der Benutzername wird kleingeschrieben. Die Passwortregeln (A6) prüft `auth` beim Anlegen |
+| `Keys` | `MONIKA_MASTER_KEY` und `MONIKA_MASTER_KEY_PREVIOUS` als `secret.Keys`, so wie `secret.NewService` sie braucht |
+| `Warnings` | Hinweise, die den Start nicht verhindern (`.env` für andere lesbar, öffentliche URL ohne `https`); `main` loggt sie, sobald der Logger steht |
+| `config.EnvFile(environ)` | Pfad der `.env`: `MONIKA_ENV_FILE`, sonst `./.env` |
 
 Variablen, Standardwerte und Bedeutung stehen in `docs/ARCHITECTURE.md`, Abschnitt 14.
 

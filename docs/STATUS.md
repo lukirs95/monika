@@ -92,7 +92,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 3. **Erst der ganze Kern, dann Treiber** (Entscheidung vom 2026-10-11): Alles unter `internal/` (dazu das SDK ohne Treiber, Bootstrap und Deployment) entsteht lauffähig und getestet, bevor der erste echte Treiber geschrieben wird. Getestet wird mit einem programmierbaren Fake-Treiber aus `sdk/sdktest`. Reihenfolge:
    0. ~~`make lint`~~ (golangci-lint v2.14.0 per `go run`, `.golangci.yml`): erledigt, 0 Befunde
    1. ~~SDK ohne Treiber~~: Typen, Vokabular, Registry mit `Validate` und `CheckElement`, `Counter`, `sdktest` mit `Reporter`, `Scheduler`, `Conformance` und Fake-Treiber (`sdk/`): erledigt
-   2. Konfiguration (`internal/config`)
+   2. ~~Konfiguration~~ (`internal/config`): erledigt
    3. Fakten und Lebenszeichen (`internal/core/state`)
    4. Inventar-Logik: Snapshot → `Discovery`, `Diff`, Eltern `""` = Zugang (`internal/core/inventory`)
    5. Bewertung: Präzedenz, `when`, Befunde, Health und Rollup, Ursache/Symptom, `InScope` (`internal/core/evaluation`)
