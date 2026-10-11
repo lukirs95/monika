@@ -328,7 +328,7 @@ func TestLoopMessages(t *testing.T) {
 	run := action.Run{ID: uuid.New(), Status: action.StatusSent}
 	r.c.Post(RunChanged{Run: run})
 	r.waitView("run", func(v *View) bool { return v.Runs[run.ID].Status == action.StatusSent })
-	run.Status = action.StatusConfirmed
+	run.Status, run.FinishedAt = action.StatusConfirmed, time.Now()
 	r.c.Post(RunChanged{Run: run})
 	r.waitView("run gone", func(v *View) bool { _, ok := v.Runs[run.ID]; return !ok })
 

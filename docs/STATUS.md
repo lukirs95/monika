@@ -110,7 +110,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~7b Supervisor~~ (Goroutine pro Quelle, Start/Neustart/Stopp, Backoff, Stuck, Panics in `New`, `Run`, `Execute` und Aufgaben, Herunterfahren; Ende-zu-Ende-Test mit Schleife und Fake-Treiber): erledigt
    8. Executor und Preset-Runner (`internal/action/executor`, `internal/preset`); Entscheidungen J1–J6 vom 2026-10-11 in `services.md` (Timeouts, Platzhalter, Zusammenfassung, Prüfung der Bedingung, Paket des Stores, Lebenszyklus):
       - ~~8a Executor: Ziele und Anlegen~~ (Auflösung, `critical` und Prüfbedingung einfrieren, Zusammenfassung; `executor.Store`, `evaluation.Condition.Check`): erledigt
-      - 8b Executor: Ausführung (FIFO pro Element, `Execute`, Prüfbedingung, übergeordnete Läufe, `Cancel`, Stopp)
+      - ~~8b Executor: Ausführung~~ (FIFO pro Element, `Execute` mit Timeout, Prüfbedingung über `FactsChanged`, übergeordnete Läufe, `Cancel`, Stopp nach F8; `Run.Finished`): erledigt
       - 8c Preset-Runner
    9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
    10. Anmeldung und Rechte (`internal/auth`)

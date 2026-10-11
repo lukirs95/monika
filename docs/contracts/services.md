@@ -160,6 +160,8 @@ classDiagram
 - **Prüfung** der Bedingungen mit demselben Vergleich wie bei Regeln (`evaluation.Condition.Check`); fehlt der Fakt, ist die Bedingung nicht erfüllt.
 - **Zusammenfassung** im `response` des übergeordneten Laufs: `{"targets": n, "unsupported": n, "skipped": [{"element_id", "element_path", "reason"}], "statuses": {"confirmed": n, …}}`. `skipped` nennt Elemente, die die Aktion zwar haben, aber nicht bekommen können (fehlender Schlüssel bei `set`), `unsupported` zählt die übrigen ohne die Aktion; beides beim Anlegen, `statuses` beim Ende.
 - **Lebenszyklus:** `Run(ctx)` besitzt das Abo auf `FactsChanged` und die Goroutinen pro Element; vor `Run` und nach dem Stopp liefert `Submit` `ErrStopped`.
+- **Ausführung:** pro Element eine Goroutine mit Warteschlange; ein Lauf ist erst fertig (einschließlich Prüfbedingung), bevor der nächste dasselbe Element anspricht. Der Übergang `pending` → `sent` geschieht unter Sperre, damit `Cancel` nur wirklich wartende Läufe trifft. Beendet ist ein Lauf, wenn `FinishedAt` gesetzt ist (`Run.Finished()`). Scheitert `UpdateRun`, wird das geloggt und der Lauf trotzdem gemeldet; offene Läufe schließt der nächste Start ab (F2). Eine Antwort, die nach der 5-s-Frist des Stopps noch eintrifft, wird verworfen; ihre Goroutine endet spätestens mit dem 30-s-Timeout von `Execute`.
+- `Cancel` auf einen beendeten oder unbekannten Lauf: `ErrFinished` (API: `409 run_finished`).
 
 ## Preset-Runner (`internal/preset`)
 

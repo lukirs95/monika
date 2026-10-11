@@ -28,7 +28,8 @@ const (
 	StatusCancelled   Status = "cancelled"
 )
 
-// Final meldet einen Endzustand; er ist endgültig.
+// Final meldet einen Status, der immer Endzustand ist. accepted ist es nur ohne Prüfbedingung;
+// ob ein Lauf beendet ist, sagt deshalb Run.Finished.
 func (s Status) Final() bool {
 	switch s {
 	case StatusRejected, StatusFailed, StatusConfirmed, StatusUnconfirmed, StatusCancelled:
@@ -67,3 +68,6 @@ type Run struct {
 	RespondedAt   time.Time
 	FinishedAt    time.Time
 }
+
+// Finished meldet, ob der Lauf im Endzustand ist; der ist endgültig.
+func (r Run) Finished() bool { return !r.FinishedAt.IsZero() }

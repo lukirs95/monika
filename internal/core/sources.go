@@ -182,7 +182,7 @@ func (c *Core) handleMessage(_ context.Context, r *round, m Message) {
 			c.live.Stuck(m.SourceID, r.now)
 		}
 	case RunChanged:
-		if m.Run.Status.Final() {
+		if m.Run.Finished() {
 			c.runs.del(m.Run.ID)
 		} else {
 			c.runs.set(m.Run.ID, m.Run)
