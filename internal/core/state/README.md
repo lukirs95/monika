@@ -2,9 +2,8 @@
 
 Aktueller Zustand aller Elemente im Speicher.
 
-- Fakten (flache Map mit Punkt-Schlüsseln) und Gerätealarme übernehmen; Fakten liegen nur im Speicher
-- im festen Takt alle aktuellen Werte nach InfluxDB schreiben
-- Lebenszeichen der Quellen verfolgen; bleiben sie aus → `source.unreachable`, Elemente der Quelle `unknown`
-- reservierter Fakt `present` aus dem Inventar
+- `Facts`: aktuelle Fakten aller Elemente, nur im Speicher; `Replace` (Snapshot), `Merge` (Update), `Drop`; liefert, was sich geändert hat; copy-on-write für die `View`
+- `Liveness`: Phase jeder laufenden Quelle; Live nur nach `Connected` und Snapshot mit aktuellen Lebenszeichen; `source.unreachable` nach 3 × Heartbeat seit dem letzten Lebenszeichen
+- Logik ohne Goroutinen und Locks; Besitzer ist die Schleife des Core
 
 Siehe `docs/ARCHITECTURE.md`, Abschnitt 8 und 14.

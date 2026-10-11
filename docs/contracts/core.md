@@ -107,19 +107,31 @@ classDiagram
     class Facts {
         <<state>>
         +Replace(sourceID, facts map~ID, sdk.Facts~) Changed
-        +Merge(facts map~ID, sdk.Facts~) Changed
-        +Drop(ids []ID)
+        +Merge(sourceID, facts map~ID, sdk.Facts~) Changed
+        +Drop(ids []ID) Changed
+        +DropSource(sourceID) Changed
         +Get(id, key) (any, bool)
+        +Element(id) sdk.Facts
+        +Snapshot() map~ID, sdk.Facts~
     }
     class Liveness {
         <<state>>
+        +Starting(sourceID, at)
+        +Started(sourceID, heartbeat, at)
+        +Connected(sourceID, at)
+        +SnapshotApplied(sourceID, at)
+        +Disconnected(sourceID, err, at)
         +Touch(sourceID, at)
-        +SetConnected(sourceID, bool, err)
-        +Expired(now) []ID
+        +Failed(sourceID, err, at)
+        +Stopping(sourceID, at)
+        +Stuck(sourceID, at)
+        +Remove(sourceID)
+        +Live(sourceID, now) bool
+        +Status(sourceID, now) (Status, bool)
+        +Unreachable(now) []ID
     }
     class Changed {
-        <<struct>>
-        +Elements map~ID, []string~
+        <<map ID → []string>>
     }
     class Evaluator {
         <<evaluation>>
@@ -166,7 +178,9 @@ classDiagram
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Diff` | was die Discovery bzw. ein Befehl am Inventar geändert hat; `Missing`/`Returned` sind Wechsel von `present` |
-| `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben |
+| `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben, neu sind oder weggefallen sind |
+| `Facts` | copy-on-write: Die Fakten eines Elements werden nie verändert, sondern ersetzt; `Snapshot` kopiert nur die äußere Map, die `View` teilt den Rest (C7) |
+| `Liveness` | Phase jeder laufenden Quelle aus `Reporter` und Supervisor; `Live` entscheidet, ob bewertet wird; `Unreachable(now)` ist die Menge der Quellen, für die `source.unreachable` gilt (3 × Heartbeat seit dem letzten Lebenszeichen bzw. dem Start, bei Heartbeat 0 nur `backoff` und `stuck`) |
 | `Evaluator.Tick` | regelmäßig: Haltezeiten (`hold_seconds`, `clear_hold_seconds`) laufen ab, Lebenszeichen fehlen, offene Schreibvorgänge werden wiederholt |
 | `FindingChange.CauseSet` | neue Zuordnung von Ursache und Symptom (auch auf „keine Ursache“), siehe unten |
 
@@ -225,7 +239,7 @@ sequenceDiagram
 
     R->>L: Update(u)
     L->>F: Touch(sourceID, now)
-    L->>F: Merge(u.Facts)
+    L->>F: Merge(sourceID, u.Facts)
     F-->>L: Changed (nur echte Änderungen)
     opt Quelle Live und etwas hat sich geändert
         L->>E: Evaluate(Changed, View)
@@ -236,7 +250,7 @@ sequenceDiagram
     end
 
     loop Takt der Schleife (1 s)
-        L->>F: Expired(now)
+        L->>F: Unreachable(now)
         F-->>L: Quellen nicht Live seit 3 × Heartbeat nach dem letzten Lebenszeichen
         L->>E: Tick(now, View)
         E-->>L: FindingChanges (source.unreachable, abgelaufene Haltezeiten, Wiederholungen)

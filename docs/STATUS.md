@@ -93,7 +93,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    0. ~~`make lint`~~ (golangci-lint v2.14.0 per `go run`, `.golangci.yml`): erledigt, 0 Befunde
    1. ~~SDK ohne Treiber~~: Typen, Vokabular, Registry mit `Validate` und `CheckElement`, `Counter`, `sdktest` mit `Reporter`, `Scheduler`, `Conformance` und Fake-Treiber (`sdk/`): erledigt
    2. ~~Konfiguration~~ (`internal/config`): erledigt
-   3. Fakten und Lebenszeichen (`internal/core/state`)
+   3. ~~Fakten und Lebenszeichen~~ (`internal/core/state`): erledigt
    4. Inventar-Logik: Snapshot → `Discovery`, `Diff`, Eltern `""` = Zugang (`internal/core/inventory`)
    5. Bewertung: Präzedenz, `when`, Befunde, Health und Rollup, Ursache/Symptom, `InScope` (`internal/core/evaluation`)
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
