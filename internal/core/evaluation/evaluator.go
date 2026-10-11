@@ -135,7 +135,17 @@ type result struct {
 	errs    []error
 }
 
-func (r *result) done() ([]FindingChange, error) { return r.changes, errors.Join(r.errs...) }
+// ErrWrite kennzeichnet gescheiterte Schreibvorgänge von Befunden, Zuordnungen und Health. Sie
+// werden im Takt wiederholt; für den Aufrufer betreffen sie den Zustand der Datenbank, nicht
+// den Befehl.
+var ErrWrite = errors.New("write failed")
+
+func (r *result) done() ([]FindingChange, error) {
+	if len(r.errs) == 0 {
+		return r.changes, nil
+	}
+	return r.changes, fmt.Errorf("%w: %w", ErrWrite, errors.Join(r.errs...))
+}
 
 // Load übernimmt Regeln, aktive Befunde und gespeicherte Health beim Start. Regeln, die nicht
 // mehr zum Katalog passen, bleiben mit Warn-Log draußen.
@@ -155,6 +165,32 @@ func (e *Evaluator) Load(rules []Rule, active []Finding, health []ElementHealth)
 		e.active[f.ID] = f
 		e.put(&track{key: keyOf(f), phase: phaseActive, finding: f})
 	}
+}
+
+// Restore lädt Regeln, aktive Befunde und gespeicherte Health aus dem Store (beim Start).
+func (e *Evaluator) Restore(ctx context.Context) error {
+	rules, err := e.store.ListRules(ctx)
+	if err != nil {
+		return fmt.Errorf("list rules: %w", err)
+	}
+	active, err := e.store.ListActiveFindings(ctx)
+	if err != nil {
+		return fmt.Errorf("list active findings: %w", err)
+	}
+	health, err := e.store.LoadHealth(ctx)
+	if err != nil {
+		return fmt.Errorf("load health: %w", err)
+	}
+	e.Load(rules, active, health)
+	return nil
+}
+
+// Flush schreibt die noch nicht gespeicherte Health (beim Beenden der Schleife).
+func (e *Evaluator) Flush(ctx context.Context) error {
+	var res result
+	e.saveHealth(ctx, &res)
+	_, err := res.done()
+	return err
 }
 
 // Rules liefert den aktuellen Satz von Regeln, Findings eine Kopie der aktiven Befunde.

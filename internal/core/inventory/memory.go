@@ -2,6 +2,8 @@ package inventory
 
 import (
 	"cmp"
+	"context"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -66,6 +68,16 @@ func (inv *Inventory) Load(snap Snapshot) {
 	for _, l := range snap.Links {
 		inv.links[l.ID] = l
 	}
+}
+
+// Restore lädt das gesamte Inventar aus dem Store (beim Start).
+func (inv *Inventory) Restore(ctx context.Context) error {
+	snap, err := inv.store.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load inventory: %w", err)
+	}
+	inv.Load(snap)
+	return nil
 }
 
 // Element liefert ein Element.

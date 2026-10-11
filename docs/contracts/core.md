@@ -89,6 +89,7 @@ classDiagram
     class Inventory {
         <<inventory>>
         +Load(snap inventory.Snapshot)
+        +Restore(ctx) error
         +ApplySnapshot(ctx, sourceID, s sdk.Snapshot) (Diff, error)
         +CreateDevice(ctx, actor, e) (Diff, error)
         +DeleteDevice(ctx, actor, id) (Diff, error)
@@ -184,6 +185,8 @@ classDiagram
     class Evaluator {
         <<evaluation>>
         +Load(rules []Rule, active []Finding, health []ElementHealth)
+        +Restore(ctx) error
+        +Flush(ctx) error
         +Evaluate(ctx, now, elements []ID, s State) ([]FindingChange, error)
         +Alarms(ctx, now, sourceID, alarms map~ID, []sdk.Alarm~, replace bool, s State) ([]FindingChange, error)
         +Tick(ctx, now, s State) ([]FindingChange, error)
@@ -252,7 +255,11 @@ classDiagram
 | Typ | Bedeutung |
 |---|---|
 | `Core.Reporter(sourceID)` | die Umsetzung von `sdk.Reporter` für eine Quelle: verpackt jede Meldung als Nachricht an die Schleife |
-| `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
+| `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet **und die neue `View` veröffentlicht** hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API. Endet `ctx` vorher, liefert `Do` `ctx.Err()`, der Befehl kann trotzdem ausgeführt werden; läuft die Schleife nicht mehr: `ErrStopped`. Fachliche Fehler (`ErrNotFound`, `InUseError`, `ErrInvalidRule` …) berühren `View.DB` nicht, alle anderen Fehler eines Befehls setzen sie auf „nicht in Ordnung“ |
+| `Core.Run(ctx)` | startet alle aktivierten Quellen beim Supervisor und den Datenbank-Wächter (`Pinger`, Ping alle 5 s, 2 s Timeout), dann die Runden. Mit `ctx` verarbeitet sie, was noch wartet, schreibt die letzte Health (`Evaluator.Flush`) und kehrt zurück, höchstens 3 s (Phase 4) |
+| `Restore(ctx)` | Inventar und Evaluator laden beim Start aus ihrem eigenen Store (`Load`, `ListRules`, `ListActiveFindings`, `LoadHealth`); danach entsteht der Core mit diesem Stand als erster `View` |
+| Befehle und Quellen | `CreateSource` startet eine aktivierte Quelle; `UpdateSource` stoppt sie und startet sie neu, wenn sie aktiviert ist; `ReplaceSecret` startet alle aktivierten Quellen mit diesem Secret neu; `DeleteSource` und `DeleteDevice` stoppen ihre Quellen und vergessen deren Fakten, Postfächer und gemerkte Snapshots. Nach jedem Befehl am Inventar bewertet die Schleife die betroffenen Elemente (bei Benutzerfeldern und Mitgliedschaften den Geltungsbereich des Elements) |
+| `evaluation.ErrWrite` | kennzeichnet gescheiterte Schreibvorgänge von Befunden, Zuordnungen und Health; sie betreffen `View.DB`, nicht den Befehl, und werden im Takt wiederholt |
 | `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}`; Influx-Schreiber: `InfluxStatus`; Datenbank-Wächter: `DBPing{ok, err}` |
 | `View.Graph` | Elemente, Quellen und Links mit Index pro Element (Kinder, Vorfahren, Mitgliedschaften, Links ausgehend und eingehend); für `GET /state`, Geltungsbereiche, Ursache/Symptom und die Anzeige von Verbindungen über `represents`. Baut das Inventar nach jeder Änderung neu (`Inventory.Graph`), sonst wird er übernommen |
 | `Graph.Scopes(id)` | alle Geltungsbereiche, die das Element umfassen, mit Abstand: das Element selbst (0), seine Vorfahren über `parent_id` und die Gruppen, die es oder einen Vorfahren rekursiv enthalten; der Abstand zählt Schritte über Eltern und Mitgliedschaften zusammen (Präzedenz der Regeln) |

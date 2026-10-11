@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +22,15 @@ const (
 	queueSize    = 1024 // Warteschlange für Do und Post
 	maxPerRound  = 1024 // Einträge pro Runde, damit auch unter Last regelmäßig eine View erscheint
 	tickInterval = time.Second
+	pingInterval = 5 * time.Second // Datenbank-Wächter
+	pingTimeout  = 2 * time.Second
+	stopTimeout  = 3 * time.Second // Phase 4 des Herunterfahrens: Rest verarbeiten, letztes SaveHealth
 )
+
+// Pinger prüft, ob die Datenbank erreichbar ist (der Pool von PostgreSQL).
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
 
 // Config enthält, was der Core braucht; verdrahtet wird in cmd/monika.
 type Config struct {
@@ -29,6 +38,7 @@ type Config struct {
 	Evaluator  *evaluation.Evaluator
 	Supervisor Supervisor
 	Secrets    Secrets
+	DB         Pinger // nil = kein Datenbank-Wächter (Tests)
 	Log        *slog.Logger
 }
 
@@ -40,11 +50,14 @@ type Core struct {
 	ev      *evaluation.Evaluator
 	sup     Supervisor
 	secrets Secrets
+	pinger  Pinger
 	log     *slog.Logger
 	now     func() time.Time
 	tick    time.Duration
+	ping    time.Duration
 
 	queue chan entry
+	done  chan struct{} // geschlossen, wenn Run zurückgekehrt ist
 	hub   *hub
 	view  atomic.Pointer[View]
 
@@ -70,19 +83,23 @@ type Core struct {
 	warned          map[uuid.UUID]map[string]bool // unbekannte external_ids, je Quelle bis zum nächsten Snapshot
 }
 
-// entry ist ein Eintrag der Warteschlange.
+// entry ist ein Eintrag der Warteschlange: ein Befehl mit Antwortkanal oder eine Nachricht.
 type entry struct {
-	at  time.Time
-	msg Message
+	at    time.Time
+	cmd   Command
+	reply chan error
+	msg   Message
 }
 
 // New liefert den Core mit dem Stand von Inventar und Evaluator als erster View.
 func New(cfg Config) *Core {
 	c := &Core{
-		inv: cfg.Inventory, ev: cfg.Evaluator, sup: cfg.Supervisor, secrets: cfg.Secrets, log: cfg.Log,
+		inv: cfg.Inventory, ev: cfg.Evaluator, sup: cfg.Supervisor, secrets: cfg.Secrets, pinger: cfg.DB, log: cfg.Log,
 		now:             time.Now,
 		tick:            tickInterval,
+		ping:            pingInterval,
 		queue:           make(chan entry, queueSize),
+		done:            make(chan struct{}),
 		hub:             newHub(),
 		mailboxes:       map[uuid.UUID]*mailbox{},
 		signal:          make(chan struct{}, 1),
@@ -137,14 +154,33 @@ func sourceOf(m Message) (uuid.UUID, bool) {
 	return uuid.Nil, false
 }
 
-// Run ist die Schleife. Sie endet mit ctx.
+// Run ist die Schleife: Sie startet alle aktivierten Quellen und den Datenbank-Wächter und
+// verarbeitet Runde für Runde. Mit ctx endet sie: Sie verarbeitet, was noch wartet, schreibt die
+// letzte Health und kehrt zurück (Phase 4 des Herunterfahrens, höchstens stopTimeout).
 func (c *Core) Run(ctx context.Context) error {
+	defer close(c.done)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	if c.pinger != nil {
+		wg.Go(func() { c.watchDB(ctx) })
+	}
+
+	r := c.newRound()
+	g := c.inv.Graph()
+	for _, id := range slices.SortedFunc(maps.Keys(maps.Collect(g.Sources())), compareIDs) {
+		if src, _ := g.Source(id); src.Enabled {
+			c.startSource(r, src)
+		}
+	}
+	c.publish(ctx, r)
+
 	ticker := time.NewTicker(c.tick)
 	defer ticker.Stop()
 	for {
 		r := c.newRound()
 		select {
 		case <-ctx.Done():
+			c.stop(ctx)
 			return nil
 		case e := <-c.queue:
 			c.handle(ctx, r, e)
@@ -191,8 +227,44 @@ func (c *Core) drain(ctx context.Context, r *round) {
 
 func (c *Core) handle(ctx context.Context, r *round, e entry) {
 	r.lag = max(r.lag, c.now().Sub(e.at))
-	if e.msg != nil {
+	switch {
+	case e.cmd != nil:
+		r.replies = append(r.replies, reply{e.reply, c.handleCommand(ctx, r, e.cmd)})
+	case e.msg != nil:
 		c.handleMessage(ctx, r, e.msg)
+	}
+}
+
+// stop verarbeitet nach dem Ende von ctx, was noch wartet, und schreibt die letzte Health.
+func (c *Core) stop(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
+	defer cancel()
+	r := c.newRound()
+	c.drain(ctx, r)
+	c.publish(ctx, r)
+	if err := c.ev.Flush(ctx); err != nil {
+		c.log.Error("final health not saved", "err", err)
+	}
+}
+
+// watchDB pingt die Datenbank im Takt und meldet das Ergebnis (DBPing).
+func (c *Core) watchDB(ctx context.Context) {
+	ticker := time.NewTicker(c.ping)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pctx, cancel := context.WithTimeout(ctx, pingTimeout)
+		err := c.pinger.Ping(pctx)
+		cancel()
+		select {
+		case c.queue <- entry{at: c.now(), msg: DBPing{OK: err == nil, Err: err}}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

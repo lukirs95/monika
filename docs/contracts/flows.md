@@ -46,7 +46,7 @@ sequenceDiagram
     end
     M->>DB: initialen Admin anlegen, falls es keinen Benutzer gibt
     M->>DB: unterbrochene Läufe abschließen (siehe Aktion)
-    M->>C: Laden: Inventar, Regeln, aktive Befunde, Health
+    M->>C: Laden: Inventar, Regeln, aktive Befunde, Health (Restore)
     M->>+C: go Run(ctx)
     M->>X: go Run(ctx) (abonnieren Ereignisse, dazu Aufbewahrung)
     C->>Sup: Start(alle aktivierten Quellen)

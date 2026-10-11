@@ -3,9 +3,12 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,19 +49,37 @@ func (s *invStore) ApplyDiscovery(_ context.Context, d inventory.Discovery) ([]u
 	return missing, nil
 }
 
+func (s *invStore) CreateDevice(context.Context, uuid.UUID, inventory.Element) error { return nil }
+func (s *invStore) CreateSource(context.Context, uuid.UUID, inventory.Source, uuid.UUID) error {
+	return nil
+}
+func (s *invStore) UpdateSource(context.Context, uuid.UUID, inventory.Source) error { return nil }
+func (s *invStore) DeleteSource(context.Context, uuid.UUID, uuid.UUID) error        { return nil }
+func (s *invStore) CreateGroup(context.Context, uuid.UUID, inventory.Element) error { return nil }
+func (s *invStore) AddGroupMember(context.Context, uuid.UUID, inventory.Link) error { return nil }
+
 func (s *invStore) setErr(err error) {
 	s.mu.Lock()
 	s.err = err
 	s.mu.Unlock()
 }
 
-// evalStore ist die Attrappe des Evaluation-Stores; alles gelingt.
-type evalStore struct{ evaluation.Store }
+// evalStore ist die Attrappe des Evaluation-Stores; alles gelingt, SaveHealth wird gezählt.
+type evalStore struct {
+	evaluation.Store
+	saves *atomic.Int32
+}
+
+func (evalStore) CreateRule(context.Context, uuid.UUID, evaluation.Rule) error { return nil }
+func (evalStore) AckFinding(context.Context, uuid.UUID, uuid.UUID) error       { return nil }
 
 func (evalStore) RaiseFinding(context.Context, evaluation.Finding) error              { return nil }
 func (evalStore) EndFinding(context.Context, uuid.UUID, evaluation.ClearReason) error { return nil }
 func (evalStore) SetFindingCause(context.Context, uuid.UUID, uuid.UUID) error         { return nil }
-func (evalStore) SaveHealth(context.Context, []evaluation.ElementHealth) error        { return nil }
+func (s evalStore) SaveHealth(context.Context, []evaluation.ElementHealth) error {
+	s.saves.Add(1)
+	return nil
+}
 
 type syncBuffer struct {
 	mu sync.Mutex
@@ -84,12 +105,55 @@ type rig struct {
 	store                  *invStore
 	events                 <-chan Event
 	logs                   *syncBuffer
+	sup                    *fakeSupervisor
+	secrets                *fakeSecrets
+	pinger                 *fakePinger
+	saves                  *atomic.Int32
+	stop                   func() // beendet Run und wartet darauf
 	device, source, access uuid.UUID
+}
+
+// fakeSupervisor zeichnet Aufträge auf.
+type fakeSupervisor struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (f *fakeSupervisor) Start(spec SourceSpec) { f.record("start " + spec.Driver) }
+func (f *fakeSupervisor) Stop(uuid.UUID)        { f.record("stop") }
+
+func (f *fakeSupervisor) record(s string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, s)
+}
+
+func (f *fakeSupervisor) Calls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.calls)
+}
+
+type fakeSecrets struct{ replaced atomic.Int32 }
+
+func (f *fakeSecrets) Replace(context.Context, uuid.UUID, uuid.UUID, json.RawMessage) error {
+	f.replaced.Add(1)
+	return nil
+}
+
+type fakePinger struct{ err atomic.Pointer[error] }
+
+func (f *fakePinger) Ping(context.Context) error {
+	if err := f.err.Load(); err != nil {
+		return *err
+	}
+	return nil
 }
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	r := &rig{t: t, device: uuid.New(), source: uuid.New(), access: uuid.New(), logs: &syncBuffer{}}
+	r := &rig{t: t, device: uuid.New(), source: uuid.New(), access: uuid.New(), logs: &syncBuffer{},
+		sup: &fakeSupervisor{}, secrets: &fakeSecrets{}, pinger: &fakePinger{}, saves: &atomic.Int32{}}
 	log := slog.New(slog.NewTextHandler(r.logs, nil))
 	drivers := func(name string) (sdk.Driver, bool) { return sdk.Driver{Name: name}, name == "videoxlink" }
 	r.store = &invStore{}
@@ -103,24 +167,29 @@ func newRig(t *testing.T) *rig {
 		},
 	})
 	types := func(key string) (vocab.Type, bool) { return vocab.Float, key == "temp" }
-	ev := evaluation.New(evalStore{}, types, func(string) bool { return true }, log)
+	ev := evaluation.New(evalStore{saves: r.saves}, types, func(string) bool { return true }, log)
 	ev.Load([]evaluation.Rule{{ID: uuid.New(), Name: "Temperatur", Enabled: true, Severity: evaluation.SeverityWarning,
 		Fact: "temp", Op: evaluation.OpLte, Value: []byte(`80`)}}, nil, nil)
 
-	r.c = New(Config{Inventory: inv, Evaluator: ev, Log: log})
+	r.c = New(Config{Inventory: inv, Evaluator: ev, Supervisor: r.sup, Secrets: r.secrets, DB: r.pinger, Log: log})
 	r.c.tick = 20 * time.Millisecond
+	r.c.ping = 20 * time.Millisecond
 	var cancel func()
 	r.events, cancel = r.c.Subscribe(1024)
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan error)
 	go func() { done <- r.c.Run(ctx) }()
-	t.Cleanup(func() {
-		stop()
-		if err := <-done; err != nil {
-			t.Errorf("Run: %v", err)
-		}
-		cancel()
-	})
+	var once sync.Once
+	r.stop = func() {
+		once.Do(func() {
+			stop()
+			if err := <-done; err != nil {
+				t.Errorf("Run: %v", err)
+			}
+			cancel()
+		})
+	}
+	t.Cleanup(r.stop)
 	return r
 }
 
