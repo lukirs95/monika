@@ -118,7 +118,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~9c Aufbewahrung~~ (Queries `retention.sql`, `retention.Store` in `postgres` mit Integrationstest, `Cleaner` 1 min nach dem Start und täglich 03:30 Uhr in Batches): erledigt
    10. Anmeldung und Rechte (`internal/auth`); Festlegungen M1–M8 vom 2026-10-11 in `auth.md`:
       - ~~10a Zugangsdaten~~ (argon2id, API- und Sitzungs-Tokens, TOTP nach RFC 6238, Wiederherstellungscodes, Begrenzung der Fehlversuche): erledigt
-      - 10b Anmeldung und Sitzungen
+      - ~~10b Anmeldung und Sitzungen~~ (`Login`, `VerifyTOTP`, Einrichtung, `Authenticate`, `AuthenticateToken`, `KioskLogin`, `Logout`, Aktivität gesammelt; `IssuedSession`): erledigt
       - 10c Rechte und Verwaltung, initialer Admin
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)

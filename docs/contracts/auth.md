@@ -22,14 +22,14 @@ classDiagram
     class Service {
         <<auth>>
         +Login(ctx, username, password, meta) (LoginStep, error)
-        +VerifyTOTP(ctx, challenge, code, meta) (Session, error)
+        +VerifyTOTP(ctx, challenge, code, meta) (IssuedSession, error)
         +Authenticate(ctx, sessionToken) (Principal, error)
         +AuthenticateToken(ctx, bearer) (Principal, error)
-        +KioskLogin(ctx, bearer, meta) (Session, error)
+        +KioskLogin(ctx, bearer, meta) (IssuedSession, error)
         +Logout(ctx, sessionToken) error
         +Allowed(v *View, p Principal, perm Permission, element ID) bool
         +EnrollTOTP(ctx, challenge) (Enrollment, error)
-        +ConfirmTOTP(ctx, challenge, code, meta) (Session, recoveryCodes []string, error)
+        +ConfirmTOTP(ctx, challenge, code, meta) (IssuedSession, recoveryCodes []string, error)
         +CreateUser(ctx, actor, u NewUser) error
         +UpdateUser(ctx, actor, u User) error
         +SetPassword(ctx, actor, user ID, password) error
@@ -54,7 +54,7 @@ classDiagram
         +Challenge string
         +NeedsEnrollment bool
     }
-    class Session {
+    class IssuedSession {
         <<struct>>
         +Token string
         +ExpiresAt time.Time
@@ -83,13 +83,17 @@ classDiagram
 
     Service ..> Principal
     Service ..> LoginStep
-    Service ..> Session
+    Service ..> IssuedSession
     Service ..> Enrollment
     Service *-- Grant
     Service ..> Store
 ```
 
 - **`Principal`** ist der angemeldete Benutzer einer Anfrage. Die API gibt seine `UserID` als `actor` an jedes Fachpaket weiter. Ist `ReadOnly` gesetzt (Token bzw. Kiosk-Sitzung mit `read_only`), lehnt die API jede ändernde Anfrage ab, unabhängig von den Rechten der Rollen.
+- **`IssuedSession`** ist eine neue Sitzung für das Cookie mit dem Klartext des Tokens; `Session` heißt die gespeicherte Sitzung (nur Hash).
+- **Fehler:** `ErrInvalidCredentials` (gleich für unbekannten Namen, falsches Passwort, deaktivierten Benutzer und Dienstkonto), `ThrottledError` mit Wartezeit (`errors.Is(err, ErrThrottled)`), `ErrInvalidChallenge`, `ErrInvalidCode`, `ErrUnauthenticated`. Bei unbekanntem Namen vergleicht `Login` trotzdem gegen einen Hash, damit die Antwortzeit nichts verrät.
+- **Falsche Codes** (TOTP und Wiederherstellung) zählen bei der Begrenzung der Fehlversuche mit; erst eine vollständige Anmeldung setzt sie zurück. Sonst ließe sich mit bekanntem Passwort der Code über viele Challenges durchprobieren.
+- **`Run`** schreibt jede Minute `last_seen_at` und `last_used_at` gesammelt und räumt abgelaufene Challenges auf; beim Stopp ein letztes Mal.
 - **Rollen und Rechte hält `auth` im Speicher** (`LoadAuthz` beim Start, nach jeder Änderung neu). `Allowed` braucht deshalb keine Datenbank, nur die `View` für den Geltungsbereich.
 
 ## Anmeldung mit Passwort und TOTP
