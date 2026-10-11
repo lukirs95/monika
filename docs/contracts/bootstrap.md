@@ -108,7 +108,7 @@ sequenceDiagram
 
 - **Logger:** `slog` mit `MONIKA_LOG_FORMAT` (`json` oder `text`) und `MONIKA_LOG_LEVEL`; `slog.SetDefault`, damit auch `log`-Ausgaben fremder Libraries strukturiert landen (`sdk.md`, Logging). Beim Start eine Zeile mit Version und den wesentlichen, nicht geheimen Einstellungen.
 - **Initialer Admin:** wird nur angelegt, wenn es noch keinen Benutzer gibt; das Passwort muss A6 erfüllen (`auth.md`), sonst startet Monika nicht. TOTP richtet er bei der ersten Anmeldung ein (A1). Gibt es schon Benutzer und die Variablen sind gesetzt, warnt Monika, dass sie entfernt werden können.
-- **Kein Unterbefehl, keine Flags** außer `-version`. Migrationen laufen beim Start; für die Entwicklung gibt es `make db-migrate`.
+- **Kein Unterbefehl**, nur zwei Flags: `-version` und `-healthcheck` (fragt `GET /healthz` auf `MONIKA_LISTEN` ab und endet mit `0` oder `1`; für den Healthcheck im Container, der kein `curl` hat). Migrationen laufen beim Start; für die Entwicklung gibt es `make db-migrate`.
 - **Exit-Codes:** `0` nach einem Signal, `1` bei jedem Fehler.
 
 ## Entscheidungen
@@ -121,3 +121,4 @@ sequenceDiagram
 | K4 | Lebenszyklus der Dienste | `errgroup` mit gemeinsamem `ctx`; ein Fehler fährt alles geordnet herunter, Exit-Code 1, Neustart durch die Umgebung |
 | K5 | Woher kommt die `.env`? | `./.env` oder `MONIKA_ENV_FILE`; fehlt sie, kein Fehler; Umgebung hat Vorrang |
 | K6 | TLS | nur über einen Reverse-Proxy; Warnung bei `MONIKA_PUBLIC_URL` ohne `https` |
+| K7 | Flags | `-version` und `-healthcheck`, sonst keine (`docs/OPERATIONS.md`) |

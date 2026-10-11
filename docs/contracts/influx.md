@@ -67,6 +67,7 @@ Das Schema ist das Vokabular ([`vocabulary.md`](vocabulary.md)): Ein Fakt `<meas
 | Measurements des Vokabulars (`state`, `system`, `ptp`, `stream`, …) | die historisierten Felder, Typ laut Vokabular (`int` mit `i`) | `element_id`, `device_id`, `source_id`, `driver`, `kind`, `transport` | pro Element, nur wenn seine Quelle Live ist |
 | `health` | `level` (0 `ok`, 1 `warning`, 2 `error`, 3 `unknown`) | `element_id`, `device_id`, `kind` | pro Element mit Health |
 | `rollup` | `ok`, `warning`, `error`, `unknown`, `unchecked`, `unmonitored`, `missing` | `element_id`, `kind` | pro Gerät und Gruppe mit Rollup |
+| `monika` | eigene Kennzahlen (`docs/OPERATIONS.md`) | – | ein Punkt pro Takt |
 
 ```
 ptp,element_id=…,device_id=…,source_id=…,driver=videoxlink,kind=clock,transport=ptp state="slave",offset_ns=-12i,path_delay_ns=830i,domain=0i 1760097600000

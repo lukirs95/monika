@@ -307,5 +307,5 @@ Format `<namensraum>:<id>`. Jeder Namensraum gehört genau einem Treiber, der ih
 |---|---|
 | `kind` | `device`, `group`, `access` |
 | Fakt | `present` (blendet der Core aus `element.present` ein; nicht historisiert) |
-| Measurement | `health`, `rollup` (schreibt Monika selbst) |
+| Measurement | `health`, `rollup`, `monika` (schreibt Monika selbst; `monika` sind ihre eigenen Kennzahlen, `docs/OPERATIONS.md`) |
 | Treibername | kein Measurement-Name dieses Vokabulars (sonst kollidieren rohe Schlüssel `<treiber>.<name>` mit `<measurement>.<feld>`) |

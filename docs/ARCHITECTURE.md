@@ -779,6 +779,7 @@ Vertrag: [`contracts/influx.md`](contracts/influx.md).
 - **Nie Labels als Tags**: Labels ändern sich, eine Umbenennung würde Zeitreihen zerreißen. Namen lösen externe Werkzeuge über das Schema `reporting` auf.
 - Ist InfluxDB nicht erreichbar, puffert Monika 1 min im Speicher und verwirft danach die ältesten Takte. Das Monitoring läuft weiter.
 - Die Aufbewahrung stellt der Betreiber in InfluxDB ein, nicht Monika.
+- Monika schreibt ihre eigenen Kennzahlen (Schleife, Quellen, Abonnenten, Puffer) in das Measurement `monika`. Betrieb, Backup und Updates: [`OPERATIONS.md`](OPERATIONS.md).
 
 ### Schnittstelle für externe Werkzeuge
 

@@ -48,6 +48,7 @@ monika/
 └─ docs/
    ├─ ARCHITECTURE.md
    ├─ DRIVERS.md            Leitfaden: einen Treiber schreiben
+   ├─ OPERATIONS.md         Betrieb: Auslieferung, Stack, Backup, Updates
    ├─ STATUS.md             Arbeitsstand, nächste Schritte, bekannte Lücken
    ├─ contracts/            Verträge (Mermaid, OpenAPI) vor dem Code
    └─ schema/monika.dbml
