@@ -16,10 +16,10 @@ const createRule = `-- name: CreateRule :exec
 WITH r AS (
   INSERT INTO rule (
     id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver,
-    fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds
+    fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds
   ) VALUES (
     $2::uuid, $3::text, $4::boolean, $5::severity, $6, $7, $8, $9,
-    $10::text, $11::rule_op, $12::jsonb, $13, $14, $15, $16, $17::int
+    $10::text, $11::rule_op, $12::jsonb, $13, $14, $15, $16, $17::int, $18::int
   )
   RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
 )
@@ -28,23 +28,24 @@ SELECT $1::uuid, 'create', 'rule', r.id, to_jsonb(r) FROM r
 `
 
 type CreateRuleParams struct {
-	ActorID        *uuid.UUID
-	ID             uuid.UUID
-	Name           string
-	Enabled        bool
-	Severity       Severity
-	ScopeElementID *uuid.UUID
-	MatchKind      *string
-	MatchTransport *string
-	MatchDriver    *string
-	Fact           string
-	Op             RuleOp
-	Value          json.RawMessage
-	WhenFact       *string
-	WhenOp         *RuleOp
-	WhenValue      json.RawMessage
-	ClearValue     json.RawMessage
-	HoldSeconds    int32
+	ActorID          *uuid.UUID
+	ID               uuid.UUID
+	Name             string
+	Enabled          bool
+	Severity         Severity
+	ScopeElementID   *uuid.UUID
+	MatchKind        *string
+	MatchTransport   *string
+	MatchDriver      *string
+	Fact             string
+	Op               RuleOp
+	Value            json.RawMessage
+	WhenFact         *string
+	WhenOp           *RuleOp
+	WhenValue        json.RawMessage
+	ClearValue       json.RawMessage
+	HoldSeconds      int32
+	ClearHoldSeconds int32
 }
 
 func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) error {
@@ -66,6 +67,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) error {
 		arg.WhenValue,
 		arg.ClearValue,
 		arg.HoldSeconds,
+		arg.ClearHoldSeconds,
 	)
 	return err
 }
@@ -158,6 +160,7 @@ WITH before AS (
       when_value       = $15,
       clear_value      = $16,
       hold_seconds     = $17::int,
+      clear_hold_seconds = $18::int,
       updated_at       = now()
   WHERE rule.id = $2::uuid
   RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
@@ -168,23 +171,24 @@ FROM r JOIN before ON before.id = r.id
 `
 
 type UpdateRuleParams struct {
-	ActorID        *uuid.UUID
-	ID             uuid.UUID
-	Name           string
-	Enabled        bool
-	Severity       Severity
-	ScopeElementID *uuid.UUID
-	MatchKind      *string
-	MatchTransport *string
-	MatchDriver    *string
-	Fact           string
-	Op             RuleOp
-	Value          json.RawMessage
-	WhenFact       *string
-	WhenOp         *RuleOp
-	WhenValue      json.RawMessage
-	ClearValue     json.RawMessage
-	HoldSeconds    int32
+	ActorID          *uuid.UUID
+	ID               uuid.UUID
+	Name             string
+	Enabled          bool
+	Severity         Severity
+	ScopeElementID   *uuid.UUID
+	MatchKind        *string
+	MatchTransport   *string
+	MatchDriver      *string
+	Fact             string
+	Op               RuleOp
+	Value            json.RawMessage
+	WhenFact         *string
+	WhenOp           *RuleOp
+	WhenValue        json.RawMessage
+	ClearValue       json.RawMessage
+	HoldSeconds      int32
+	ClearHoldSeconds int32
 }
 
 func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (int64, error) {
@@ -206,6 +210,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (int64, 
 		arg.WhenValue,
 		arg.ClearValue,
 		arg.HoldSeconds,
+		arg.ClearHoldSeconds,
 	)
 	if err != nil {
 		return 0, err

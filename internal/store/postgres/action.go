@@ -40,7 +40,7 @@ func (s *Store) CreateRuns(ctx context.Context, runs []action.Run) error {
 		}
 		params[i] = db.InsertRunParams{
 			ID: r.ID, ParentID: nullable(r.ParentID), PresetID: nullable(r.PresetID),
-			PresetStepID: nullable(r.PresetStepID), ElementID: nullable(r.ElementID),
+			PresetStepID: nullable(r.PresetStepID), ElementID: nullable(r.ElementID), ElementPath: nullable(r.ElementPath),
 			SourceID: nullable(r.SourceID), Action: r.Action, Params: r.Params,
 			Status: db.ActionStatus(r.Status), Critical: r.Critical, Verify: verify,
 			RequestedByID: r.RequestedByID, RequestedAt: requestedAt,

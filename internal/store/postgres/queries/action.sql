@@ -5,10 +5,10 @@ SET CONSTRAINTS ALL DEFERRED;
 
 -- name: InsertRun :batchexec
 INSERT INTO action_run (
-  id, parent_id, preset_id, preset_step_id, element_id, source_id, action, params,
+  id, parent_id, preset_id, preset_step_id, element_id, element_path, source_id, action, params,
   status, critical, verify, requested_by_id, requested_at
 ) VALUES (
-  @id, @parent_id, @preset_id, @preset_step_id, @element_id, @source_id, @action, @params,
+  @id, @parent_id, @preset_id, @preset_step_id, @element_id, @element_path, @source_id, @action, @params,
   @status, @critical, @verify, @requested_by_id, @requested_at
 );
 

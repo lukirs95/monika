@@ -54,6 +54,7 @@ type Rule struct {
 	Value json.RawMessage
 	When  *Condition // nil = gilt immer
 
-	ClearValue  json.RawMessage // Hysterese, nur numerisch
-	HoldSeconds int
+	ClearValue       json.RawMessage // Hysterese, nur numerisch
+	HoldSeconds      int             // Verletzung so lange, bevor ein Befund entsteht
+	ClearHoldSeconds int             // Sollzustand so lange, bevor der Befund endet
 }

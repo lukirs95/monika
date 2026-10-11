@@ -25,7 +25,7 @@ func (s *Store) CreateRule(ctx context.Context, actor uuid.UUID, r evaluation.Ru
 		ActorID: nullable(actor), ID: r.ID, Name: p.Name, Enabled: p.Enabled, Severity: p.Severity,
 		ScopeElementID: p.ScopeElementID, MatchKind: p.MatchKind, MatchTransport: p.MatchTransport, MatchDriver: p.MatchDriver,
 		Fact: p.Fact, Op: p.Op, Value: p.Value, WhenFact: p.WhenFact, WhenOp: p.WhenOp, WhenValue: p.WhenValue,
-		ClearValue: p.ClearValue, HoldSeconds: p.HoldSeconds,
+		ClearValue: p.ClearValue, HoldSeconds: p.HoldSeconds, ClearHoldSeconds: p.ClearHoldSeconds,
 	})
 }
 
@@ -66,18 +66,19 @@ func (s *Store) DeleteRule(ctx context.Context, actor uuid.UUID, id uuid.UUID) e
 // ruleParams übersetzt eine Regel in die Spalten von UpdateRule; CreateRule nutzt dieselben Werte.
 func ruleParams(r evaluation.Rule) db.UpdateRuleParams {
 	p := db.UpdateRuleParams{
-		Name:           r.Name,
-		Enabled:        r.Enabled,
-		Severity:       db.Severity(r.Severity),
-		ScopeElementID: nullable(r.ScopeElementID),
-		MatchKind:      nullable(r.MatchKind),
-		MatchTransport: nullable(r.MatchTransport),
-		MatchDriver:    nullable(r.MatchDriver),
-		Fact:           r.Fact,
-		Op:             db.RuleOp(r.Op),
-		Value:          r.Value,
-		ClearValue:     r.ClearValue,
-		HoldSeconds:    int32(r.HoldSeconds),
+		Name:             r.Name,
+		Enabled:          r.Enabled,
+		Severity:         db.Severity(r.Severity),
+		ScopeElementID:   nullable(r.ScopeElementID),
+		MatchKind:        nullable(r.MatchKind),
+		MatchTransport:   nullable(r.MatchTransport),
+		MatchDriver:      nullable(r.MatchDriver),
+		Fact:             r.Fact,
+		Op:               db.RuleOp(r.Op),
+		Value:            r.Value,
+		ClearValue:       r.ClearValue,
+		HoldSeconds:      int32(r.HoldSeconds),
+		ClearHoldSeconds: int32(r.ClearHoldSeconds),
 	}
 	if w := r.When; w != nil {
 		p.WhenFact, p.WhenOp, p.WhenValue = &w.Fact, new(db.RuleOp(w.Op)), w.Value
@@ -87,19 +88,20 @@ func ruleParams(r evaluation.Rule) db.UpdateRuleParams {
 
 func toRule(r db.Rule) evaluation.Rule {
 	out := evaluation.Rule{
-		ID:             r.ID,
-		Name:           r.Name,
-		Enabled:        r.Enabled,
-		Severity:       evaluation.Severity(r.Severity),
-		ScopeElementID: value(r.ScopeElementID),
-		MatchKind:      value(r.MatchKind),
-		MatchTransport: value(r.MatchTransport),
-		MatchDriver:    value(r.MatchDriver),
-		Fact:           r.Fact,
-		Op:             evaluation.Op(r.Op),
-		Value:          r.Value,
-		ClearValue:     r.ClearValue,
-		HoldSeconds:    int(r.HoldSeconds),
+		ID:               r.ID,
+		Name:             r.Name,
+		Enabled:          r.Enabled,
+		Severity:         evaluation.Severity(r.Severity),
+		ScopeElementID:   value(r.ScopeElementID),
+		MatchKind:        value(r.MatchKind),
+		MatchTransport:   value(r.MatchTransport),
+		MatchDriver:      value(r.MatchDriver),
+		Fact:             r.Fact,
+		Op:               evaluation.Op(r.Op),
+		Value:            r.Value,
+		ClearValue:       r.ClearValue,
+		HoldSeconds:      int(r.HoldSeconds),
+		ClearHoldSeconds: int(r.ClearHoldSeconds),
 	}
 	if r.WhenFact != nil {
 		out.When = &evaluation.Condition{Fact: *r.WhenFact, Op: evaluation.Op(value(r.WhenOp)), Value: r.WhenValue}

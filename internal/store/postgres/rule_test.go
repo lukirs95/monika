@@ -23,7 +23,7 @@ func newRule(scope uuid.UUID) evaluation.Rule {
 		ScopeElementID: scope, MatchDriver: "videoxlink",
 		Fact: "signal_present", Op: evaluation.OpEq, Value: json.RawMessage(`true`),
 		When:        &evaluation.Condition{Fact: "running", Op: evaluation.OpEq, Value: json.RawMessage(`true`)},
-		HoldSeconds: 5,
+		HoldSeconds: 5, ClearHoldSeconds: 30,
 	}
 }
 

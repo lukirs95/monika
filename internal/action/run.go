@@ -38,6 +38,7 @@ type Run struct {
 	PresetID     uuid.UUID
 	PresetStepID uuid.UUID
 	ElementID    uuid.UUID // uuid.Nil nur am Wurzel-Lauf eines Presets
+	ElementPath  string    // Anzeigename des Ziels beim Anlegen; hält den Lauf lesbar, wenn das Ziel gelöscht ist
 	SourceID     uuid.UUID // ausführende Quelle; uuid.Nil bei übergeordneten Läufen
 
 	Action   string

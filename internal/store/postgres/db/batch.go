@@ -241,11 +241,11 @@ func (b *InsertRecoveryCodeBatchResults) Close() error {
 
 const insertRun = `-- name: InsertRun :batchexec
 INSERT INTO action_run (
-  id, parent_id, preset_id, preset_step_id, element_id, source_id, action, params,
+  id, parent_id, preset_id, preset_step_id, element_id, element_path, source_id, action, params,
   status, critical, verify, requested_by_id, requested_at
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8,
-  $9, $10, $11, $12, $13
+  $1, $2, $3, $4, $5, $6, $7, $8, $9,
+  $10, $11, $12, $13, $14
 )
 `
 
@@ -261,6 +261,7 @@ type InsertRunParams struct {
 	PresetID      *uuid.UUID
 	PresetStepID  *uuid.UUID
 	ElementID     *uuid.UUID
+	ElementPath   *string
 	SourceID      *uuid.UUID
 	Action        string
 	Params        json.RawMessage
@@ -280,6 +281,7 @@ func (q *Queries) InsertRun(ctx context.Context, arg []InsertRunParams) *InsertR
 			a.PresetID,
 			a.PresetStepID,
 			a.ElementID,
+			a.ElementPath,
 			a.SourceID,
 			a.Action,
 			a.Params,

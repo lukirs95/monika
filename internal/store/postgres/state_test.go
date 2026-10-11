@@ -29,7 +29,7 @@ func TestSaveLoadHealth(t *testing.T) {
 		t.Fatalf("CreateGroup: %v", err)
 	}
 	want := []evaluation.ElementHealth{
-		{ElementID: device, Health: evaluation.HealthError, Rollup: &evaluation.Rollup{OK: 12, Error: 1, Unmonitored: 2}},
+		{ElementID: device, Health: evaluation.HealthError, Rollup: &evaluation.Rollup{OK: 12, Error: 1, Unchecked: 40, Unmonitored: 2}},
 		// Ohne Health und ohne Rollup: beides wird als NULL gespeichert.
 		{ElementID: group, Health: evaluation.HealthNone},
 	}

@@ -7,10 +7,10 @@ ORDER BY id;
 WITH r AS (
   INSERT INTO rule (
     id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver,
-    fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds
+    fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds
   ) VALUES (
     @id::uuid, @name::text, @enabled::boolean, @severity::severity, @scope_element_id, @match_kind, @match_transport, @match_driver,
-    @fact::text, @op::rule_op, @value::jsonb, @when_fact, @when_op, @when_value, @clear_value, @hold_seconds::int
+    @fact::text, @op::rule_op, @value::jsonb, @when_fact, @when_op, @when_value, @clear_value, @hold_seconds::int, @clear_hold_seconds::int
   )
   RETURNING *
 )
@@ -37,6 +37,7 @@ WITH before AS (
       when_value       = @when_value,
       clear_value      = @clear_value,
       hold_seconds     = @hold_seconds::int,
+      clear_hold_seconds = @clear_hold_seconds::int,
       updated_at       = now()
   WHERE rule.id = @id::uuid
   RETURNING *

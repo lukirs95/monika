@@ -122,7 +122,7 @@ func TestAccessGlobalRef(t *testing.T) {
 	link := inventory.Link{ID: newID(), Type: inventory.LinkRepresents, SourceID: localSource, FromID: peer, ToRef: "xlink:X8A9001"}
 	if _, err := s.ApplyDiscovery(ctx, inventory.Discovery{
 		SourceID: localSource,
-		Upsert: []inventory.Element{{ID: peer, Kind: "peer", ParentID: localAccess, DeviceID: local, SourceID: localSource, ExternalID: "peer/X8A9001"}},
+		Upsert:   []inventory.Element{{ID: peer, Kind: "peer", ParentID: localAccess, DeviceID: local, SourceID: localSource, ExternalID: "peer/X8A9001"}},
 		Seen:     []uuid.UUID{peer},
 		AddLinks: []inventory.Link{link},
 	}); err != nil {

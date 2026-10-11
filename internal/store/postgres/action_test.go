@@ -43,7 +43,7 @@ func TestRuns(t *testing.T) {
 	root := action.Run{ID: newID(), PresetID: p.ID, Action: "preset", Status: action.StatusPending, RequestedByID: user}
 	stepRun := action.Run{ID: newID(), ParentID: root.ID, PresetStepID: p.Steps[0].ID, ElementID: group,
 		Action: "start", Status: action.StatusPending, RequestedByID: user}
-	elementRun := action.Run{ID: newID(), ParentID: stepRun.ID, ElementID: port, Action: "start",
+	elementRun := action.Run{ID: newID(), ParentID: stepRun.ID, ElementID: port, ElementPath: "X8 / E1", Action: "start",
 		Status: action.StatusPending, RequestedByID: user, Critical: true,
 		Verify: &action.Verify{Timeout: 10 * time.Second, Conditions: []evaluation.Condition{
 			{Fact: "running", Op: evaluation.OpEq, Value: json.RawMessage(`true`)},
@@ -53,9 +53,12 @@ func TestRuns(t *testing.T) {
 		t.Fatalf("CreateRuns: %v", err)
 	}
 
-	var verify string
-	if err := pool.QueryRow(ctx, `SELECT verify::text FROM action_run WHERE id = $1`, elementRun.ID).Scan(&verify); err != nil {
+	var verify, path string
+	if err := pool.QueryRow(ctx, `SELECT verify::text, element_path FROM action_run WHERE id = $1`, elementRun.ID).Scan(&verify, &path); err != nil {
 		t.Fatalf("query verify: %v", err)
+	}
+	if path != "X8 / E1" {
+		t.Errorf("element_path = %q, want X8 / E1", path)
 	}
 	if want := `{"conditions": [{"op": "eq", "fact": "running", "value": true}], "timeout_ms": 10000}`; verify != want {
 		t.Errorf("verify = %s, want %s", verify, want)
