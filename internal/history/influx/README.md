@@ -1,7 +1,7 @@
 # internal/history/influx
 
-Schreibt Messwerte, Signal und Health (als Zahl) nach InfluxDB.
+Schreibt im festen Takt die historisierten Fakten, Health, Rollups und eigene Kennzahlen (`monika`) als Line Protocol nach InfluxDB; puffert höchstens 1 min.
 
-Tags: `element_id`, `device_id`, `kind`, `transport`, `driver`. Nie Labels als Tags.
+Tags: `element_id`, `device_id`, `source_id`, `driver`, `kind`, `transport`. Nie Labels als Tags.
 
-Siehe `docs/ARCHITECTURE.md`, Abschnitt 14 (InfluxDB).
+Vertrag: `docs/contracts/influx.md`.

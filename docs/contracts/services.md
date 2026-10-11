@@ -206,7 +206,13 @@ classDiagram
 
 - Die Weiterleitung besitzt `forward.Store`; die API ändert Ziele über sie, nie direkt. Nach jeder Änderung arbeitet sie mit der neuen Liste weiter.
 - **Format:** ein JSON-Objekt pro Ereignis (`event`, `at`, `finding` bzw. `run`, `element` mit `path` und `url`); Syslog nach RFC 5424 mit dem JSON in `MSG`, Webhook mit dem JSON als Body oder mit Vorlage (`docs/ARCHITECTURE.md` Abschnitt 13). Beim Anlegen prüft sie, dass `{{secret.…}}` nur in `url` und `headers` steht.
-- `SetTargetResults` schreibt `last_sent_at` und `last_error` gesammelt im Takt, nicht pro Ereignis.
+- `SetTargetResults` schreibt `last_sent_at` und `last_error` gesammelt alle 10 s, nicht pro Ereignis.
+- **`action.finished`** nur für Läufe ohne übergeordneten Lauf (einzelne Aktionen, Sammelaktionen, Wurzel-Läufe von Presets); die Kinder stehen in deren Zusammenfassung.
+- **Vorlagen** wie beim HTTP-Treiber (`docs/ARCHITECTURE.md` Abschnitt 11): Platzhalter sind Pfade in das JSON des Ereignisses (`{{finding.severity}}`, `{{element.path}}`, `{{run.status}}`), eingesetzt im Body als JSON-Wert, in der URL URL-kodiert, in Headern als Text; `{{secret.<schlüssel>}}` nur in URL und Headern.
+- **`element.url`** = `<MONIKA_PUBLIC_URL>/elements/<id>`; die UI bedient diese Route.
+- **Warteschlange** pro Ziel 1 000 Ereignisse, bei Überlauf fallen die ältesten weg (geloggt); 3 Wiederholungen nach 1 s, 5 s, 30 s (F5), danach `last_error`.
+- **`acked_by`** ist vorerst die ID des Benutzers.
+- **`MinSeverity`** filtert nur Befund-Ereignisse.
 
 ## Aufbewahrung (`internal/retention`)
 
@@ -226,7 +232,7 @@ classDiagram
     Cleaner ..> Store
 ```
 
-- Läuft einmal pro Nacht (und einmal kurz nach dem Start) und löscht in Batches (`limit`), bis nichts mehr übrig ist; zwischen den Batches gibt er der Datenbank Luft.
+- Läuft 1 min nach dem Start und dann täglich um 03:30 Uhr Ortszeit und löscht in Batches von 1 000 Zeilen, bis nichts mehr übrig ist; zwischen den Batches 100 ms Pause. Sitzungen und benutzte Wiederherstellungscodes fest nach 30 Tagen.
 - Löscht nur Verlauf: beendete Befunde, abgeschlossene Lauf-Bäume über ihre Wurzel, Audit, abgelaufene Sitzungen und benutzte Wiederherstellungscodes. Aktive Befunde und laufende Läufe nie; sie liegen auch im Speicher des Core, der davon nichts merkt.
 - Grenzen aus `MONIKA_RETENTION_*` (`0` = nie). Die Zahl der gelöschten Zeilen wird geloggt, nicht ins Audit geschrieben.
 - `retention.Store` ist die einzige Ausnahme von „ein Fachpaket pro Tabelle“: Aufräumen ist eine eigene fachliche Operation über mehrere Verlaufstabellen, und sie berührt keinen Zustand im Speicher.

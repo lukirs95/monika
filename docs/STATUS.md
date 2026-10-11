@@ -112,7 +112,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~8a Executor: Ziele und Anlegen~~ (Auflösung, `critical` und Prüfbedingung einfrieren, Zusammenfassung; `executor.Store`, `evaluation.Condition.Check`): erledigt
       - ~~8b Executor: Ausführung~~ (FIFO pro Element, `Execute` mit Timeout, Prüfbedingung über `FactsChanged`, übergeordnete Läufe, `Cancel`, Stopp nach F8; `Run.Finished`): erledigt
       - ~~8c Preset-Runner~~ (Verwaltung, Start mit eingefrorenen Zielen und Vorabprüfung, Stufen mit Wartezeit, Abbruch, verlorene Ereignisse, Stopp; Entscheidungen K1–K5; `auth.Principal`, `Executor.Targets`/`Finish`/`Result`): erledigt
-   9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
+   9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`); Entscheidungen L1–L7 vom 2026-10-11 in `services.md`:
+      - ~~9a Influx-Schreiber~~ (Punkte pro Element und Measurement, Raten nur ohne Zähler, Health, Rollup, `monika`; gzip, Batches, 1 min Puffer, `InfluxStatus`, Rest beim Stopp): erledigt
+      - 9b Weiterleitung
+      - 9c Aufbewahrung
    10. Anmeldung und Rechte (`internal/auth`)
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
@@ -132,6 +135,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 - Beim Löschen meldet der Evaluator die zurückgezogenen Befunde (`deleted`, `rule_deleted`) nur im Speicher; die Schleife muss dafür `Evaluate` mit `Diff.Deleted` aufrufen (Schritt 6).
 - `CreateMemberLink` prüft nicht selbst, dass die Gruppe `kind = group` hat; das prüft `Inventory.AddGroupMember` vor dem Store.
 - testcontainers schreibt viele Logzeilen in die Testausgabe.
+
+## Vorgaben für die UI (Phase 2)
+
+- Route `/elements/<id>` für Links aus der Weiterleitung (`services.md`, Weiterleitung).
 
 ## Offene Fragen an den User
 
