@@ -208,6 +208,7 @@ sequenceDiagram
 
 - Rechte des Benutzers = Vereinigung der Rechte aller seiner Rollen (nur Erlauben, kein Verbieten).
 - Ein Recht mit Geltungsbereich S gilt für Element E, wenn `View.InScope(S, E)` (`core.md`): S ist NULL; S ist E oder ein Vorfahre von E über `parent_id` (das Gerät ist der fernste); S ist eine Gruppe, die E oder einen Vorfahren von E rekursiv enthält. Dieselbe Auflösung gilt für Regeln, Weiterleitung, Verlauf und Watch.
+- **Gerüst:** Vorfahren eines sichtbaren Elements sind nur mit Name und Struktur sichtbar, ohne Zustand und ohne Rechte daran (`api.md`, Sichtbarkeit). `Allowed` gibt für sie `false` zurück, solange kein Recht sie selbst umfasst.
 - **Aktionen an Stellvertretern:** Geprüft wird das Recht am Stellvertreter, nicht am Original (das Recht folgt dem Weg, `docs/ARCHITECTURE.md` Abschnitt 7).
 - **Kritische Aktionen:** `Allowed(base) && Allowed(critical)` für dasselbe Element; die beiden Rechte dürfen aus verschiedenen Rollen kommen.
 - Globale Rechte (`preset_run`, `preset_edit`, `source_edit`, `admin`) haben immer Geltungsbereich NULL.

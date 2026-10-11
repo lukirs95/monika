@@ -14,7 +14,7 @@ Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket au
 | R4 | Fehler | RFC 9457 Problem Details (`application/problem+json`) mit stabilem `code`, z. B. `device_in_use`, `invalid_target`, `not_found` |
 | R5 | Verlauf | Cursor-Paginierung über UUIDv7: `?before=<id>&limit=100` (höchstens 500); Filter siehe unten, sie bleiben beim Weiterblättern gleich |
 | R6 | Stand und Live-Push | `GET /state` ohne Fakten; Fakten pro Element bzw. per Abo; Ereignisse per SSE (siehe unten) |
-| R7 | Sichtbarkeit | Ohne `view` fehlen Objekte in Listen; einzelne Objekte antworten mit 404, nicht 403 |
+| R7 | Sichtbarkeit | Ohne `view` fehlen Objekte in Listen; einzelne Objekte antworten mit 404, nicht 403. Ausnahme Gerüst, siehe unten |
 | R8 | Formate | IDs als UUID-Strings; Zeitpunkte RFC 3339 in UTC (`2026-10-09T12:00:00.123Z`); Dauern als Ganzzahl mit Einheit im Namen (`hold_seconds`, `delay_ms`); Feldnamen `snake_case` |
 
 Weitere Regeln:
@@ -22,6 +22,19 @@ Weitere Regeln:
 - **Ändernde Anfragen** (`POST`, `PUT`, `PATCH`, `DELETE`) mit Sitzung prüfen den `Origin`-Header (`auth.md`, A4). Ein `Principal` mit `read_only` bekommt `403` mit `code = read_only`.
 - **Anlegen** liefert `201` mit dem angelegten Objekt; IDs vergibt der Server.
 - **Rechte fehlen** bei sichtbarem Objekt: `403` mit `code = forbidden`.
+
+## Sichtbarkeit
+
+Sichtbar ist, was im Geltungsbereich eines `view`-Rechts liegt (`View.InScope`). Damit die UI den Baum aufbauen kann und nichts Falsches zeigt, gilt zusätzlich:
+
+| Fall | Regel |
+|---|---|
+| **Vorfahren** sichtbarer Elemente (z. B. Gerät und Zugang eines sichtbaren Encoders) | als **Gerüst** sichtbar: nur `id`, `kind`, `name`, `label`, `parent_id`, `device_id`, Feld `skeleton = true`; keine Fakten, Health, Befunde, Aktionen, Einstellungen, Quellen |
+| **Links** | nur, wenn beide Enden sichtbar sind (nicht als Gerüst); sonst fehlen sie |
+| **Ursache außerhalb der Sicht** | ein sichtbarer Befund behält `caused_by_id`; der Befund dahinter erscheint nicht, die UI zeigt „Ursache nicht sichtbar“ |
+| **Verlauf gelöschter Elemente** | nur mit `view` global (siehe Filter im Verlauf) |
+
+Ein Gerüst-Element ist kein sichtbares Objekt im Sinne von R7: Einzelabfragen darauf antworten mit 404, Aktionen und Regeln daran sind nicht möglich.
 
 ## Filter im Verlauf
 

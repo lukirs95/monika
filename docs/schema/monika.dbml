@@ -501,6 +501,7 @@ Table finding {
     rule_id
     caused_by_id
     raised_at
+    cleared_at
   }
 
   Note: '''
@@ -585,6 +586,7 @@ Table action_run {
     requested_at
     status
     requested_by_id
+    finished_at
   }
 
   checks {
@@ -713,6 +715,7 @@ Table user_session {
   indexes {
     user_id
     token_id
+    expires_at
   }
 
   checks {
@@ -743,6 +746,7 @@ Table user_recovery_code {
 
   indexes {
     user_id
+    used_at
   }
 
   Note: '10 Codes pro Einrichtung, je einmal gültig; neue Einrichtung ersetzt sie.'

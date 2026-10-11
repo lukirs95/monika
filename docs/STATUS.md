@@ -70,6 +70,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 - **B3:** `contracts/bootstrap.md` (eigener `.env`-Parser, unbekannte Variablen brechen ab, `errgroup`).
 - **B1:** `contracts/influx.md` (Line Protocol, Measurements aus dem Vokabular, 1 s Takt, 1 min Puffer, Schema `reporting`).
 - **C:** Aufbewahrung durch eigenen Dienst (180/180/730 Tage), Einzelinstanz-Sperre; Hochverfügbarkeit nicht in Version 1; Management-Adresse und Zugangsdaten werden **nie** über Aktionen geändert.
+- **Zweite Durchsicht:** Sichtbarkeit mit Gerüst (Vorfahren nur mit Name und Struktur, Links nur bei sichtbaren Enden, Ursache „nicht sichtbar“); `monika_reporting` sieht bewusst alles; Indizes für die Aufbewahrung.
 - **D (Durchsicht):** Health und Rollup über die verschiedenen Elemente im Geltungsbereich (keine Doppelzählung); Regel `feeds` = fester, `uses` = wählbarer Signalfluss; `View.Stats` für die Kennzahlen; `Setting.Unit` gestrichen; Reste in allen Dokumenten nachgezogen.
 - **B4:** `docs/OPERATIONS.md`: distroless-Image, lokal gebautes Binary, Stack aus Monika, PostgreSQL, InfluxDB und Caddy, `-healthcheck`, Migrationen nur vorwärts, Backup mit getrenntem Master-Key, Kennzahlen im Measurement `monika`, NTP, Datenbankrollen.
 - **B2:** Treiber-Leitfaden `docs/DRIVERS.md` am erfundenen Gateway „Acme GW-4“, mit typischen Fehlern und Checkliste; Testbaukasten `sdk/sdktest` im SDK-Vertrag.

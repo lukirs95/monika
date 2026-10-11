@@ -2032,6 +2032,7 @@ components:
 
     State:
       type: object
+      description: Sichtbares nach `view`; Vorfahren sichtbarer Elemente als Gerüst (`skeleton = true`, ohne Health, Befunde, Fakten); Links nur, wenn beide Enden sichtbar sind
       required: [version, elements, links, health, findings, runs, sources]
       properties:
         version: { type: integer, format: int64 }
@@ -2061,6 +2062,7 @@ components:
       required: [id, kind, present, monitored, actions, critical_actions]
       properties:
         id: { type: string, format: uuid }
+        skeleton: { type: boolean, description: 'nur Gerüst: Vorfahre eines sichtbaren Elements, ohne eigenes view-Recht; nur id, kind, name, label, parent_id, device_id sind gefüllt' }
         kind: { type: string, description: 'device, group, access, module, port, …' }
         parent_id: { type: string, format: uuid, nullable: true }
         device_id: { type: string, format: uuid, nullable: true }

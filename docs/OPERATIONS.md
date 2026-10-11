@@ -45,6 +45,8 @@ Der Host muss per **NTP synchron** laufen. TOTP verträgt nur ±30 s Abweichung,
 
 Die Migrationen legen das Schema `reporting` und seine Views an, nicht die Rollen; Rollen und Passwörter richtet der Betreiber einmal ein (Beispiel-Skript in `deploy/`).
 
+**`monika_reporting` sieht alles.** Die Views kennen Monikas Rechte nicht; wer Grafana bzw. diese Rolle nutzt, sieht alle Namen und Befunde. Das ist bewusst so (Zeilenrechte in PostgreSQL nach Monikas Rechtemodell wären viel Aufwand für wenig Nutzen). Zugang dazu bekommt nur, wer in Monika auch global `view` hätte.
+
 ## Updates
 
 - **Migrationen laufen beim Start, nur vorwärts.** Es gibt keine Down-Migrationen im Betrieb; zurück heißt: Backup einspielen und die alte Version starten.
