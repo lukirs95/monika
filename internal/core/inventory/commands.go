@@ -166,8 +166,7 @@ func (inv *Inventory) AddGroupMember(ctx context.Context, actor uuid.UUID, l Lin
 	if err := inv.store.AddGroupMember(ctx, actor, m); err != nil {
 		return Diff{}, fmt.Errorf("add group member: %w", err)
 	}
-	inv.links[m.ID] = m
-	inv.graph = nil
+	inv.setLink(m)
 	return Diff{LinksChanged: true}, nil
 }
 
@@ -181,8 +180,7 @@ func (inv *Inventory) UpdateGroupMember(ctx context.Context, actor uuid.UUID, l 
 	if err := inv.store.UpdateGroupMember(ctx, actor, next); err != nil {
 		return Diff{}, fmt.Errorf("update group member %s: %w", l.ID, err)
 	}
-	inv.links[l.ID] = next
-	inv.graph = nil
+	inv.setLink(next)
 	return Diff{LinksChanged: true}, nil
 }
 
@@ -194,24 +192,29 @@ func (inv *Inventory) RemoveGroupMember(ctx context.Context, actor uuid.UUID, id
 	if err := inv.store.RemoveGroupMember(ctx, actor, id); err != nil {
 		return Diff{}, fmt.Errorf("remove group member %s: %w", id, err)
 	}
-	delete(inv.links, id)
-	inv.graph = nil
+	inv.delLink(id)
 	return Diff{LinksChanged: true}, nil
 }
 
 // deleteElements entfernt die passenden Elemente mit ihren Links aus dem Speicher, wie die
-// Datenbank per CASCADE.
+// Datenbank per CASCADE; die Links in einem Durchgang.
 func (inv *Inventory) deleteElements(match func(Element) bool) Diff {
 	var diff Diff
-	links := len(inv.links)
+	deleted := map[uuid.UUID]bool{}
 	for id, e := range inv.elements {
 		if match(e) {
 			diff.Deleted = append(diff.Deleted, id)
+			deleted[id] = true
 		}
 	}
 	for _, id := range diff.Deleted {
 		inv.deleteElement(id)
 	}
-	diff.LinksChanged = len(inv.links) != links
+	for lid, l := range inv.links {
+		if deleted[l.FromID] || deleted[l.ToID] {
+			inv.delLink(lid)
+			diff.LinksChanged = true
+		}
+	}
 	return diff
 }

@@ -31,9 +31,31 @@ type Inventory struct {
 	byExt    map[extKey]uuid.UUID // (Quelle, external_id) → Element; "" = Zugang
 	byRef    map[string]uuid.UUID // global_ref → Element
 
+	// Indizes, damit Discovery und Löschen nicht alle Elemente und Links durchgehen.
+	elementsBySource ids[uuid.UUID] // Quelle → ihre Elemente
+	linksBySource    ids[uuid.UUID] // Quelle → ihre Treiber-Links
+	linksByRef       ids[string]    // global_ref → Links mit diesem unaufgelösten Endpunkt
+
 	lastSeenWrite map[uuid.UUID]time.Time // je Quelle: letzter Abschluss einer Discovery in der Datenbank
 
 	graph *Graph // nil = nach einer Änderung neu bauen; jede Änderung im Speicher setzt es zurück
+}
+
+// ids ist ein Index von einem Schlüssel auf eine Menge von IDs.
+type ids[K comparable] map[K]map[uuid.UUID]struct{}
+
+func (x ids[K]) add(k K, id uuid.UUID) {
+	if x[k] == nil {
+		x[k] = map[uuid.UUID]struct{}{}
+	}
+	x[k][id] = struct{}{}
+}
+
+func (x ids[K]) remove(k K, id uuid.UUID) {
+	delete(x[k], id)
+	if len(x[k]) == 0 {
+		delete(x, k)
+	}
 }
 
 type extKey struct {
@@ -45,14 +67,17 @@ type extKey struct {
 func New(store Store, drivers func(name string) (sdk.Driver, bool), log *slog.Logger) *Inventory {
 	return &Inventory{
 		store: store, drivers: drivers, log: log,
-		newID:         func() uuid.UUID { return uuid.Must(uuid.NewV7()) },
-		now:           time.Now,
-		elements:      map[uuid.UUID]Element{},
-		sources:       map[uuid.UUID]Source{},
-		links:         map[uuid.UUID]Link{},
-		byExt:         map[extKey]uuid.UUID{},
-		byRef:         map[string]uuid.UUID{},
-		lastSeenWrite: map[uuid.UUID]time.Time{},
+		newID:            func() uuid.UUID { return uuid.Must(uuid.NewV7()) },
+		now:              time.Now,
+		elements:         map[uuid.UUID]Element{},
+		sources:          map[uuid.UUID]Source{},
+		links:            map[uuid.UUID]Link{},
+		byExt:            map[extKey]uuid.UUID{},
+		byRef:            map[string]uuid.UUID{},
+		elementsBySource: ids[uuid.UUID]{},
+		linksBySource:    ids[uuid.UUID]{},
+		linksByRef:       ids[string]{},
+		lastSeenWrite:    map[uuid.UUID]time.Time{},
 	}
 }
 
@@ -66,7 +91,7 @@ func (inv *Inventory) Load(snap Snapshot) {
 		inv.putElement(e)
 	}
 	for _, l := range snap.Links {
-		inv.links[l.ID] = l
+		inv.setLink(l)
 	}
 }
 
@@ -152,6 +177,7 @@ func (inv *Inventory) putElement(e Element) {
 	inv.elements[e.ID] = e
 	if e.SourceID != uuid.Nil {
 		inv.byExt[extKey{e.SourceID, e.ExternalID}] = e.ID
+		inv.elementsBySource.add(e.SourceID, e.ID)
 	}
 	if e.GlobalRef != "" {
 		inv.byRef[e.GlobalRef] = e.ID
@@ -167,13 +193,42 @@ func (inv *Inventory) deleteElement(id uuid.UUID) {
 	delete(inv.elements, id)
 	if e.SourceID != uuid.Nil {
 		delete(inv.byExt, extKey{e.SourceID, e.ExternalID})
+		inv.elementsBySource.remove(e.SourceID, id)
 	}
 	if e.GlobalRef != "" && inv.byRef[e.GlobalRef] == id {
 		delete(inv.byRef, e.GlobalRef)
 	}
-	for lid, l := range inv.links {
-		if l.FromID == id || l.ToID == id {
-			delete(inv.links, lid)
+}
+
+// setLink setzt einen Link und pflegt die Indizes.
+func (inv *Inventory) setLink(l Link) {
+	inv.delLink(l.ID)
+	inv.graph = nil
+	inv.links[l.ID] = l
+	if l.SourceID != uuid.Nil {
+		inv.linksBySource.add(l.SourceID, l.ID)
+	}
+	for _, ref := range []string{l.FromRef, l.ToRef} {
+		if ref != "" {
+			inv.linksByRef.add(ref, l.ID)
+		}
+	}
+}
+
+// delLink entfernt einen Link mit seinen Indizes.
+func (inv *Inventory) delLink(id uuid.UUID) {
+	l, ok := inv.links[id]
+	if !ok {
+		return
+	}
+	inv.graph = nil
+	delete(inv.links, id)
+	if l.SourceID != uuid.Nil {
+		inv.linksBySource.remove(l.SourceID, id)
+	}
+	for _, ref := range []string{l.FromRef, l.ToRef} {
+		if ref != "" {
+			inv.linksByRef.remove(ref, id)
 		}
 	}
 }

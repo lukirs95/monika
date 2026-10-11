@@ -1,0 +1,40 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/core
+cpu: Apple M4 Max
+BenchmarkUpdate/devices=10-14         	    3427	    342027 ns/op	       271.0 findings	  490766 B/op	    4482 allocs/op
+BenchmarkUpdate/devices=50-14         	    7924	    151498 ns/op	       328.0 findings	  344585 B/op	    1658 allocs/op
+BenchmarkUpdate/devices=100-14        	    7862	    151679 ns/op	       319.0 findings	  533974 B/op	    1309 allocs/op
+BenchmarkUpdate/devices=200-14        	    6504	    183086 ns/op	       344.0 findings	  966066 B/op	    1167 allocs/op
+BenchmarkUpdate/devices=400-14        	    4214	    269515 ns/op	       688.0 findings	 1917516 B/op	    1300 allocs/op
+BenchmarkUpdate/devices=1000-14       	    1066	    957099 ns/op	      1720 findings	 5515314 B/op	    3617 allocs/op
+BenchmarkFindingToggle/devices=10-14  	    1369	    869354 ns/op	 4593404 B/op	    6707 allocs/op
+BenchmarkFindingToggle/devices=50-14  	    2890	    412205 ns/op	 1784861 B/op	    3983 allocs/op
+BenchmarkFindingToggle/devices=100-14 	    2859	    420369 ns/op	 2132596 B/op	    3370 allocs/op
+BenchmarkFindingToggle/devices=200-14 	    2090	    546947 ns/op	 3476738 B/op	    3228 allocs/op
+BenchmarkFindingToggle/devices=400-14 	    1012	   1116013 ns/op	 6946532 B/op	    6240 allocs/op
+BenchmarkFindingToggle/devices=1000-14         	     378	   3106483 ns/op	14797609 B/op	   15184 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=10-14         	   22647	     52652 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=50-14         	   25336	     46992 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=100-14        	   26113	     46264 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=200-14        	   25659	     46588 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=400-14        	   25693	     46490 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=1000-14       	   25254	     46940 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=10-14          	   20025	     60291 ns/op	  112052 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=50-14          	   23582	     51828 ns/op	  111963 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=100-14         	   22578	     53163 ns/op	  111949 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=200-14         	   22782	     51539 ns/op	  111942 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=400-14         	   22825	     52328 ns/op	  111939 B/op	     158 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=1000-14        	   22406	     53142 ns/op	  111937 B/op	     158 allocs/op
+BenchmarkGraph/devices=10-14                               	    2925	    393048 ns/op	  888037 B/op	    2826 allocs/op
+BenchmarkGraph/devices=50-14                               	     615	   1964399 ns/op	 4227867 B/op	   13804 allocs/op
+BenchmarkGraph/devices=100-14                              	     278	   4237847 ns/op	 8658482 B/op	   27512 allocs/op
+BenchmarkGraph/devices=200-14                              	     126	   9494584 ns/op	17716130 B/op	   54915 allocs/op
+BenchmarkGraph/devices=400-14                              	      56	  21151126 ns/op	35905857 B/op	  109706 allocs/op
+BenchmarkGraph/devices=1000-14                             	      19	  61362789 ns/op	85450763 B/op	  273762 allocs/op
+BenchmarkLoop/devices=10-14                                	    3320	    354515 ns/op	      3545 ns/update	  618651 B/op	    5464 allocs/op
+BenchmarkLoop/devices=50-14                                	    1612	    732246 ns/op	      7322 ns/update	 1002056 B/op	    9341 allocs/op
+BenchmarkLoop/devices=100-14                               	    1009	   1187680 ns/op	     11877 ns/update	 1569334 B/op	   14022 allocs/op
+BenchmarkLoop/devices=200-14                               	    1052	   1130182 ns/op	     11302 ns/update	 1858062 B/op	   12229 allocs/op
+BenchmarkLoop/devices=400-14                               	     922	   1205078 ns/op	     12051 ns/update	 2774383 B/op	   12226 allocs/op
+BenchmarkLoop/devices=1000-14                              	     804	   1469575 ns/op	     14696 ns/update	 4777965 B/op	   12547 allocs/op

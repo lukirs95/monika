@@ -2,6 +2,7 @@ package evaluation
 
 import (
 	"errors"
+	"maps"
 	"testing"
 	"time"
 
@@ -145,4 +146,32 @@ func (b *bench) name(id uuid.UUID) string {
 		b.device: "device", b.access: "access", b.port: "port", b.missing: "missing",
 		b.unmonitored: "unmonitored", b.g1: "g1", b.g2: "g2",
 	}[id]
+}
+
+// TestRollupIncrementalMatchesFull: Nach einer Folge von Änderungen stimmen die inkrementell
+// geführten Rollups mit einer vollständigen Neuberechnung überein.
+func TestRollupIncrementalMatchesFull(t *testing.T) {
+	b := newBench(t, tempRule())
+	b.state.heartbeat = 5 * time.Second
+	b.health()
+	steps := []func(){
+		func() { b.set("temp", 85.0) },
+		func() { b.state.notLive = map[uuid.UUID]bool{b.source: true} },
+		func() { b.state.notLive = nil },
+		func() { b.set("temp", 70.0) },
+		func() { b.set("temp", 95.0) },
+	}
+	for i, step := range steps {
+		step()
+		b.ev.Health(b.state, []uuid.UUID{b.port, b.access})
+		incremental := maps.Clone(b.ev.Healths())
+		b.ev.healthGraph = nil // erzwingt die vollständige Neuberechnung
+		b.ev.Health(b.state, nil)
+		for id, full := range b.ev.Healths() {
+			if !sameHealth(full, incremental[id]) {
+				t.Errorf("step %d, %s: incremental %+v %+v, full %+v %+v", i, b.name(id),
+					incremental[id].Health, incremental[id].Rollup, full.Health, full.Rollup)
+			}
+		}
+	}
 }

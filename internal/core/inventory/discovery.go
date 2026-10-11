@@ -102,8 +102,8 @@ func (inv *Inventory) ApplySnapshot(ctx context.Context, sourceID uuid.UUID, s s
 		}
 	}
 	vanishes := false
-	for id, e := range inv.elements {
-		if e.SourceID == sourceID && e.Present && !seen[id] {
+	for id := range inv.elementsBySource[sourceID] {
+		if e := inv.elements[id]; e.Present && !seen[id] {
 			vanishes = true
 			break
 		}
@@ -127,7 +127,11 @@ func (inv *Inventory) ApplySnapshot(ctx context.Context, sourceID uuid.UUID, s s
 		return Diff{}, fmt.Errorf("apply discovery of source %s: %w", sourceID, err)
 	}
 	inv.lastSeenWrite[sourceID] = now
-	inv.graph = nil
+	if structural {
+		// Nur dann; sonst hat sich nur last_seen_at geändert, und der Graph bleibt (mit dem
+		// vorigen LastSeenAt) bestehen, statt alle 5 min pro Quelle neu gebaut zu werden.
+		inv.graph = nil
+	}
 
 	// Ab hier nur noch der Speicher, in derselben Reihenfolge wie der Store.
 	if d.Identity != nil {
@@ -161,10 +165,10 @@ func (inv *Inventory) ApplySnapshot(ctx context.Context, sourceID uuid.UUID, s s
 		}
 	}
 	for _, id := range d.RemoveLinks {
-		delete(inv.links, id)
+		inv.delLink(id)
 	}
 	for _, l := range d.AddLinks {
-		inv.links[l.ID] = l
+		inv.setLink(l)
 	}
 	for _, e := range d.Upsert {
 		if e.GlobalRef != "" {
@@ -271,8 +275,8 @@ func keyOf(l Link) linkKey {
 // Snapshot, sonst das Inventar), und bleiben sonst als Verweis stehen.
 func (inv *Inventory) diffLinks(sourceID uuid.UUID, links []sdk.Link, ids, refs map[string]uuid.UUID, log *slog.Logger) (add []Link, remove []uuid.UUID) {
 	existing := map[linkKey]uuid.UUID{}
-	for id, l := range inv.links {
-		if l.SourceID == sourceID && l.Type != LinkMember {
+	for id := range inv.linksBySource[sourceID] {
+		if l := inv.links[id]; l.Type != LinkMember {
 			existing[keyOf(l)] = id
 		}
 	}
@@ -326,21 +330,18 @@ func (inv *Inventory) diffLinks(sourceID uuid.UUID, links []sdk.Link, ids, refs 
 
 // resolveRefs löst unaufgelöste Endpunkte mit dieser global_ref auf, in allen Quellen.
 func (inv *Inventory) resolveRefs(ref string, id uuid.UUID) bool {
-	changed := false
-	for lid, l := range inv.links {
-		if l.FromRef != ref && l.ToRef != ref {
-			continue
-		}
+	lids := slices.Collect(maps.Keys(inv.linksByRef[ref]))
+	for _, lid := range lids {
+		l := inv.links[lid]
 		if l.FromRef == ref {
 			l.FromID, l.FromRef = id, ""
 		}
 		if l.ToRef == ref {
 			l.ToID, l.ToRef = id, ""
 		}
-		inv.links[lid] = l
-		changed = true
+		inv.setLink(l)
 	}
-	return changed
+	return len(lids) > 0
 }
 
 // withDriverFields setzt die Spalten, die der Treiber liefert, und lässt die übrigen stehen.

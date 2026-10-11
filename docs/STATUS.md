@@ -115,6 +115,14 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
 
+## Leistung
+
+`make bench` misst den Core in Stufen von 10 bis 1000 Geräten (je 100 Elemente, 200 Regeln); Vergleich mit `benchstat`. Messwerte in `docs/benchmarks/`.
+
+- **Ausgangsstand:** Commit `adfc843`, `docs/benchmarks/baseline.txt`. Bei 200 Geräten 6,9 ms pro einzelner Meldung, 97 % davon im Rollup der großen Gruppen.
+- **Optimiert (2026-10-11):** Rollup inkrementell, `Monitored` im Graph vorberechnet, Indizes pro Quelle und `global_ref` im Inventar, kein Neubau des Graphs bei reinem `last_seen_at`; `docs/benchmarks/incremental-rollup.txt`. Bei 200 Geräten 0,18 ms pro einzelner Meldung, 11 µs pro Meldung mit Bündelung; bei 1000 Geräten 0,96 ms bzw. 15 µs; `ApplySnapshot` größenunabhängig 47 µs. Zurück zum Ausgangsstand: diesen Commit per `git revert` zurücknehmen.
+- **Bewusst O(Anzahl Elemente) pro Runde:** Kopie der Map der Fakten für die `View` und die Health-Map (copy-on-write), bei 1000 Geräten etwa 5 MB und knapp 1 ms pro Runde; der Neubau des Graphs bei Strukturänderungen (61 ms bei 1000 Geräten). Erst angehen, wenn es im Betrieb stört.
+
 ## Bekannte Lücken
 
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.

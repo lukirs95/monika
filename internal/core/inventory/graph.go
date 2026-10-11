@@ -20,6 +20,7 @@ type Graph struct {
 	out, in  map[uuid.UUID][]uuid.UUID // Element → Links (alle Typen)
 	members  map[uuid.UUID][]uuid.UUID // Gruppe → Mitglieder
 	groups   map[uuid.UUID][]uuid.UUID // Element → Gruppen, die es direkt enthalten
+	monitor  map[uuid.UUID]bool        // effektives monitored, beim Bau berechnet
 }
 
 // newGraph baut die Indizes; die Maps gehören danach dem Graph.
@@ -31,6 +32,10 @@ func newGraph(elements map[uuid.UUID]Element, sources map[uuid.UUID]Source, link
 		in:       map[uuid.UUID][]uuid.UUID{},
 		members:  map[uuid.UUID][]uuid.UUID{},
 		groups:   map[uuid.UUID][]uuid.UUID{},
+		monitor:  make(map[uuid.UUID]bool, len(elements)),
+	}
+	for id := range elements {
+		g.monitored(id, map[uuid.UUID]bool{})
 	}
 	for _, id := range sortedKeys(elements) {
 		if p := elements[id].ParentID; p != uuid.Nil {
@@ -196,20 +201,28 @@ func (g *Graph) ScopeElements(scope uuid.UUID) iter.Seq[uuid.UUID] {
 
 // Monitored ist das effektive monitored: Das Element und alle Vorfahren sind überwacht, und seine
 // Quelle ist aktiviert. Gruppen vererben nichts an ihre Mitglieder.
-func (g *Graph) Monitored(id uuid.UUID) bool {
+func (g *Graph) Monitored(id uuid.UUID) bool { return g.monitor[id] }
+
+// monitored berechnet Monitored beim Bau, mit den Ergebnissen der Eltern; visiting fängt Kreise ab.
+func (g *Graph) monitored(id uuid.UUID, visiting map[uuid.UUID]bool) bool {
+	if m, ok := g.monitor[id]; ok {
+		return m
+	}
 	e, ok := g.elements[id]
-	if !ok || !e.Monitored {
-		return false
+	m := ok && e.Monitored && !visiting[id]
+	if m && e.SourceID != uuid.Nil {
+		m = g.sources[e.SourceID].Enabled
 	}
-	if e.SourceID != uuid.Nil && !g.sources[e.SourceID].Enabled {
-		return false
-	}
-	for a := range g.Ancestors(id) {
-		if !g.elements[a].Monitored {
-			return false
+	if m && e.ParentID != uuid.Nil {
+		if _, ok := g.elements[e.ParentID]; ok {
+			visiting[id] = true
+			m = g.monitored(e.ParentID, visiting)
 		}
 	}
-	return true
+	if ok {
+		g.monitor[id] = m
+	}
+	return m
 }
 
 // Path ist der Anzeigename eines Elements wie bei Inventory.Path.

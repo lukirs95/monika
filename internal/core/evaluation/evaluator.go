@@ -65,6 +65,8 @@ type Evaluator struct {
 	healthGraph *inventory.Graph            // Graph und Regeln der letzten vollständigen Berechnung
 	healthRules *Rules
 	unsaved     map[uuid.UUID]ElementHealth // geändert, noch nicht gespeichert
+	buckets     map[uuid.UUID]bucket        // wie jedes Element zuletzt im Rollup gezählt wurde
+	counts      map[uuid.UUID]*Rollup       // Zähler pro Gerät und Gruppe
 }
 
 // New liefert einen Evaluator ohne Regeln und Befunde; types ist meist RegistryFactTypes,
@@ -81,6 +83,8 @@ func New(store Store, types FactTypes, drivers func(name string) bool, log *slog
 		health:       map[uuid.UUID]ElementHealth{},
 		healthDirty:  map[uuid.UUID]bool{},
 		unsaved:      map[uuid.UUID]ElementHealth{},
+		buckets:      map[uuid.UUID]bucket{},
+		counts:       map[uuid.UUID]*Rollup{},
 	}
 }
 

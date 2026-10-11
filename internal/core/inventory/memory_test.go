@@ -103,7 +103,7 @@ func TestFactsByID(t *testing.T) {
 
 func TestDeleteElement(t *testing.T) {
 	tr := newTree(t)
-	tr.inv.deleteElement(tr.port)
+	tr.inv.deleteElements(func(e Element) bool { return e.ID == tr.port })
 
 	if _, ok := tr.inv.Element(tr.port); ok {
 		t.Error("element still there")
