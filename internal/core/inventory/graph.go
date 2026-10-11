@@ -80,9 +80,11 @@ func (g *Graph) Link(id uuid.UUID) (Link, bool) {
 	return l, ok
 }
 
-// All liefert alle Elemente, Links alle Links, jeweils in beliebiger Reihenfolge.
-func (g *Graph) All() iter.Seq2[uuid.UUID, Element] { return maps.All(g.elements) }
-func (g *Graph) Links() iter.Seq2[uuid.UUID, Link]  { return maps.All(g.links) }
+// All liefert alle Elemente, Sources alle Quellen, Links alle Links, jeweils in beliebiger
+// Reihenfolge.
+func (g *Graph) All() iter.Seq2[uuid.UUID, Element]    { return maps.All(g.elements) }
+func (g *Graph) Sources() iter.Seq2[uuid.UUID, Source] { return maps.All(g.sources) }
+func (g *Graph) Links() iter.Seq2[uuid.UUID, Link]     { return maps.All(g.links) }
 
 // Outgoing und Incoming liefern die Links aller Typen, die am Element beginnen bzw. enden.
 func (g *Graph) Outgoing(id uuid.UUID) iter.Seq[Link] { return g.linkSeq(g.out[id]) }

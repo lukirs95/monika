@@ -113,6 +113,7 @@ classDiagram
         +Source(id) (Source, bool)
         +Link(id) (Link, bool)
         +All() iter.Seq2~ID, Element~
+        +Sources() iter.Seq2~ID, Source~
         +Links() iter.Seq2~ID, Link~
         +Outgoing(id) iter.Seq~Link~
         +Incoming(id) iter.Seq~Link~
@@ -169,10 +170,10 @@ classDiagram
         +Alarms(ctx, now, sourceID, alarms map~ID, []sdk.Alarm~, replace bool, s State) ([]FindingChange, error)
         +Tick(ctx, now, s State) ([]FindingChange, error)
         +Discovery(ctx, now, sourceID, err error, s State) ([]FindingChange, error)
-        +CreateRule(ctx, actor, r Rule, s State) ([]FindingChange, error)
-        +UpdateRule(ctx, actor, r Rule, s State) ([]FindingChange, error)
-        +DeleteRule(ctx, actor, id, s State) ([]FindingChange, error)
-        +AckFinding(ctx, actor, id) (Finding, error)
+        +CreateRule(ctx, now, actor, r Rule, s State) ([]FindingChange, error)
+        +UpdateRule(ctx, now, actor, r Rule, s State) ([]FindingChange, error)
+        +DeleteRule(ctx, now, actor, id, s State) ([]FindingChange, error)
+        +AckFinding(ctx, now, actor, id) (Finding, error)
         +Rules() *Rules
         +Findings() map~ID, Finding~
         +Health(s State, elements []ID) []ElementHealth
@@ -247,9 +248,10 @@ classDiagram
 | `State` | was die Bewertung vom Zustand liest; die `View` erfüllt es. Ein Interface beim Verwender, weil `core` `evaluation` importiert und nicht umgekehrt |
 | `Evaluator.Alarms` | Gerätealarme einer Quelle: bei `Snapshot` (`replace`) ersetzen sie alle Alarme der Quelle, bei `Update` nur die der genannten Elemente. Ein neuer Alarm erzeugt sofort einen Befund, ein fehlender beendet ihn als behoben |
 | Schreiben der Befunde | nur der Evaluator ruft `evaluation.Store` (`CLAUDE.md`), jeder Aufruf mit 2 s Timeout. **Entstehen gescheitert:** Der Befund gilt noch nicht als aktiv (weder in der `View` noch als Ereignis), `Tick` wiederholt; fällt sein Grund vorher weg, wird er verworfen. **Enden gescheitert:** Der Befund bleibt aktiv, bis `Tick` das Schreiben wiederholt hat; `ErrNotFound` zählt als Erfolg. Die Methoden liefern die gelungenen Änderungen und die gesammelten Fehler |
-| Abgleich | Pro Element berechnet der Evaluator die Befunde, die sein sollen: Regel (verletzte Regeln der gewinnenden Stufe), Gerät (Codes der zuletzt gemeldeten Alarme), System am Zugang (`source.unreachable` laut `State.Unreachable`, `source.discovery_failed` laut letztem `Discovery`). Regel- und Gerätebefunde nur, wenn die Quelle `Live` ist, sonst bleiben sie eingefroren (auch eine abgelaufene Haltezeit wartet); Systembefunde immer |
+| Abgleich | Pro Element berechnet der Evaluator die Befunde, die sein sollen: Regel (verletzte Regeln der gewinnenden Stufe), Gerät (Codes der zuletzt gemeldeten Alarme), System am Zugang (`source.unreachable` laut `State.Unreachable`, `source.discovery_failed` laut letztem `Discovery`). Regel- und Gerätebefunde nur, wenn die Quelle `Live` ist, sonst bleiben sie eingefroren (auch eine abgelaufene Haltezeit wartet); Systembefunde immer, `Tick` prüft dafür jede Sekunde alle Zugänge. Ein verschwundenes Element hat für die Bewertung nur `present` und keine Alarme. Pro Element kommen erst die beendeten, dann die neuen Befunde |
 | Grund des Zurückziehens | der erste passende in dieser Reihenfolge: `deleted` (Element nicht mehr im Graph), `rule_deleted`, `rule_disabled`, `source_disabled`, `unmonitored`, `element_missing`, `fact_missing`, sonst `rule_changed` (Geltungsbereich, Filter oder Präzedenz). `deleted`, `rule_deleted` und `rule_disabled` hat der Store schon in derselben Transaktion geschrieben; der Evaluator beendet sie nur im Speicher und meldet sie |
 | `Evaluator.Discovery` | Ergebnis jedes Versuchs, einen `Snapshot` zu speichern: Fehler erzeugt `source.discovery_failed` am Zugang (Fehlertext in `details`), Erfolg beendet ihn als behoben |
+| `Evaluator.AckFinding` | quittiert einen aktiven Befund (`ErrNotFound` sonst); die erste Quittierung bleibt bestehen |
 | Regelbefehle | `CreateRule`, `UpdateRule`, `DeleteRule` prüfen die Regel (auch: Geltungsbereich existiert, `match_driver` registriert), schreiben sie und bewerten alle Elemente im alten und neuen Geltungsbereich neu, damit auch überschriebene oder wieder geltende Regeln stimmen. IDs vergibt die API |
 | Regelbefund | `message` z. B. `temp lte 80`; `details` mit dem Snapshot der Regel (Name, Fakt, Operator, Wert, `when`, Hysterese) und dem gemessenen Wert, damit der Befund nach dem Löschen der Regel lesbar bleibt; `element_path` aus `Graph.Path` |
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |

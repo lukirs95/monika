@@ -21,6 +21,7 @@ type fakeStore struct {
 	ended    map[uuid.UUID]ClearReason
 	raiseErr error
 	endErr   error
+	calls    []string // Regeln und Quittieren
 }
 
 var _ Store = (*fakeStore)(nil)
@@ -44,15 +45,27 @@ func (f *fakeStore) EndFinding(_ context.Context, id uuid.UUID, reason ClearReas
 	return nil
 }
 
-func (f *fakeStore) ListRules(context.Context) ([]Rule, error)                   { return nil, nil }
-func (f *fakeStore) CreateRule(context.Context, uuid.UUID, Rule) error           { return nil }
-func (f *fakeStore) UpdateRule(context.Context, uuid.UUID, Rule) error           { return nil }
-func (f *fakeStore) DeleteRule(context.Context, uuid.UUID, uuid.UUID) error      { return nil }
+func (f *fakeStore) ListRules(context.Context) ([]Rule, error) { return nil, nil }
+func (f *fakeStore) CreateRule(context.Context, uuid.UUID, Rule) error {
+	f.calls = append(f.calls, "create")
+	return nil
+}
+func (f *fakeStore) UpdateRule(context.Context, uuid.UUID, Rule) error {
+	f.calls = append(f.calls, "update")
+	return nil
+}
+func (f *fakeStore) DeleteRule(context.Context, uuid.UUID, uuid.UUID) error {
+	f.calls = append(f.calls, "delete")
+	return nil
+}
 func (f *fakeStore) ListActiveFindings(context.Context) ([]Finding, error)       { return nil, nil }
 func (f *fakeStore) SetFindingCause(context.Context, uuid.UUID, uuid.UUID) error { return nil }
-func (f *fakeStore) AckFinding(context.Context, uuid.UUID, uuid.UUID) error      { return nil }
-func (f *fakeStore) LoadHealth(context.Context) ([]ElementHealth, error)         { return nil, nil }
-func (f *fakeStore) SaveHealth(context.Context, []ElementHealth) error           { return nil }
+func (f *fakeStore) AckFinding(context.Context, uuid.UUID, uuid.UUID) error {
+	f.calls = append(f.calls, "ack")
+	return nil
+}
+func (f *fakeStore) LoadHealth(context.Context) ([]ElementHealth, error) { return nil, nil }
+func (f *fakeStore) SaveHealth(context.Context, []ElementHealth) error   { return nil }
 
 // bench ist ein Evaluator über der Testwelt mit einer Regel am Port.
 type bench struct {
@@ -68,7 +81,7 @@ func newBench(t *testing.T, r Rule) *bench {
 	t.Helper()
 	w := newWorld(t)
 	store := &fakeStore{}
-	ev := New(store, testTypes, slog.New(slog.DiscardHandler))
+	ev := New(store, testTypes, func(name string) bool { return name == "videoxlink" }, slog.New(slog.DiscardHandler))
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lukirs95/monika/internal/core/inventory"
+	"github.com/lukirs95/monika/sdk"
 )
 
 // Codes der Befunde, die Monika selbst vergibt.
@@ -39,25 +40,32 @@ type FindingChange struct {
 // das Inventar ist er Logik ohne eigene Goroutinen; Besitzer ist die Schleife des Core. Er
 // schreibt erst in die Datenbank und ändert dann den Speicher.
 type Evaluator struct {
-	store Store
-	types FactTypes
-	log   *slog.Logger
-	newID func() uuid.UUID
+	store   Store
+	types   FactTypes
+	drivers func(name string) bool
+	log     *slog.Logger
+	newID   func() uuid.UUID
 
 	rules  *Rules
-	graph  *inventory.Graph // zuletzt gesehen, um Regeln gelöschter Geltungsbereiche zu entfernen
+	graph  *inventory.Graph // zuletzt gesehen, um Gelöschtes aufzuräumen
 	active map[uuid.UUID]Finding
 	tracks map[uuid.UUID]map[findingKey]*track // Element → seine Befunde in Arbeit und aktiv
+
+	alarms       map[uuid.UUID][]sdk.Alarm // Element → zuletzt gemeldete Alarme
+	discoveryErr map[uuid.UUID]string      // Quelle → Fehler des letzten Versuchs, einen Snapshot zu speichern
 }
 
-// New liefert einen Evaluator ohne Regeln und Befunde; types ist meist RegistryFactTypes.
-func New(store Store, types FactTypes, log *slog.Logger) *Evaluator {
+// New liefert einen Evaluator ohne Regeln und Befunde; types ist meist RegistryFactTypes,
+// drivers meist RegistryDriver.
+func New(store Store, types FactTypes, drivers func(name string) bool, log *slog.Logger) *Evaluator {
 	return &Evaluator{
-		store: store, types: types, log: log,
-		newID:  func() uuid.UUID { return uuid.Must(uuid.NewV7()) },
-		rules:  newRules(nil),
-		active: map[uuid.UUID]Finding{},
-		tracks: map[uuid.UUID]map[findingKey]*track{},
+		store: store, types: types, drivers: drivers, log: log,
+		newID:        func() uuid.UUID { return uuid.Must(uuid.NewV7()) },
+		rules:        newRules(nil),
+		active:       map[uuid.UUID]Finding{},
+		tracks:       map[uuid.UUID]map[findingKey]*track{},
+		alarms:       map[uuid.UUID][]sdk.Alarm{},
+		discoveryErr: map[uuid.UUID]string{},
 	}
 }
 
@@ -97,9 +105,11 @@ func (t *track) isActive() bool {
 }
 
 // wanted ist ein Befund, der laut Bewertung sein soll (violated) oder dessen Grund zwar gilt,
-// aber erfüllt ist.
+// aber erfüllt ist. keep lässt ihn unverändert (source.unreachable, solange die Quelle noch
+// nicht wieder Live ist).
 type wanted struct {
 	violated        bool
+	keep            bool
 	finding         Finding // Vorlage
 	hold, clearHold time.Duration
 }
@@ -137,7 +147,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, now time.Time, elements []uuid
 	var res result
 	e.prune(s.Graph(), &res)
 	for _, id := range elements {
-		e.reconcile(ctx, now, id, s, &res)
+		e.reconcile(ctx, now, id, s, "", &res)
 	}
 	return res.done()
 }
@@ -161,34 +171,61 @@ func (e *Evaluator) Tick(ctx context.Context, now time.Time, s State) ([]Finding
 			e.end(ctx, tr, ReasonResolved, &res)
 		}
 	}
+	// Lebenszeichen: Systembefunde aller Zugänge.
+	for _, src := range slices.SortedFunc(maps.Values(maps.Collect(g.Sources())), func(a, b inventory.Source) int {
+		return slices.Compare(a.ID[:], b.ID[:])
+	}) {
+		e.reconcile(ctx, now, src.AccessElementID, s, OriginSystem, &res)
+	}
 	return res.done()
 }
 
-// reconcile gleicht die Befunde eines Elements mit dem ab, was laut Bewertung sein soll.
-func (e *Evaluator) reconcile(ctx context.Context, now time.Time, id uuid.UUID, s State, res *result) {
+// reconcile gleicht die Befunde eines Elements mit dem ab, was laut Bewertung sein soll; only
+// beschränkt das auf eine Herkunft ("" = alle).
+func (e *Evaluator) reconcile(ctx context.Context, now time.Time, id uuid.UUID, s State, only Origin, res *result) {
 	g := s.Graph()
-	_, exists := g.Element(id)
+	el, exists := g.Element(id)
 	eligible := exists && g.Monitored(id)
+	includes := func(o Origin) bool { return only == "" || only == o }
 
 	// Welche Herkünfte jetzt bewertet werden; die übrigen bleiben unverändert.
 	evaluated := map[Origin]bool{}
 	want := map[findingKey]wanted{}
 	switch {
 	case !eligible:
-		evaluated = map[Origin]bool{OriginRule: true, OriginDevice: true, OriginSystem: true}
-	case e.live(s, id):
-		evaluated[OriginRule] = true
-		e.wantRules(id, s, want)
+		for _, o := range []Origin{OriginRule, OriginDevice, OriginSystem} {
+			evaluated[o] = includes(o)
+		}
+	default:
+		if includes(OriginSystem) {
+			evaluated[OriginSystem] = true
+			e.wantSystem(el, s, want)
+		}
+		if !e.live(s, id) {
+			break
+		}
+		if includes(OriginRule) {
+			evaluated[OriginRule] = true
+			e.wantRules(id, s, want)
+		}
+		if includes(OriginDevice) {
+			evaluated[OriginDevice] = true
+			if el.Present { // mit dem Element entfallen seine Alarme
+				e.wantAlarms(id, want)
+			}
+		}
 	}
 
-	for _, key := range slices.SortedFunc(maps.Keys(want), compareKeys) {
-		e.apply(ctx, now, g, key, want[key], res)
-	}
+	// Erst beenden, was nicht mehr gilt, dann das Neue: in dieser Reihenfolge sehen es auch die
+	// Abonnenten.
 	for _, tr := range e.elementTracks(id) {
 		if _, ok := want[tr.key]; ok || !evaluated[tr.finding.Origin] {
 			continue
 		}
 		e.drop(ctx, tr, e.reason(g, s, tr), res)
+	}
+	for _, key := range slices.SortedFunc(maps.Keys(want), compareKeys) {
+		e.apply(ctx, now, g, key, want[key], res)
 	}
 }
 
@@ -215,9 +252,57 @@ func (e *Evaluator) wantRules(id uuid.UUID, s State, want map[findingKey]wanted)
 	}
 }
 
+// wantAlarms trägt die zuletzt gemeldeten Alarme des Elements ein; jeder Code einmal.
+func (e *Evaluator) wantAlarms(id uuid.UUID, want map[findingKey]wanted) {
+	for _, a := range e.alarms[id] {
+		key := findingKey{id, uuid.Nil, a.Code}
+		if _, dup := want[key]; dup || a.Code == "" {
+			continue
+		}
+		sev := Severity(a.Severity)
+		if sev != SeverityInfo && sev != SeverityError {
+			sev = SeverityWarning
+		}
+		want[key] = wanted{violated: true, finding: Finding{Origin: OriginDevice, Code: a.Code, Severity: sev, Message: a.Message}}
+	}
+}
+
+// wantSystem trägt am Zugang source.unreachable und source.discovery_failed ein. Ein
+// source.unreachable endet erst, wenn die Quelle wieder Live ist.
+func (e *Evaluator) wantSystem(el inventory.Element, s State, want map[findingKey]wanted) {
+	if el.Kind != inventory.KindAccess {
+		return
+	}
+	src := el.SourceID
+	key := findingKey{el.ID, uuid.Nil, CodeSourceUnreachable}
+	reason, unreachable := s.Unreachable(src)
+	switch {
+	case unreachable:
+		want[key] = wanted{violated: true, finding: systemFinding(CodeSourceUnreachable, map[string]string{"reason": reason})}
+	case s.Live(src):
+		want[key] = wanted{}
+	default:
+		want[key] = wanted{keep: true}
+	}
+	key = findingKey{el.ID, uuid.Nil, CodeDiscoveryFailed}
+	if msg, failed := e.discoveryErr[src]; failed {
+		want[key] = wanted{violated: true, finding: systemFinding(CodeDiscoveryFailed, map[string]string{"error": msg})}
+	} else {
+		want[key] = wanted{}
+	}
+}
+
+func systemFinding(code string, details map[string]string) Finding {
+	b, _ := json.Marshal(details) // map[string]string lässt sich immer kodieren
+	return Finding{Origin: OriginSystem, Code: code, Severity: SeverityError, Details: b}
+}
+
 // apply führt einen Befund, dessen Grund gilt, zum gewünschten Zustand.
 func (e *Evaluator) apply(ctx context.Context, now time.Time, g *inventory.Graph, key findingKey, w wanted, res *result) {
 	tr := e.track(key)
+	if w.keep {
+		return
+	}
 	if w.violated {
 		switch {
 		case tr == nil:
@@ -300,13 +385,24 @@ func memoryOnly(r ClearReason) bool {
 	return r == ReasonDeleted || r == ReasonRuleDeleted || r == ReasonRuleDisabled
 }
 
-// prune entfernt Regeln, deren Geltungsbereich gelöscht ist (in der Datenbank per CASCADE), und
-// beendet ihre Befunde im Speicher.
+// prune räumt nach einer Änderung des Inventars auf: Alarme gelöschter Elemente, Fehler
+// gelöschter Quellen und Regeln, deren Geltungsbereich gelöscht ist (in der Datenbank per
+// CASCADE); deren Befunde beendet es im Speicher.
 func (e *Evaluator) prune(g *inventory.Graph, res *result) {
 	if g == e.graph {
 		return
 	}
 	e.graph = g
+	for id := range e.alarms {
+		if _, ok := g.Element(id); !ok {
+			delete(e.alarms, id)
+		}
+	}
+	for id := range e.discoveryErr {
+		if _, ok := g.Source(id); !ok {
+			delete(e.discoveryErr, id)
+		}
+	}
 	var gone []uuid.UUID
 	for _, r := range e.rules.list {
 		if _, ok := g.Element(r.ScopeElementID); r.ScopeElementID != uuid.Nil && !ok {

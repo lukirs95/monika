@@ -43,6 +43,12 @@ func RegistryFactTypes(key string) (vocab.Type, bool) {
 	return d.FactType(key)
 }
 
+// RegistryDriver meldet, ob ein Treiber registriert ist (für match_driver).
+func RegistryDriver(name string) bool {
+	_, ok := sdk.Lookup(name)
+	return ok
+}
+
 // rule ist eine geprüfte Regel mit gelesenen Werten.
 type rule struct {
 	Rule
@@ -320,6 +326,13 @@ func newRules(byID map[uuid.UUID]*rule) *Rules {
 
 func compareRules(a, b *rule) int {
 	return cmp.Or(strings.Compare(a.Name, b.Name), slices.Compare(a.ID[:], b.ID[:]))
+}
+
+// with liefert einen neuen Satz mit der Regel, neu oder ersetzt.
+func (rs *Rules) with(r *rule) *Rules {
+	byID := maps.Clone(rs.byID)
+	byID[r.ID] = r
+	return newRules(byID)
 }
 
 // without liefert einen neuen Satz ohne die Regeln.
