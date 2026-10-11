@@ -1,0 +1,75 @@
+?   	github.com/lukirs95/monika/internal/action	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/action/executor
+cpu: Apple M4 Max
+BenchmarkPlanCollective/devices=10-14         	    1107	   1006972 ns/op	       961.0 runs	 1613645 B/op	    7748 allocs/op
+BenchmarkPlanCollective/devices=50-14         	     242	   4968060 ns/op	      4801 runs	 9426765 B/op	   38506 allocs/op
+BenchmarkPlanCollective/devices=100-14        	     100	  10059140 ns/op	      9601 runs	21570351 B/op	   76948 allocs/op
+BenchmarkPlanCollective/devices=200-14        	      55	  21130442 ns/op	     19201 runs	38401404 B/op	  153821 allocs/op
+BenchmarkPlanCollective/devices=400-14        	      25	  46326915 ns/op	     38401 runs	79960208 B/op	  307560 allocs/op
+BenchmarkPlanCollective/devices=1000-14       	       9	 123504468 ns/op	     96001 runs	203418912 B/op	  768631 allocs/op
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/core
+cpu: Apple M4 Max
+BenchmarkUpdate/devices=10-14         	    3387	    344279 ns/op	       271.0 findings	  490795 B/op	    4482 allocs/op
+BenchmarkUpdate/devices=50-14         	    7808	    153274 ns/op	       328.0 findings	  344595 B/op	    1658 allocs/op
+BenchmarkUpdate/devices=100-14        	    7848	    153007 ns/op	       319.0 findings	  533972 B/op	    1309 allocs/op
+BenchmarkUpdate/devices=200-14        	    6428	    184330 ns/op	       344.0 findings	  966244 B/op	    1167 allocs/op
+BenchmarkUpdate/devices=400-14        	    4290	    265139 ns/op	       688.0 findings	 1915862 B/op	    1298 allocs/op
+BenchmarkUpdate/devices=1000-14       	    1018	   1041333 ns/op	      1720 findings	 5606172 B/op	    3724 allocs/op
+BenchmarkFindingToggle/devices=10-14  	    1346	    863164 ns/op	 4590571 B/op	    6703 allocs/op
+BenchmarkFindingToggle/devices=50-14  	    2827	    417445 ns/op	 1785093 B/op	    3984 allocs/op
+BenchmarkFindingToggle/devices=100-14 	    2769	    421433 ns/op	 2132585 B/op	    3370 allocs/op
+BenchmarkFindingToggle/devices=200-14 	    2145	    551271 ns/op	 3476797 B/op	    3228 allocs/op
+BenchmarkFindingToggle/devices=400-14 	    1060	   1109800 ns/op	 6946536 B/op	    6240 allocs/op
+BenchmarkFindingToggle/devices=1000-14         	     355	   3272310 ns/op	14799109 B/op	   15189 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=10-14         	   23077	     52489 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=50-14         	   25449	     46622 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=100-14        	   26043	     45835 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=200-14        	   25932	     46284 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=400-14        	   25803	     46521 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=false/devices=1000-14       	   25064	     47106 ns/op	   85680 B/op	     146 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=10-14          	   19962	     60259 ns/op	  112053 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=50-14          	   22218	     53386 ns/op	  111962 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=100-14         	   23638	     51450 ns/op	  111949 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=200-14         	   22801	     50744 ns/op	  111942 B/op	     159 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=400-14         	   22672	     52466 ns/op	  111939 B/op	     158 allocs/op
+BenchmarkApplySnapshot/changed=true/devices=1000-14        	   22297	     53667 ns/op	  111937 B/op	     158 allocs/op
+BenchmarkGraph/devices=10-14                               	    2906	    405388 ns/op	  888037 B/op	    2826 allocs/op
+BenchmarkGraph/devices=50-14                               	     578	   1984877 ns/op	 4227867 B/op	   13804 allocs/op
+BenchmarkGraph/devices=100-14                              	     278	   4244968 ns/op	 8658483 B/op	   27512 allocs/op
+BenchmarkGraph/devices=200-14                              	     128	   9353087 ns/op	17716131 B/op	   54915 allocs/op
+BenchmarkGraph/devices=400-14                              	      50	  21488202 ns/op	35905856 B/op	  109706 allocs/op
+BenchmarkGraph/devices=1000-14                             	      16	  63100422 ns/op	85448698 B/op	  273762 allocs/op
+BenchmarkLoop/devices=10-14                                	    3286	    359129 ns/op	      3591 ns/update	  618667 B/op	    5464 allocs/op
+BenchmarkLoop/devices=50-14                                	    1615	    738942 ns/op	      7389 ns/update	 1002047 B/op	    9341 allocs/op
+BenchmarkLoop/devices=100-14                               	     987	   1202618 ns/op	     12026 ns/update	 1569350 B/op	   14022 allocs/op
+BenchmarkLoop/devices=200-14                               	    1018	   1182481 ns/op	     11825 ns/update	 1858172 B/op	   12229 allocs/op
+BenchmarkLoop/devices=400-14                               	     871	   1243242 ns/op	     12432 ns/update	 2775728 B/op	   12228 allocs/op
+BenchmarkLoop/devices=1000-14                              	     776	   1510053 ns/op	     15101 ns/update	 4783262 B/op	   12557 allocs/op
+?   	github.com/lukirs95/monika/internal/core/coretest	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/forward
+cpu: Apple M4 Max
+BenchmarkDispatch/devices=10-14         	  225908	      4921 ns/op	    4777 B/op	      77 allocs/op
+BenchmarkDispatch/devices=50-14         	  257922	      4748 ns/op	    4724 B/op	      77 allocs/op
+BenchmarkDispatch/devices=100-14        	  269607	      4476 ns/op	    4539 B/op	      77 allocs/op
+BenchmarkDispatch/devices=200-14        	  276498	      4265 ns/op	    4504 B/op	      77 allocs/op
+BenchmarkDispatch/devices=400-14        	  264459	      4440 ns/op	    4504 B/op	      77 allocs/op
+BenchmarkDispatch/devices=1000-14       	  257866	      4419 ns/op	    4504 B/op	      77 allocs/op
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/history/influx
+cpu: Apple M4 Max
+BenchmarkTakt/devices=10-14         	     273	   4255885 ns/op	        28.99 gzip-KiB	      3861 lines	 5707019 B/op	   49435 allocs/op
+BenchmarkTakt/devices=50-14         	      56	  20970192 ns/op	       142.8 gzip-KiB	     19301 lines	25812135 B/op	  246888 allocs/op
+BenchmarkTakt/devices=100-14        	      26	  42606720 ns/op	       285.5 gzip-KiB	     38601 lines	51210091 B/op	  493696 allocs/op
+BenchmarkTakt/devices=200-14        	      13	  86809458 ns/op	       569.8 gzip-KiB	     77201 lines	102064043 B/op	  987303 allocs/op
+BenchmarkTakt/devices=400-14        	       6	 177045903 ns/op	      1140 gzip-KiB	    154401 lines	203706400 B/op	 1974510 allocs/op
+BenchmarkTakt/devices=1000-14       	       3	 459310375 ns/op	      2848 gzip-KiB	    386001 lines	506380704 B/op	 4936119 allocs/op
+?   	github.com/lukirs95/monika/internal/store/postgres	[no test files]
+?   	github.com/lukirs95/monika/internal/store/postgres/db	[no test files]
+?   	github.com/lukirs95/monika/internal/store/postgres/pgtest	[no test files]
