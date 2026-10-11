@@ -60,7 +60,7 @@ classDiagram
 ```mermaid
 classDiagram
     class SourceSpec {
-        <<struct>>
+        <<struct, core.SourceSpec>>
         +SourceID ID
         +DeviceID ID
         +Driver string
@@ -79,12 +79,15 @@ classDiagram
     }
 ```
 
+- **Paketgrenze:** Dienste importieren den Core, nie umgekehrt. Der Supervisor nutzt den Core über `CoreLink`; der Core nutzt den Supervisor über sein eigenes Interface `core.Supervisor{Start(spec), Stop(id)}`, deshalb liegt `SourceSpec` im Core.
 - `Start` und `Stop` kommen aus der Schleife und kehren sofort zurück; der Supervisor arbeitet sie in eigener Goroutine ab. Für dieselbe Quelle gilt die Reihenfolge der Aufträge.
 - `Start` holt den Klartext des Secrets (`secret.Service` erfüllt `SecretValues`), erzeugt `SourceConfig` mit Logger (`driver`, `source_id`, `device_id`) und Scheduler, liest `Source.Heartbeat()` und startet `Run` hinter einer `recover`-Grenze.
 - Er meldet der Schleife per `Post` `SourceStarted{sourceID, heartbeat}`, `SourceStopped{sourceID}`, `SourceFailed{sourceID, err, panic}` (Fehler, Panic, führt zu `Backoff`) und `SourceStuck{sourceID}` (`sdk.md`, Stoppen) und startet nach `Backoff` neu, nie zwei Instanzen derselben Quelle.
 - `Execute` ruft `Source.Execute` hinter einer `recover`-Grenze; läuft die Quelle nicht: `ErrSourceNotRunning` (der Lauf endet als `failed`).
 
-## Executor (`internal/action`)
+## Executor (`internal/action/executor`)
+
+Der Core führt laufende Läufe in `View.Runs` und verteilt `RunChanged` mit dem Typ `action.Run`. Damit bleibt `internal/action` ein Paket nur mit Typen (`Run`, Status); der Executor liegt in einem eigenen Paket mit eigenem `Store`-Interface, weil er den Core importiert.
 
 ```mermaid
 classDiagram

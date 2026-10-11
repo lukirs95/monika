@@ -163,6 +163,24 @@ classDiagram
     class Changed {
         <<map ID → []string>>
     }
+    class SourceSpec {
+        <<struct>>
+        +SourceID ID
+        +DeviceID ID
+        +Driver string
+        +Address string
+        +Config json.RawMessage
+        +SecretID ID
+    }
+    class Supervisor {
+        <<interface, beim Core>>
+        +Start(spec SourceSpec)
+        +Stop(sourceID)
+    }
+    class Secrets {
+        <<interface, beim Core>>
+        +Replace(ctx, actor, id, value json.RawMessage) error
+    }
     class Evaluator {
         <<evaluation>>
         +Load(rules []Rule, active []Finding, health []ElementHealth)
@@ -213,13 +231,15 @@ classDiagram
     Core *-- Facts
     Core *-- Liveness
     Core *-- Evaluator
+    Core ..> Supervisor : Start / Stop
+    Core ..> Secrets : ReplaceSecret
+    Supervisor ..> SourceSpec
     Core ..> View : veröffentlicht
     Core ..> Event : verteilt
     Core ..> Command : nimmt an
     Core ..> Message : nimmt an
     View *-- SourceStatus
     View *-- Graph
-    View ..|> State
     Inventory ..> Graph
     Inventory ..> Diff
     Facts ..> Changed
@@ -247,7 +267,12 @@ classDiagram
 | `View.DB` | Datenbank erreichbar: letzter Ping **und** letzte Schreibvorgänge erfolgreich, höchstens 5 s alt. Ein kleiner Wächter (eigene Goroutine des Core) pingt alle 5 s mit 2 s Timeout und meldet `DBPing`. Ist er falsch, meldet die API `503` an `GET /healthz` und die UI zeigt ein Banner; `/healthz` liest nur diesen Wert |
 | `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
-| `State` | was die Bewertung vom Zustand liest; die `View` erfüllt es. Ein Interface beim Verwender, weil `core` `evaluation` importiert und nicht umgekehrt |
+| `State` | was die Bewertung vom Zustand liest. Ein Interface beim Verwender, weil `core` `evaluation` importiert und nicht umgekehrt. Die Schleife reicht ihren **aktuellen** Stand (Inventar, Fakten, Lebenszeichen) als `State`, nicht die zuletzt veröffentlichte `View`; `View.EffectiveRules` nutzt einen Adapter über die `View` |
+| Paketgrenzen | Dienste importieren den Core, nie umgekehrt. Was der Core von ihnen braucht, definiert er selbst: `Supervisor{Start(SourceSpec), Stop(id)}` und `SourceSpec`, `Secrets{Replace(ctx, actor, id, value)}` (erfüllt von `secret.Service`). `View.Runs` und `RunChanged` verwenden `action.Run`; `internal/action` enthält deshalb nur Typen |
+| `Reporter` | nie blockierend: pro Quelle ein Postfach mit geordneter Liste aus `Connected`, `Snapshot`, `Disconnected` und `Update`. Ein `Update` wird in ein direkt davor stehendes `Update` gemischt (neuester Wert pro Element und Fakt, neueste Alarmliste pro Element), nie über ein anderes hinweg. Die Quelle steht höchstens einmal in der Warteschlange der Schleife, bis diese ihr Postfach geleert hat |
+| Warteschlange | eine gemeinsame für `Do`, `Post` und Postfächer, Puffer 1024; `Post` blockiert nur, wenn sie voll ist; `Do` wartet auf die Antwort oder `ctx`. Jeder Eintrag trägt den Zeitpunkt des Einreihens (`LoopLag`) |
+| Veröffentlichen | Die Schleife arbeitet alle gerade wartenden Einträge ab und veröffentlicht **dann einmal** eine neue `View`; alle Ereignisse dieser Runde tragen deren `Version`. `Do` antwortet erst danach, die API sieht also die neue `View` |
+| Ereignisse | `ElementsChanged{Added, Changed, Missing, Returned, Deleted, LinksChanged}`, `FactsChanged{Changed (Schlüssel pro Element), Facts (neue Fakten der Elemente)}`, `FindingRaised{Finding}`, `FindingEnded{Finding mit ClearedAt, Reason}`, `FindingAcked{Finding}`, `FindingCauseChanged{FindingID, CausedBy}`, `HealthChanged{[]ElementHealth}`, `RunChanged{Run}` (derselbe Typ wie die Nachricht des Executors), `SourceStatusChanged{SourceID, Status}` |
 | `Evaluator.Alarms` | Gerätealarme einer Quelle: bei `Snapshot` (`replace`) ersetzen sie alle Alarme der Quelle, bei `Update` nur die der genannten Elemente. Ein neuer Alarm erzeugt sofort einen Befund, ein fehlender beendet ihn als behoben |
 | Schreiben der Befunde | nur der Evaluator ruft `evaluation.Store` (`CLAUDE.md`), jeder Aufruf mit 2 s Timeout. **Entstehen gescheitert:** Der Befund gilt noch nicht als aktiv (weder in der `View` noch als Ereignis), `Tick` wiederholt; fällt sein Grund vorher weg, wird er verworfen. **Enden gescheitert:** Der Befund bleibt aktiv, bis `Tick` das Schreiben wiederholt hat; `ErrNotFound` zählt als Erfolg. Die Methoden liefern die gelungenen Änderungen und die gesammelten Fehler |
 | Abgleich | Pro Element berechnet der Evaluator die Befunde, die sein sollen: Regel (verletzte Regeln der gewinnenden Stufe), Gerät (Codes der zuletzt gemeldeten Alarme), System am Zugang (`source.unreachable` laut `State.Unreachable`, `source.discovery_failed` laut letztem `Discovery`). Regel- und Gerätebefunde nur, wenn die Quelle `Live` ist, sonst bleiben sie eingefroren (auch eine abgelaufene Haltezeit wartet); Systembefunde immer, `Tick` prüft dafür jede Sekunde alle Zugänge. Ein verschwundenes Element hat für die Bewertung nur `present` und keine Alarme. Pro Element kommen erst die beendeten, dann die neuen Befunde |

@@ -101,7 +101,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - 5c Befunde (Entscheidungen F1–F5 vom 2026-10-11 in `core.md`): ~~5c1 Evaluator mit Regelbefunden~~ (Abgleich pro Element, Haltezeiten, Hysterese, Gründe des Zurückziehens, Wiederholung gescheiterter Schreibvorgänge, Regeln gelöschter Geltungsbereiche) und ~~5c2~~ (Gerätealarme, `source.unreachable`, `source.discovery_failed`, Regelbefehle, Quittieren): erledigt
       - ~~5d Ursache und Symptom~~ (Ableitung über `parent`, `feeds`, `uses`; Wurzel nach Schwere und Alter, Kreise; Zuordnung beim Entstehen und bei jeder Änderung): erledigt
       - ~~5e Health und Rollup~~ (vier Stufen, Rollup über `ScopeElements`, Neuberechnung bei geänderten Befunden, Graph und Regeln, gesammeltes `SaveHealth` im Takt): erledigt
-   6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
+   6. Schleife (`internal/core`), in drei Teilen; Entscheidungen G1–G5 vom 2026-10-11 in `core.md` (Postfach pro Quelle im `Reporter`, eine `View` pro Runde, Inhalt der Ereignisse, Dienste importieren den Core und nie umgekehrt, gemeinsame Warteschlange):
+      - ~~6a Typen und Verteilung~~ (Befehle, Nachrichten, Ereignisse, `View`, `SourceSpec`/`Supervisor`/`Secrets`, Abonnenten mit Abhängen): erledigt
+      - 6b Schleife und Meldungen der Treiber
+      - 6c Befehle, Supervisor, Laden, Datenbank-Wächter, `Stats`, Ende
    7. Supervisor und Scheduler (`internal/core/supervisor`)
    8. Executor und Preset-Runner (`internal/action`, `internal/preset`)
    9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
