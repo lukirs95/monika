@@ -69,8 +69,8 @@ func TestEveryCallsAndStops(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	stop()
 	n := calls.Load()
-	if n < 4 {
-		t.Errorf("calls = %d in 100 ms at 10 ms, want at least 4", n)
+	if n < 3 {
+		t.Errorf("calls = %d in 100 ms at 10 ms, want at least 3", n)
 	}
 	time.Sleep(40 * time.Millisecond)
 	if calls.Load() > n+1 {

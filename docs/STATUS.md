@@ -105,9 +105,9 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~6a Typen und Verteilung~~ (Befehle, Nachrichten, Ereignisse, `View`, `SourceSpec`/`Supervisor`/`Secrets`, Abonnenten mit Abhängen): erledigt
       - ~~6b Schleife und Meldungen der Treiber~~ (Postfach pro Instanz, Runden, `Snapshot`/`Update` mit Bewertung, gescheiterter Snapshot mit Wiederholung, Nachrichten der Dienste, Zustand der Quellen): erledigt
       - ~~6c Befehle, Supervisor, Laden, Datenbank-Wächter, `Stats`, Ende~~ (`Do`, Übersetzung der Befehle, Start und Neustart von Quellen, `Restore`, `Flush`, `ErrWrite`, `ErrStopped`): erledigt
-   7. Supervisor und Scheduler (`internal/core/supervisor`); Entscheidungen H1–H5 vom 2026-10-11 in `services.md` und `sdk.md` (Wartezeit im Backoff, `Run` ohne Stopp, Panic in `Execute`, Scheduler, Aufbau):
+   7. ~~Supervisor und Scheduler~~ (`internal/core/supervisor`): erledigt; Entscheidungen H1–H5 vom 2026-10-11 in `services.md` und `sdk.md` (Wartezeit im Backoff, `Run` ohne Stopp, Panic in `Execute`, Scheduler, Aufbau):
       - ~~7a Scheduler~~ (Versatz aus Quelle und Aufgabe, an der Uhr ausgerichtet, globale Obergrenze, keine Überlappung, Timeout, hängende Aufgaben, Panics): erledigt
-      - 7b Supervisor
+      - ~~7b Supervisor~~ (Goroutine pro Quelle, Start/Neustart/Stopp, Backoff, Stuck, Panics in `New`, `Run`, `Execute` und Aufgaben, Herunterfahren; Ende-zu-Ende-Test mit Schleife und Fake-Treiber): erledigt
    8. Executor und Preset-Runner (`internal/action`, `internal/preset`)
    9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
    10. Anmeldung und Rechte (`internal/auth`)

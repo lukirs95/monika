@@ -43,18 +43,32 @@ type mailbox struct {
 	mu     sync.Mutex
 	items  []item
 	queued bool // steht in Core.ready, bis die Schleife das Postfach geleert hat
+	closed bool // eine neue Instanz hat begonnen bzw. die Quelle ist gelöscht: nichts mehr annehmen
 }
 
 var _ sdk.Reporter = (*mailbox)(nil)
 
 // Reporter liefert das Postfach einer neuen Instanz der Quelle; der Supervisor ruft es bei jedem
-// Start. Meldungen einer früheren Instanz verwirft die Schleife.
+// Start. Was die frühere Instanz bis dahin gemeldet hat, verarbeitet die Schleife noch in
+// Reihenfolge; was sie danach meldet, verwirft ihr geschlossenes Postfach.
 func (c *Core) Reporter(sourceID uuid.UUID) sdk.Reporter {
 	mb := &mailbox{core: c, source: sourceID}
 	c.mbMu.Lock()
+	old := c.mailboxes[sourceID]
 	c.mailboxes[sourceID] = mb
 	c.mbMu.Unlock()
+	old.close()
 	return mb
+}
+
+// close lässt das Postfach nichts mehr annehmen.
+func (m *mailbox) close() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
 }
 
 func (m *mailbox) Connected()              { m.put(item{kind: itemConnected}) }
@@ -66,6 +80,10 @@ func (m *mailbox) Heartbeat()              { m.put(item{kind: itemHeartbeat}) }
 func (m *mailbox) put(it item) {
 	it.at = m.core.now()
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
 	n := len(m.items)
 	switch {
 	case n > 0 && it.kind == itemUpdate && m.items[n-1].kind == itemUpdate:
@@ -104,18 +122,12 @@ func (c *Core) markReady(m *mailbox) {
 	}
 }
 
-// takeReady liefert die Postfächer mit Meldungen, nur die der aktuellen Instanzen.
+// takeReady liefert die Postfächer mit Meldungen in der Reihenfolge, in der sie bereit wurden;
+// das Postfach einer früheren Instanz steht damit vor dem der neuen.
 func (c *Core) takeReady() []*mailbox {
 	c.mbMu.Lock()
 	defer c.mbMu.Unlock()
-	var out []*mailbox
-	for _, m := range c.ready {
-		if c.mailboxes[m.source] == m {
-			out = append(out, m)
-		} else {
-			m.take() // Meldungen einer früheren Instanz
-		}
-	}
+	out := c.ready
 	c.ready = nil
 	return out
 }

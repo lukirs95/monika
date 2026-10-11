@@ -12,7 +12,7 @@ classDiagram
 
     class Supervisor {
         <<supervisor>>
-        +Run(ctx) error
+        +Run(ctx, core CoreLink) error
         +Start(spec SourceSpec)
         +Stop(sourceID)
         +Execute(ctx, sourceID, c sdk.Command) (sdk.Result, error)
@@ -79,7 +79,7 @@ classDiagram
     }
 ```
 
-- **Paketgrenze:** Dienste importieren den Core, nie umgekehrt. Der Supervisor nutzt den Core über `CoreLink`; der Core nutzt den Supervisor über sein eigenes Interface `core.Supervisor{Start(spec), Stop(id)}`, deshalb liegt `SourceSpec` im Core.
+- **Paketgrenze:** Dienste importieren den Core, nie umgekehrt. Der Supervisor nutzt den Core über `CoreLink`, den er erst in `Run` bekommt (der Core braucht den Supervisor schon beim Erzeugen; Aufträge vor `Run` warten); der Core nutzt den Supervisor über sein eigenes Interface `core.Supervisor{Start(spec), Stop(id)}`, deshalb liegt `SourceSpec` im Core.
 - `Start` und `Stop` kommen aus der Schleife und kehren sofort zurück; der Supervisor arbeitet sie in eigener Goroutine ab. Für dieselbe Quelle gilt die Reihenfolge der Aufträge.
 - **Reihenfolge pro Start:** erst `Reporter(sourceID)` holen, dann `Post(SourceStarted)`, dann `Run` starten. Nachrichten zu einer Quelle stellt der Core in das Postfach ihrer aktuellen Instanz, damit sie in Reihenfolge mit den Meldungen des Treibers verarbeitet werden (sonst könnte ein spätes `SourceStarted` ein schon gemeldetes `Connected` zurücksetzen).
 - `Start` holt den Klartext des Secrets (`secret.Service` erfüllt `SecretValues`), erzeugt `SourceConfig` mit Logger (`driver`, `source_id`, `device_id`) und Scheduler, liest `Source.Heartbeat()` und startet `Run` hinter einer `recover`-Grenze.

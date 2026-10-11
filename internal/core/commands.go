@@ -213,8 +213,10 @@ func (c *Core) forgetSources(r *round, ids []uuid.UUID) {
 			r.facts = true
 		}
 		c.mbMu.Lock()
+		mb := c.mailboxes[id]
 		delete(c.mailboxes, id)
 		c.mbMu.Unlock()
+		mb.close()
 	}
 }
 
