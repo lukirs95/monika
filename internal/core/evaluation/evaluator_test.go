@@ -24,6 +24,8 @@ type fakeStore struct {
 	calls    []string // Regeln und Quittieren
 	causes   map[uuid.UUID]uuid.UUID
 	causeErr error
+	saved    [][]ElementHealth
+	saveErr  error
 }
 
 var _ Store = (*fakeStore)(nil)
@@ -76,7 +78,13 @@ func (f *fakeStore) AckFinding(context.Context, uuid.UUID, uuid.UUID) error {
 	return nil
 }
 func (f *fakeStore) LoadHealth(context.Context) ([]ElementHealth, error) { return nil, nil }
-func (f *fakeStore) SaveHealth(context.Context, []ElementHealth) error   { return nil }
+func (f *fakeStore) SaveHealth(_ context.Context, hs []ElementHealth) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	f.saved = append(f.saved, hs)
+	return nil
+}
 
 // bench ist ein Evaluator über der Testwelt mit einer Regel am Port.
 type bench struct {
@@ -100,7 +108,7 @@ func newBench(t *testing.T, r Rule) *bench {
 	if r.Severity == "" {
 		r.Severity = SeverityWarning
 	}
-	ev.Load([]Rule{r}, nil)
+	ev.Load([]Rule{r}, nil, nil)
 	return &bench{world: w, ev: ev, store: store, rule: r, now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC), t: t}
 }
 
@@ -289,7 +297,7 @@ func TestEvaluatePrunesRulesOfDeletedScope(t *testing.T) {
 	// Regel an der Gruppe g1, die den Port enthält.
 	r := b.rule
 	r.ScopeElementID = b.g1
-	b.ev.Load([]Rule{r}, nil)
+	b.ev.Load([]Rule{r}, nil, nil)
 	b.set("temp", 81.0)
 	id := b.store.raised[0].ID
 
@@ -359,7 +367,7 @@ func TestWriteFailures(t *testing.T) {
 func TestLoadActiveFindings(t *testing.T) {
 	b := newBench(t, tempRule())
 	f := Finding{ID: uuid.New(), ElementID: b.port, Origin: OriginRule, RuleID: b.rule.ID, Code: CodeRuleViolated, Severity: SeverityWarning}
-	b.ev.Load([]Rule{b.rule}, []Finding{f})
+	b.ev.Load([]Rule{b.rule}, []Finding{f}, nil)
 	if got := summary(b.set("temp", 81.0)); got != "" {
 		t.Errorf("still violated after start: %q", got)
 	}

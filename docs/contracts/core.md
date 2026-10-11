@@ -165,7 +165,7 @@ classDiagram
     }
     class Evaluator {
         <<evaluation>>
-        +Load(rules []Rule, active []Finding)
+        +Load(rules []Rule, active []Finding, health []ElementHealth)
         +Evaluate(ctx, now, elements []ID, s State) ([]FindingChange, error)
         +Alarms(ctx, now, sourceID, alarms map~ID, []sdk.Alarm~, replace bool, s State) ([]FindingChange, error)
         +Tick(ctx, now, s State) ([]FindingChange, error)
@@ -177,6 +177,7 @@ classDiagram
         +Rules() *Rules
         +Findings() map~ID, Finding~
         +Health(s State, elements []ID) []ElementHealth
+        +Healths() map~ID, ElementHealth~
     }
     class State {
         <<interface, evaluation>>
@@ -255,7 +256,8 @@ classDiagram
 | `Evaluator.AckFinding` | quittiert einen aktiven Befund (`ErrNotFound` sonst); die erste Quittierung bleibt bestehen |
 | Regelbefehle | `CreateRule`, `UpdateRule`, `DeleteRule` prüfen die Regel (auch: Geltungsbereich existiert, `match_driver` registriert), schreiben sie und bewerten alle Elemente im alten und neuen Geltungsbereich neu, damit auch überschriebene oder wieder geltende Regeln stimmen. IDs vergibt die API |
 | Regelbefund | `message` z. B. `temp lte 80`; `details` mit dem Snapshot der Regel (Name, Fakt, Operator, Wert, `when`, Hysterese) und dem gemessenen Wert, damit der Befund nach dem Löschen der Regel lesbar bleibt; `element_path` aus `Graph.Path` |
-| `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
+| `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`ScopeElements`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal. Berechnet die übergebenen Elemente, dazu selbst alle mit geänderten Befunden und danach die Rollups ihrer Geräte und Gruppen; nach einer Änderung am Graph oder an den Regeln alles. Die Schleife übergibt die Elemente mit geänderten Fakten und alle Elemente einer Quelle, deren `Live` sich geändert hat. Liefert, was sich geändert hat; `Tick` schreibt es gesammelt (`SaveHealth`), gescheitert bleibt es offen bis zum nächsten Takt |
+| `Evaluator.Healths` | Health und Rollup aller Elemente für die `View`; copy-on-write, nie verändert |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Inventory.FactsByID` | übersetzt die Fakten einer Meldung von `external_id`s in Element-IDs; unbekannte `external_id`s kommen zurück, die Schleife loggt sie einmal pro Quelle |
 | `Inventory.Path`, `Graph.Path` | `element_path` eines Elements für Befunde und Läufe (Label, sonst Name, vom Gerät bis zum Element, ohne Zugang, getrennt durch „ / “) |

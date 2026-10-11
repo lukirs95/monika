@@ -95,12 +95,12 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    2. ~~Konfiguration~~ (`internal/config`): erledigt
    3. ~~Fakten und Lebenszeichen~~ (`internal/core/state`): erledigt
    4. ~~Inventar-Logik~~ (`internal/core/inventory`): erledigt; Inventar im Speicher mit `Path` und `FactsByID`, `ApplySnapshot` (Prüfung, Abgleich, Links über Quellen, 5-min-Regel), Befehle als Methoden (Entscheidung B vom 2026-10-11: Befehls-Structs nur im Core, IDs vergibt die API)
-   5. Bewertung (`internal/core/evaluation`), in fünf Teilen; Entscheidungen vom 2026-10-11: Die Bewertung liest den Zustand über ein Interface `evaluation.State` (die `View` erfüllt es, kein Importzyklus), der Graph liegt im Inventar, nur der Evaluator schreibt Befunde, Gerätealarme kommen über `Evaluator.Alarms`
+   5. ~~Bewertung~~ (`internal/core/evaluation`): erledigt, in fünf Teilen; Entscheidungen vom 2026-10-11: Die Bewertung liest den Zustand über ein Interface `evaluation.State` (die `View` erfüllt es, kein Importzyklus), der Graph liegt im Inventar, nur der Evaluator schreibt Befunde, Gerätealarme kommen über `Evaluator.Alarms`
       - ~~5a Graph und Geltungsbereich~~ (`inventory.Graph`: `Scopes`, `InScope`, `ScopeElements`, effektives `Monitored`): erledigt
       - ~~5b Regeln~~ (`evaluation.Rules`: Prüfung gegen den Fakt-Katalog, Gelten, Präzedenz, `op`/`when`/Hysterese, `EffectiveRules`): erledigt
       - 5c Befunde (Entscheidungen F1–F5 vom 2026-10-11 in `core.md`): ~~5c1 Evaluator mit Regelbefunden~~ (Abgleich pro Element, Haltezeiten, Hysterese, Gründe des Zurückziehens, Wiederholung gescheiterter Schreibvorgänge, Regeln gelöschter Geltungsbereiche) und ~~5c2~~ (Gerätealarme, `source.unreachable`, `source.discovery_failed`, Regelbefehle, Quittieren): erledigt
       - ~~5d Ursache und Symptom~~ (Ableitung über `parent`, `feeds`, `uses`; Wurzel nach Schwere und Alter, Kreise; Zuordnung beim Entstehen und bei jeder Änderung): erledigt
-      - 5e Health und Rollup
+      - ~~5e Health und Rollup~~ (vier Stufen, Rollup über `ScopeElements`, Neuberechnung bei geänderten Befunden, Graph und Regeln, gesammeltes `SaveHealth` im Takt): erledigt
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
    7. Supervisor und Scheduler (`internal/core/supervisor`)
    8. Executor und Preset-Runner (`internal/action`, `internal/preset`)

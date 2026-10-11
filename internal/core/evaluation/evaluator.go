@@ -59,6 +59,12 @@ type Evaluator struct {
 
 	causeGraph *inventory.Graph // Graph der letzten Zuordnung von Ursache und Symptom
 	causeDirty bool             // ein SetFindingCause ist gescheitert
+
+	health      map[uuid.UUID]ElementHealth // copy-on-write
+	healthDirty map[uuid.UUID]bool          // Elemente mit geänderten Befunden
+	healthGraph *inventory.Graph            // Graph und Regeln der letzten vollständigen Berechnung
+	healthRules *Rules
+	unsaved     map[uuid.UUID]ElementHealth // geändert, noch nicht gespeichert
 }
 
 // New liefert einen Evaluator ohne Regeln und Befunde; types ist meist RegistryFactTypes,
@@ -72,6 +78,9 @@ func New(store Store, types FactTypes, drivers func(name string) bool, log *slog
 		tracks:       map[uuid.UUID]map[findingKey]*track{},
 		alarms:       map[uuid.UUID][]sdk.Alarm{},
 		discoveryErr: map[uuid.UUID]string{},
+		health:       map[uuid.UUID]ElementHealth{},
+		healthDirty:  map[uuid.UUID]bool{},
+		unsaved:      map[uuid.UUID]ElementHealth{},
 	}
 }
 
@@ -128,9 +137,13 @@ type result struct {
 
 func (r *result) done() ([]FindingChange, error) { return r.changes, errors.Join(r.errs...) }
 
-// Load übernimmt Regeln und aktive Befunde beim Start. Regeln, die nicht mehr zum Katalog
-// passen, bleiben mit Warn-Log draußen.
-func (e *Evaluator) Load(rules []Rule, active []Finding) {
+// Load übernimmt Regeln, aktive Befunde und gespeicherte Health beim Start. Regeln, die nicht
+// mehr zum Katalog passen, bleiben mit Warn-Log draußen.
+func (e *Evaluator) Load(rules []Rule, active []Finding, health []ElementHealth) {
+	e.health = make(map[uuid.UUID]ElementHealth, len(health))
+	for _, h := range health {
+		e.health[h.ElementID] = h
+	}
 	rs, errs := NewRules(rules, e.types)
 	for _, err := range errs {
 		e.log.Warn("rule ignored", "err", err)
@@ -177,6 +190,7 @@ func (e *Evaluator) Tick(ctx context.Context, now time.Time, s State) ([]Finding
 			e.end(ctx, tr, ReasonResolved, &res)
 		}
 	}
+	e.saveHealth(ctx, &res)
 	// Lebenszeichen: Systembefunde aller Zugänge.
 	for _, src := range slices.SortedFunc(maps.Values(maps.Collect(g.Sources())), func(a, b inventory.Source) int {
 		return slices.Compare(a.ID[:], b.ID[:])
@@ -449,6 +463,7 @@ func (e *Evaluator) raise(ctx context.Context, now time.Time, g *inventory.Graph
 	}
 	tr.phase = phaseActive
 	e.active[f.ID] = f
+	e.healthDirty[f.ElementID] = true
 	res.changes = append(res.changes, FindingChange{Raised: &f})
 }
 
@@ -466,6 +481,7 @@ func (e *Evaluator) end(ctx context.Context, tr *track, reason ClearReason, res 
 	}
 	e.remove(tr)
 	delete(e.active, id)
+	e.healthDirty[tr.key.element] = true
 	res.changes = append(res.changes, FindingChange{Ended: id, Reason: reason})
 }
 
