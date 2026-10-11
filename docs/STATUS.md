@@ -99,7 +99,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~5a Graph und Geltungsbereich~~ (`inventory.Graph`: `Scopes`, `InScope`, `ScopeElements`, effektives `Monitored`): erledigt
       - ~~5b Regeln~~ (`evaluation.Rules`: Prüfung gegen den Fakt-Katalog, Gelten, Präzedenz, `op`/`when`/Hysterese, `EffectiveRules`): erledigt
       - 5c Befunde (Entscheidungen F1–F5 vom 2026-10-11 in `core.md`): ~~5c1 Evaluator mit Regelbefunden~~ (Abgleich pro Element, Haltezeiten, Hysterese, Gründe des Zurückziehens, Wiederholung gescheiterter Schreibvorgänge, Regeln gelöschter Geltungsbereiche) und ~~5c2~~ (Gerätealarme, `source.unreachable`, `source.discovery_failed`, Regelbefehle, Quittieren): erledigt
-      - 5d Ursache und Symptom
+      - ~~5d Ursache und Symptom~~ (Ableitung über `parent`, `feeds`, `uses`; Wurzel nach Schwere und Alter, Kreise; Zuordnung beim Entstehen und bei jeder Änderung): erledigt
       - 5e Health und Rollup
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
    7. Supervisor und Scheduler (`internal/core/supervisor`)

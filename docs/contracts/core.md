@@ -205,6 +205,7 @@ classDiagram
         +Ended ID
         +Reason ClearReason
         +CauseSet ID
+        +CausedBy ID
     }
 
     Core *-- Inventory
@@ -453,7 +454,9 @@ stateDiagram-v2
 
 Die Zuordnung ist eine Ableitung über den Link-Graphen der `View`, kein Zustand vom Entstehen.
 
-- **Auslöser:** Ein Befund entsteht oder endet, oder Links ändern sich. Der Evaluator ordnet dann alle aktiven Befunde neu zu, die von dort flussabwärts erreichbar sind (Breitensuche: `feeds` A→B wirkt auf B, `uses` A→B auf A, `parent` auf die Kinder).
+- **Auslöser:** Ein Befund entsteht oder endet, der Graph ändert sich (Links, Eltern), oder ein früheres `SetFindingCause` ist gescheitert. Der Evaluator leitet dann die Zuordnung aller aktiven Befunde neu ab (Breitensuche flussaufwärts: `feeds` A→B wirkt auf B, `uses` A→B auf A, `parent` auf die Kinder) und schreibt nur, was sich geändert hat. Das ergibt dasselbe wie eine Neuzuordnung nur flussabwärts und bleibt bei wenigen Ebenen billig.
+- Ein neuer Befund wird mit seiner Zuordnung zum Zeitpunkt des Entstehens geschrieben (`caused_by_id` in `RaiseFinding`).
+- `FindingChange{CauseSet, CausedBy}`: Befund mit neuer Zuordnung, `CausedBy` = Wurzel bzw. `uuid.Nil` für „selbst Ursache“. Scheitert das Schreiben, bleibt der Speicher unverändert und `Tick` versucht es erneut.
 - **Regel:** Ein aktiver Befund ist Symptom, wenn flussaufwärts ein aktiver Befund mit `warning` oder `error` liegt; `caused_by_id` zeigt auf die Wurzel. Bei mehreren Wurzeln gewinnt die schwerere, dann die ältere. Kreise sind abgefangen, dort ist der älteste Befund die Wurzel.
 - Jede Änderung wird als `FindingChange.CauseSet` geschrieben (`SetFindingCause`) und als `FindingCauseChanged` verteilt; die Weiterleitung verwendet es nicht.
 

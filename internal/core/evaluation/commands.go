@@ -48,7 +48,7 @@ func (e *Evaluator) Alarms(ctx context.Context, now time.Time, sourceID uuid.UUI
 	for _, id := range sortedIDs(touched) {
 		e.reconcile(ctx, now, id, s, OriginDevice, &res)
 	}
-	return res.done()
+	return e.finish(ctx, g, &res)
 }
 
 // Discovery übernimmt das Ergebnis eines Versuchs, einen Snapshot der Quelle zu speichern: Ein
@@ -65,7 +65,7 @@ func (e *Evaluator) Discovery(ctx context.Context, now time.Time, sourceID uuid.
 	if src, ok := g.Source(sourceID); ok {
 		e.reconcile(ctx, now, src.AccessElementID, s, OriginSystem, &res)
 	}
-	return res.done()
+	return e.finish(ctx, g, &res)
 }
 
 // CreateRule prüft und speichert eine neue Regel und bewertet ihren Geltungsbereich neu.
@@ -175,7 +175,7 @@ func (e *Evaluator) reevaluate(ctx context.Context, now time.Time, s State, rule
 	for _, id := range sortedIDs(ids) {
 		e.reconcile(ctx, now, id, s, OriginRule, &res)
 	}
-	return res.done()
+	return e.finish(ctx, g, &res)
 }
 
 func sortedIDs(set map[uuid.UUID]bool) []uuid.UUID {

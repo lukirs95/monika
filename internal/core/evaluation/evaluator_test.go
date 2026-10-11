@@ -22,6 +22,8 @@ type fakeStore struct {
 	raiseErr error
 	endErr   error
 	calls    []string // Regeln und Quittieren
+	causes   map[uuid.UUID]uuid.UUID
+	causeErr error
 }
 
 var _ Store = (*fakeStore)(nil)
@@ -58,8 +60,17 @@ func (f *fakeStore) DeleteRule(context.Context, uuid.UUID, uuid.UUID) error {
 	f.calls = append(f.calls, "delete")
 	return nil
 }
-func (f *fakeStore) ListActiveFindings(context.Context) ([]Finding, error)       { return nil, nil }
-func (f *fakeStore) SetFindingCause(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (f *fakeStore) ListActiveFindings(context.Context) ([]Finding, error) { return nil, nil }
+func (f *fakeStore) SetFindingCause(_ context.Context, id, causedBy uuid.UUID) error {
+	if f.causeErr != nil {
+		return f.causeErr
+	}
+	if f.causes == nil {
+		f.causes = map[uuid.UUID]uuid.UUID{}
+	}
+	f.causes[id] = causedBy
+	return nil
+}
 func (f *fakeStore) AckFinding(context.Context, uuid.UUID, uuid.UUID) error {
 	f.calls = append(f.calls, "ack")
 	return nil
@@ -127,13 +138,17 @@ func (b *bench) tick(d time.Duration) []FindingChange {
 	return changes
 }
 
-// summary beschreibt Änderungen kurz: "+" für entstanden, "-grund" für beendet.
+// summary beschreibt Änderungen kurz: "+" für entstanden, "-grund" für beendet, "~" für eine
+// neue Zuordnung von Ursache und Symptom.
 func summary(changes []FindingChange) string {
 	var out []string
 	for _, c := range changes {
-		if c.Raised != nil {
+		switch {
+		case c.Raised != nil:
 			out = append(out, "+")
-		} else {
+		case c.CauseSet != uuid.Nil:
+			out = append(out, "~")
+		default:
 			out = append(out, "-"+string(c.Reason))
 		}
 	}

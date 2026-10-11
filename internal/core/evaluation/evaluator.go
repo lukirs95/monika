@@ -29,11 +29,14 @@ const (
 // writeTimeout begrenzt jeden Schreibvorgang aus der Schleife (docs/contracts/core.md, C3).
 const writeTimeout = 2 * time.Second
 
-// FindingChange ist eine Änderung an den aktiven Befunden.
+// FindingChange ist eine Änderung an den aktiven Befunden: entstanden, beendet oder neu als
+// Ursache bzw. Symptom zugeordnet.
 type FindingChange struct {
-	Raised *Finding    // entstanden
-	Ended  uuid.UUID   // beendet, mit Reason
-	Reason ClearReason // bei Ended
+	Raised   *Finding    // entstanden
+	Ended    uuid.UUID   // beendet, mit Reason
+	Reason   ClearReason // bei Ended
+	CauseSet uuid.UUID   // Befund mit neuer Zuordnung zu CausedBy
+	CausedBy uuid.UUID   // bei CauseSet: die Wurzel; uuid.Nil = selbst Ursache
 }
 
 // Evaluator bewertet Regeln, Gerätealarme und Systemzustände und führt die aktiven Befunde. Wie
@@ -53,6 +56,9 @@ type Evaluator struct {
 
 	alarms       map[uuid.UUID][]sdk.Alarm // Element → zuletzt gemeldete Alarme
 	discoveryErr map[uuid.UUID]string      // Quelle → Fehler des letzten Versuchs, einen Snapshot zu speichern
+
+	causeGraph *inventory.Graph // Graph der letzten Zuordnung von Ursache und Symptom
+	causeDirty bool             // ein SetFindingCause ist gescheitert
 }
 
 // New liefert einen Evaluator ohne Regeln und Befunde; types ist meist RegistryFactTypes,
@@ -149,7 +155,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, now time.Time, elements []uuid
 	for _, id := range elements {
 		e.reconcile(ctx, now, id, s, "", &res)
 	}
-	return res.done()
+	return e.finish(ctx, s.Graph(), &res)
 }
 
 // Tick lässt Haltezeiten ablaufen und wiederholt gescheiterte Schreibvorgänge.
@@ -177,7 +183,7 @@ func (e *Evaluator) Tick(ctx context.Context, now time.Time, s State) ([]Finding
 	}) {
 		e.reconcile(ctx, now, src.AccessElementID, s, OriginSystem, &res)
 	}
-	return res.done()
+	return e.finish(ctx, g, &res)
 }
 
 // reconcile gleicht die Befunde eines Elements mit dem ab, was laut Bewertung sein soll; only
@@ -429,6 +435,7 @@ func (e *Evaluator) raise(ctx context.Context, now time.Time, g *inventory.Graph
 		tr.finding.ElementID = tr.key.element
 		tr.finding.ElementPath = g.Path(tr.key.element)
 		tr.finding.RaisedAt = now
+		tr.finding.CausedByID = e.causeOf(g, tr.finding)
 	}
 	f := tr.finding
 	err := e.write(ctx, func(ctx context.Context) error { return e.store.RaiseFinding(ctx, f) })
