@@ -21,6 +21,7 @@ type Inventory struct {
 	drivers func(name string) (sdk.Driver, bool)
 	log     *slog.Logger
 	newID   func() uuid.UUID
+	now     func() time.Time
 
 	elements map[uuid.UUID]Element
 	sources  map[uuid.UUID]Source
@@ -41,6 +42,7 @@ func New(store Store, drivers func(name string) (sdk.Driver, bool), log *slog.Lo
 	return &Inventory{
 		store: store, drivers: drivers, log: log,
 		newID:         func() uuid.UUID { return uuid.Must(uuid.NewV7()) },
+		now:           time.Now,
 		elements:      map[uuid.UUID]Element{},
 		sources:       map[uuid.UUID]Source{},
 		links:         map[uuid.UUID]Link{},
@@ -126,7 +128,7 @@ func (inv *Inventory) Path(id uuid.UUID) string {
 }
 
 func (inv *Inventory) putElement(e Element) {
-	if old, ok := inv.elements[e.ID]; ok && old.GlobalRef != "" && old.GlobalRef != e.GlobalRef {
+	if old, ok := inv.elements[e.ID]; ok && old.GlobalRef != e.GlobalRef && inv.byRef[old.GlobalRef] == e.ID {
 		delete(inv.byRef, old.GlobalRef)
 	}
 	inv.elements[e.ID] = e

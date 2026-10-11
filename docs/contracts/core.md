@@ -223,6 +223,9 @@ sequenceDiagram
 ```
 
 - `ApplySnapshot` setzt für `ParentID ""` das Zugangs-Element der Quelle als Eltern und `Snapshot.GlobalRef` an den Zugang.
+- **Ungültiges verwirft es mit `Warn`-Log:** Elemente, die `Driver.CheckElement` ablehnt, doppelte `external_id`s, Elemente ohne gültigen Weg zum Zugang (unbekannte oder verworfene Eltern, Zyklus) samt ihren Kindern; Links mit unbekanntem Typ, mit verworfenem oder unbekanntem Endpunkt und `represents` ohne `GlobalRef` am Ziel. Verworfene Elemente gelten als nicht gemeldet, verschwinden also.
+- **Konflikt der `global_ref`:** Kommt eine `global_ref` im `Snapshot` doppelt vor oder gehört sie einem Element einer anderen Quelle, liefert `ApplySnapshot` `ErrGlobalRefConflict`, ohne den Store aufzurufen; die Schleife behandelt das wie einen Fehler von `ApplyDiscovery`.
+- Erst schreibt der Store, dann ändert sich der Speicher; schlägt der Store fehl, bleibt der Speicher unverändert. Der Store bekommt die Elemente mit den Eltern vor den Kindern.
 - **Struktur unverändert:** Der Core vergleicht den `Snapshot` im Speicher mit dem vorigen. Ohne Strukturänderung schreibt er nur `last_seen_at`, höchstens alle 5 min, und übernimmt nur die Fakten.
 - `Replace` ersetzt alle Fakten der Quelle: Was im `Snapshot` fehlt, ist weg. `Update` dagegen ergänzt (`Merge`).
 - Mit dem ersten übernommenen `Snapshot` nach `Connected` ist die Quelle `Live`; erst dann wird bewertet.

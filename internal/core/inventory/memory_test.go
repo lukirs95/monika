@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"log/slog"
 	"slices"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 )
 
 // tree ist ein kleines Inventar: Gerät X8 mit einer Quelle, ihrem Zugang, einer Karte und
-// einem Port darunter.
+// einem Port darunter. snapshot meldet genau diesen Stand.
 type tree struct {
 	inv                                *Inventory
 	device, source, access, card, port uuid.UUID
@@ -19,14 +20,14 @@ type tree struct {
 func newTree(t *testing.T) tree {
 	t.Helper()
 	tr := tree{device: id(), source: id(), access: id(), card: id(), port: id()}
-	tr.inv = New(nil, sdk.Lookup, nil)
+	tr.inv = New(&fakeStore{}, testDrivers, slog.New(slog.DiscardHandler))
 	tr.inv.Load(Snapshot{
 		Sources: []Source{{ID: tr.source, DeviceID: tr.device, Driver: "videoxlink", AccessElementID: tr.access}},
 		Elements: []Element{
 			{ID: tr.device, Kind: KindDevice, Label: "X8"},
-			{ID: tr.access, Kind: KindAccess, ParentID: tr.device, DeviceID: tr.device, SourceID: tr.source, GlobalRef: "xlink:abc"},
-			{ID: tr.card, Kind: "card", ParentID: tr.access, DeviceID: tr.device, SourceID: tr.source, ExternalID: "card/1", Name: "Card 1", Label: "Decoder"},
-			{ID: tr.port, Kind: "port", ParentID: tr.card, DeviceID: tr.device, SourceID: tr.source, ExternalID: "sdi/1", Name: "SDI 1"},
+			{ID: tr.access, Kind: KindAccess, ParentID: tr.device, DeviceID: tr.device, SourceID: tr.source, GlobalRef: "xlink:abc", Present: true},
+			{ID: tr.card, Kind: "module", ParentID: tr.access, DeviceID: tr.device, SourceID: tr.source, ExternalID: "card/1", Name: "Card 1", Label: "Decoder", Present: true},
+			{ID: tr.port, Kind: "port", ParentID: tr.card, DeviceID: tr.device, SourceID: tr.source, ExternalID: "sdi/1", Transport: "sdi", Direction: DirectionIn, Name: "SDI 1", Present: true},
 		},
 		Links: []Link{{ID: id(), Type: LinkFeeds, SourceID: tr.source, FromID: tr.card, ToID: tr.port}},
 	})
