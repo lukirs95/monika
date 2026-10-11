@@ -57,7 +57,7 @@ Ein externes Audit hat Widersprüche und Lücken gefunden; alle Punkte sind ents
 - **Bewertung:** Regel gilt, wenn Fakt (und `when_fact`) existieren; unerfülltes `when` = erfüllt; Präzedenz pro Element, Fakt und Richtung; neue Gründe `fact_missing`, `deleted` (statt `device_deleted`); `clear_hold_seconds`; Ursache/Symptom bei jeder Änderung neu abgeleitet (Wurzel). Ein Geltungsbereich für alles (`View.InScope`), Regeln vererben an Kinder.
 - **Löschen:** keine Vorab-Elemente mehr; Geräte, Gruppen und Quellen werden **hart** gelöscht (CASCADE); Historie ohne Fremdschlüssel mit `element_path`. `deleted_at` entfällt.
 - **Rechte:** neues globales Recht `source_edit` für Quellen und Secret-Zuweisung.
-- **Aktionen:** `device_level` + `driver` als Filter; `set` nur an Elemente mit allen Schlüsseln; Preset-Ziele beim Start eingefroren; Abbrechen über Runner bzw. Executor, abgebrochene übergeordnete Läufe `cancelled`; Stopp wie Neustart (`sent` wartet ≤ 5 s).
+- **Aktionen:** `device_level` + `driver` als Filter; `set` nur an Elemente mit allen Schlüsseln; Preset-Ziele beim Start eingefroren; Abbrechen über Runner bzw. Executor, abgebrochene übergeordnete Läufe `cancelled`; Stopp nach F8 (`sent` wartet ≤ 5 s), harter Abbruch nach F2 beim nächsten Start.
 - **Core:** `Post`, Nachrichten des Supervisors, `View` mit Links, Runs, Rules, `DB`; Ereignisse `RunChanged`, `FindingCauseChanged`; Befehle `DeleteSource`, `UpdateGroupMember`, `ReplaceSecret`; gescheiterte Snapshots gemerkt und wiederholt (`source.discovery_failed`); DB-Timeouts, `/healthz`.
 - **API:** Verteiler mit einem Abo, sofort schreiben und bei Rückstau zusammenfassen, Ringpuffer (100, ohne Fakten) für Netzaussetzer.
 - **Bewusst akzeptiert:** PostgreSQL in der Schleife (mit Absicherung), wiederverwendete IDs (nur dokumentiert), Rechte an Stellvertretern folgen dem Weg; Management-IP und Zugangsdaten ändern später als gekoppelte Abläufe (ARCHITECTURE §17).
@@ -70,6 +70,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 - **B3:** `contracts/bootstrap.md` (eigener `.env`-Parser, unbekannte Variablen brechen ab, `errgroup`).
 - **B1:** `contracts/influx.md` (Line Protocol, Measurements aus dem Vokabular, 1 s Takt, 1 min Puffer, Schema `reporting`).
 - **C:** Aufbewahrung durch eigenen Dienst (180/180/730 Tage), Einzelinstanz-Sperre; Hochverfügbarkeit nicht in Version 1; Management-Adresse und Zugangsdaten werden **nie** über Aktionen geändert.
+- **Komplettreview (2026-10-11):** Umfang von Version 1 in zwei Phasen (Backend, UI); README eines Treibers ist sein Vertrag vor dem Code; feste Fristen für alle sechs Phasen des Herunterfahrens (30 s, `stop_grace_period: 35s`); `db_ok` gleich `View.DB`.
 - **Externes Audit der Dokumentation (2026-10-11):** TOTP-Einrichtung über die Challenge bis zur Sitzung; „erst Strom, dann Stand“ beim ersten Laden; Wiederaufnahme ab einschließlich der Version (Ereignisse idempotent); Herunterfahren in sechs Phasen mit Fristen statt gemeinsamem Abbruch (`stop_grace_period: 30s`); eigenes Schema `SkeletonElement`; Datenbank-Wächter für `View.DB` und `/healthz`; `verify` überall als `{timeout_ms, conditions}`; DBML-Notiz zu Sende-Zielen korrigiert.
 - **Zweite Durchsicht:** Sichtbarkeit mit Gerüst (Vorfahren nur mit Name und Struktur, Links nur bei sichtbaren Enden, Ursache „nicht sichtbar“); `monika_reporting` sieht bewusst alles; Indizes für die Aufbewahrung.
 - **D (Durchsicht):** Health und Rollup über die verschiedenen Elemente im Geltungsbereich (keine Doppelzählung); Regel `feeds` = fester, `uses` = wählbarer Signalfluss; `View.Stats` für die Kennzahlen; `Setting.Unit` gestrichen; Reste in allen Dokumenten nachgezogen.
@@ -79,7 +80,8 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 
 ## Nächste Schritte
 
-0. ~~**Beschreibung vervollständigen**~~: abgeschlossen mit der Durchsicht (D) am 2026-10-11. Die UI folgt nach dem Backend.
+0. ~~**Beschreibung vervollständigen**~~: für Phase 1 (Backend) abgeschlossen am 2026-10-11. Phase 2 (UI) bekommt nach dem Backend eine eigene Beschreibung (`docs/ARCHITECTURE.md` Abschnitt 1).
+   - **Treiber für Phase 1**, jeder mit eigenem Vertrag (`drivers/<name>/README.md`) vor dem Code: `videoxlink` (Vertrag offen), `http` (Vertrag offen), `embrionix` (Vertrag offen), `ravio` (Vertrag offen).
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`

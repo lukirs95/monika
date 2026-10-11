@@ -8,6 +8,8 @@ Arbeitsregeln für Claude in diesem Repository.
 - Aktueller Arbeitsstand, nächste Schritte und bekannte Lücken stehen in `docs/STATUS.md`. Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 - Die Go-Architektur entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen. Bereits festgelegt ist das Muster für die Persistenz (siehe unten).
 - **Erst Vertrag, dann Code:** Außerhalb des Stores entsteht Code erst, wenn sein Vertrag (Interfaces, Methoden, Abläufe) in `docs/contracts/` als Mermaid-Diagramm abgestimmt ist: `classDiagram` für Interfaces und Typen, `sequenceDiagram` für Abläufe, `stateDiagram-v2` für Lebenszyklen. `docs/ARCHITECTURE.md` erklärt das Warum, die Verträge legen das Wie fest. Vor jedem Commit mit geänderten Diagrammen läuft `make docs-check` (rendert alle Mermaid-Diagramme in `docs/`).
+- **Treiber:** Der Vertrag eines Treibers ist sein `drivers/<name>/README.md` (Inhalt siehe `docs/DRIVERS.md`, Checkliste). Er wird abgestimmt, bevor der Code des Treibers entsteht.
+- **UI:** Phase 2 von Version 1. Vor ihrem ersten Code wird eine eigene Beschreibung (Seiten, Abläufe, Bedienkonzept) abgestimmt.
 - Abhängigkeiten zeigen nur nach innen: `drivers/*` importiert nur `sdk/` (und die jeweilige Gerätelibrary), nie `internal/`.
 
 ## Go

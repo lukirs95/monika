@@ -39,6 +39,19 @@ Die erste Treiber-Generation:
 3. **DirectOut RAVIO**
 4. **HTTP** für generische Aktionen
 
+Jeder Treiber bekommt vor seinem Code einen eigenen Vertrag: sein `drivers/<name>/README.md` (unterstützte Modelle und Firmware, Elementbaum, Schema der `external_id`, Zuordnung der Fakten, Aktionen, Konfiguration und Secret, siehe `DRIVERS.md`).
+
+### Umfang von Version 1
+
+Version 1 entsteht in zwei Phasen; die Grenze zwischen ihnen ist die HTTP-API (`api/openapi.yaml`).
+
+| Phase | Inhalt | Beschreibung |
+|---|---|---|
+| **1 · Backend** | Core, Dienste, Treiber, API, Betrieb | dieser Dokumentensatz; die Treiber je mit eigenem README-Vertrag vor ihrem Code |
+| **2 · UI** | Seiten, Abläufe, Bedienkonzept, Technologie | eine eigene Beschreibung, die vor dem ersten Code der UI abgestimmt wird (gleiche Regel: erst Vertrag, dann Code) |
+
+Die Beschreibung von Phase 1 ist vollständig; die von Phase 2 entsteht nach dem Backend.
+
 ### Was Monika ist
 
 - Ein normalisiertes **Live-Bild** der Geräte mit Struktur (Bäume, Gruppen, Perspektiven).
@@ -1015,7 +1028,7 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 | Thema | Stand |
 |---|---|
 | Hochverfügbarkeit | **nicht Teil von Version 1.** Version 1 hält beim Start ein Advisory Lock in PostgreSQL und bricht ab, wenn eine zweite Instanz läuft. Aktiv/passiv über dasselbe Lock ist später ohne Umbau möglich; offen ist dann das Verhalten von Läufen bei einer Übernahme |
-| Frontend | kommt nach dem Backend: Technologie, Seiten, Bedienkonzept (Live-Push ist entschieden: SSE, `contracts/api.md`) |
+| Frontend | Phase 2 von Version 1 (Abschnitt 1): Technologie, Seiten, Bedienkonzept, mit eigener Beschreibung vor dem Code (Live-Push ist entschieden: SSE, `contracts/api.md`) |
 | OIDC | vorbereitet (`user_identity`, `role.external_ref`), kommt später |
 | Spätere Erweiterungen | `osc`-/`tcp`-Treiber; Prüfbedingung, die auf ein anderes Element zeigt; Prüfung der `external_id` gegen ein Muster pro `kind` |
 

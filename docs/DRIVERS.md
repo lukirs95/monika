@@ -173,6 +173,10 @@ Nur über `SourceConfig.Logger`. `Debug` für Protokolldetails, `Info` für Verb
 | bewerten im Treiber (`acme.ok`) | doppelte, nicht konfigurierbare Logik | Fakten melden, Regeln bewerten |
 | Management-IP als Einstellung | Quelle nach dem Setzen unerreichbar | nie anbieten |
 
+## Der Vertrag eines Treibers
+
+Bevor Code für einen Treiber entsteht, wird sein `drivers/<name>/README.md` geschrieben und abgestimmt (`CLAUDE.md`: erst Vertrag, dann Code). Es enthält: Gerät und unterstützte Modelle bzw. Firmware; Zugang zum Gerät (Protokoll, Abfrage oder Event-Stream, `Heartbeat()`); Elementbaum mit Rollen und Transporten; Schema der `external_id`s und ggf. Namensraum der `global_ref`; Zuordnung der Gerätewerte zum Vokabular samt Umrechnung; rohe Fakten mit Typ und Art; Alarme; Aktionen und Einstellungen mit `critical`; Links; Konfigurationsschema und Format des Secrets; Besonderheiten (z. B. wiederverwendete IDs). Schritte 1 bis 10 oben sind die Gliederung.
+
 ## Checkliste vor dem Merge
 
 - [ ] Name `[a-z0-9]+`, kein Measurement-Name; Paket unter `drivers/`, Import in `drivers/all`; nichts aus `internal/`.

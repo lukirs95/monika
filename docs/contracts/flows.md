@@ -78,13 +78,13 @@ sequenceDiagram
     M->>M: SIGTERM / SIGINT oder Dienstfehler
     M->>A: Phase 1: Shutdown (keine neuen Anfragen, laufende beenden), 5 s
     M->>P: Phase 2: keine neuen Läufe und Stufen, offene Läufe abschließen (F8), 5 s
-    M->>Sup: Phase 3: alle Quellen stoppen (ctx), parallel, höchstens 10 s je Quelle
-    M->>C: Phase 4: Schleife beenden, Rest verarbeiten, letztes SaveHealth
+    M->>Sup: Phase 3: alle Quellen stoppen (ctx), parallel, 10 s insgesamt
+    M->>C: Phase 4: Schleife beenden, Rest verarbeiten, letztes SaveHealth, 3 s
     M->>X: Phase 5: Rest senden bzw. schreiben, Aufbewahrung bricht den laufenden Batch ab, 5 s
-    M->>DB: Phase 6: Einzelinstanz-Sperre freigeben, Pool schließen
+    M->>DB: Phase 6: Einzelinstanz-Sperre freigeben, Pool schließen, 2 s
 ```
 
-Jede Phase beginnt erst, wenn die vorige fertig ist oder ihre Frist abgelaufen ist (`bootstrap.md`, K4); insgesamt höchstens rund 30 s.
+Jede Phase beginnt erst, wenn die vorige fertig ist oder ihre Frist abgelaufen ist (`bootstrap.md`, K4); zusammen höchstens 30 s. Eine Quelle, die nach den 10 s von Phase 3 noch läuft, gilt als `Stuck` (`sdk.md`).
 
 **Offene Läufe beim geordneten Stopp (F8)** enden mit Grund „Monika gestoppt“. Anders als beim harten Abbruch (F2, nachträglich beim nächsten Start) wartet `sent` noch auf die Antwort; `cancelled` bleibt dem Abbrechen durch User oder Preset vorbehalten:
 

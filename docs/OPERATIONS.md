@@ -15,7 +15,7 @@ Wie Monika ausgeliefert, betrieben, gesichert und aktualisiert wird. Konfigurati
 
 | Dienst | Image | Aufgabe |
 |---|---|---|
-| `monika` | Monika | Monitor und Konfigurator; Healthcheck `monika -healthcheck`; `stop_grace_period: 30s`, damit das Herunterfahren in Phasen fertig wird (Docker beendet sonst nach 10 s mit `SIGKILL`) |
+| `monika` | Monika | Monitor und Konfigurator; Healthcheck `monika -healthcheck`; `stop_grace_period: 35s`: Das Herunterfahren in Phasen dauert höchstens 30 s (Docker beendet sonst nach 10 s mit `SIGKILL`) |
 | `postgres` | `postgres:18-alpine` | Hauptdatenbank, Volume für die Daten |
 | `influxdb` | `influxdb:2` | Zeitreihen; Bucket und Token beim ersten Start per `DOCKER_INFLUXDB_INIT_*`, Aufbewahrung des Buckets z. B. 30 Tage |
 | `caddy` | `caddy:2` | Reverse-Proxy mit automatischem TLS, leitet an `monika:8080` weiter, setzt `X-Forwarded-For` |
@@ -83,7 +83,7 @@ Die Migrationen legen das Schema `reporting` und seine Views an, nicht die Rolle
 | `subscribers` | int | gauge | Abonnenten des Core |
 | `subscribers_dropped` | int | counter | abgehängte Abonnenten |
 | `events` | int | counter | verteilte Ereignisse |
-| `db_ok` | bool | status | letzte Schreibvorgänge in PostgreSQL gelungen |
+| `db_ok` | bool | status | Datenbank in Ordnung, gleich `View.DB` und `/healthz`: letzter Ping und letzte Schreibvorgänge erfolgreich, höchstens 5 s alt |
 | `influx_buffered` | int | gauge | gepufferte Takte |
 | `influx_dropped` | int | counter | verworfene Takte |
 | `api_streams` | int | gauge | offene SSE-Ströme |
