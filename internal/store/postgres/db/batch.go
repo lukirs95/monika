@@ -481,11 +481,11 @@ WITH prev AS (
 ), up AS (
   INSERT INTO element (
     id, kind, parent_id, device_id, source_id, external_id, global_ref,
-    transport, direction, name, attributes, position, actions, critical_actions, settings,
+    transport, direction, name, attributes, position, actions, critical_actions, settings, params,
     present, first_seen_at, last_seen_at
   ) VALUES (
     $3, $4, $5::uuid, $6::uuid, $1::uuid, NULLIF($2::text, ''), $7,
-    $8, $9, $10, $11, $12, $13, $14, $15,
+    $8, $9, $10, $11, $12, $13, $14, $15, $16,
     true, now(), now()
   )
   ON CONFLICT (source_id, external_id) WHERE source_id IS NOT NULL DO UPDATE
@@ -500,17 +500,18 @@ WITH prev AS (
       actions          = excluded.actions,
       critical_actions = excluded.critical_actions,
       settings         = excluded.settings,
+      params           = excluded.params,
       present          = true,
       first_seen_at    = COALESCE(element.first_seen_at, now()),
       last_seen_at     = now(),
       updated_at       = now()
-  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at
 ), audit AS (
   INSERT INTO audit_log (verb, object_type, object_id, before, after)
   SELECT 'create', 'element', up.id, NULL, to_jsonb(up)
   FROM up WHERE NOT EXISTS (SELECT 1 FROM prev)
   UNION ALL
-  SELECT 'update', 'element', up.id, '{"present": false}'::jsonb, '{"present": true}'::jsonb
+  SELECT 'appear', 'element', up.id, '{"present": false}'::jsonb, '{"present": true}'::jsonb
   FROM up, prev WHERE NOT prev.present
 )
 SELECT up.id FROM up
@@ -538,13 +539,13 @@ type UpsertDriverElementParams struct {
 	Actions         []string
 	CriticalActions []string
 	Settings        json.RawMessage
+	Params          json.RawMessage
 }
 
 // Discovery: legt ein Treiber-Element an oder aktualisiert es anhand von (source_id, external_id).
-// Übernimmt vom User vorab angelegte Elemente (first_seen_at = NULL) und behält deren id.
 // Eine leere external_id meint das Zugangs-Element der Quelle (gespeichert als NULL).
-// Audit (actor NULL): create für neue Elemente, update present false → true für zurückkehrende
-// und übernommene; Änderungen an Attributen werden nicht protokolliert.
+// Audit (actor NULL): create für neue Elemente, appear für zurückkehrende;
+// Änderungen an Attributen werden nicht protokolliert.
 func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverElementParams) *UpsertDriverElementBatchResults {
 	batch := &pgx.Batch{}
 	for _, a := range arg {
@@ -564,6 +565,7 @@ func (q *Queries) UpsertDriverElement(ctx context.Context, arg []UpsertDriverEle
 			a.Actions,
 			a.CriticalActions,
 			a.Settings,
+			a.Params,
 		}
 		batch.Queue(upsertDriverElement, vals...)
 	}

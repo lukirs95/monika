@@ -88,7 +88,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
    5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api/openapi.yaml` (OpenAPI 3.0.3, `make api-check`)
-2. **Code an das Audit anpassen** (Schema und Stores, bevor der Core entsteht):
+2. **Code an das Audit anpassen** (Schema und Stores, bevor der Core entsteht); erledigt ist Teil 1 (Schema neu erzeugt, Inventar, `finding.element_path`, `ClearReason`):
    - `make db-generate`, `make db-gen-go`; Migration `00003` bleibt.
    - `deleted_at`, `CreatePlannedElement` entfernen; `DeleteDevice` und `DeleteGroup` hart löschen (CASCADE, Audit vorher), `DeleteSource` neu; Presets blockieren weiterhin.
    - `finding.element_path`, `action_run.element_path` (Namens-Snapshot), Queries ohne Fremdschlüssel auf `element`.

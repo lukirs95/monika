@@ -22,21 +22,25 @@ type Store interface {
 
 	// CreateDevice legt ein Gerät an; verwendet ID, Label und Notes.
 	CreateDevice(ctx context.Context, actor uuid.UUID, e Element) error
-	// DeleteDevice löscht ein Gerät weich. Solange Presets es verwenden: *InUseError.
+	// DeleteDevice löscht ein Gerät hart, mit seinen Quellen und Elementen. Vorher zieht es die
+	// aktiven Befunde zurück und löscht Konfiguration mit diesem Geltungsbereich (mit Audit).
+	// Solange Presets auf eines seiner Elemente zielen: *InUseError.
 	DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 
 	// CreateSource legt eine Quelle samt Zugangs-Element (ID accessID) an. Ist das Gerät
-	// unbekannt oder gelöscht: ErrNotFound.
+	// unbekannt: ErrNotFound.
 	CreateSource(ctx context.Context, actor uuid.UUID, s Source, accessID uuid.UUID) error
 	// UpdateSource ändert Adresse, Konfiguration, Secret und Aktivierung einer Quelle.
 	UpdateSource(ctx context.Context, actor uuid.UUID, s Source) error
+	// DeleteSource löscht eine Quelle hart, mit Zugang, Elementen und Links; sonst wie
+	// DeleteDevice.
+	DeleteSource(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 
 	// CreateGroup legt eine Gruppe an; verwendet ID, Label und Notes.
 	CreateGroup(ctx context.Context, actor uuid.UUID, e Element) error
-	// DeleteGroup löscht eine Gruppe weich. Solange Presets sie verwenden: *InUseError.
+	// DeleteGroup löscht eine Gruppe hart, mit ihren Mitgliedschaften und der Konfiguration mit
+	// ihrem Geltungsbereich. Solange Presets sie verwenden: *InUseError.
 	DeleteGroup(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
-	// CreatePlannedElement legt ein Treiber-Element an, das der Treiber noch nie gesehen hat.
-	CreatePlannedElement(ctx context.Context, actor uuid.UUID, e Element) error
 	UpdateUserFields(ctx context.Context, actor uuid.UUID, id uuid.UUID, f UserFields) error
 
 	// AddGroupMember nimmt ein Element in eine Gruppe auf (Link vom Typ member).
@@ -60,7 +64,8 @@ type PresetRef struct {
 	Name string
 }
 
-// InUseError bedeutet, dass Presets noch Schritte mit Zielen am Gerät bzw. an der Gruppe haben.
+// InUseError bedeutet, dass Presets noch Schritte mit Zielen am Gerät, an der Quelle bzw. an der
+// Gruppe haben.
 type InUseError struct {
 	Presets []PresetRef
 }

@@ -179,7 +179,7 @@ func TestPresetWaitsForDeviceDeletion(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE element SET deleted_at = now() WHERE id = $1`, device); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM element WHERE id = $1`, device); err != nil {
 		t.Fatalf("delete device: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

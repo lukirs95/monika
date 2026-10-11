@@ -345,6 +345,7 @@ const (
 	PermissionConfigure     Permission = "configure"
 	PermissionCritical      Permission = "critical"
 	PermissionInventoryEdit Permission = "inventory_edit"
+	PermissionSourceEdit    Permission = "source_edit"
 	PermissionRuleEdit      Permission = "rule_edit"
 	PermissionPresetRun     Permission = "preset_run"
 	PermissionPresetEdit    Permission = "preset_edit"
@@ -394,6 +395,7 @@ func (e Permission) Valid() bool {
 		PermissionConfigure,
 		PermissionCritical,
 		PermissionInventoryEdit,
+		PermissionSourceEdit,
 		PermissionRuleEdit,
 		PermissionPresetRun,
 		PermissionPresetEdit,
@@ -411,6 +413,7 @@ func AllPermissionValues() []Permission {
 		PermissionConfigure,
 		PermissionCritical,
 		PermissionInventoryEdit,
+		PermissionSourceEdit,
 		PermissionRuleEdit,
 		PermissionPresetRun,
 		PermissionPresetEdit,
@@ -675,7 +678,8 @@ func AllSeverityValues() []Severity {
 }
 
 // Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
-// Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
+// Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen;
+// ein selbst abgebrochener übergeordneter Lauf endet als cancelled.
 // Gelöschte Presets und Schritte lassen die Läufe stehen (preset_id, preset_step_id werden NULL).
 type ActionRun struct {
 	ID uuid.UUID
@@ -684,20 +688,22 @@ type ActionRun struct {
 	// gesetzt am Wurzel-Lauf eines Presets
 	PresetID     *uuid.UUID
 	PresetStepID *uuid.UUID
-	// Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf
+	// Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf. Ohne Fremdschlüssel: die Historie überlebt das Löschen
 	ElementID *uuid.UUID
-	// ausführende Quelle; NULL bei übergeordneten Läufen
+	// Anzeigename des Ziels beim Anlegen; NULL nur am Preset-Wurzel-Lauf
+	ElementPath *string
+	// ausführende Quelle; NULL bei übergeordneten Läufen. Ohne Fremdschlüssel
 	SourceID *uuid.UUID
-	// start, stop, set, reboot, vxl.*; am Preset-Wurzel-Lauf: preset
+	// start, stop, set, reboot, videoxlink.*; am Preset-Wurzel-Lauf: preset
 	Action string
 	// bei set: zu setzende Werte; bei trigger: Overrides nur für diesen Aufruf
 	Params json.RawMessage
 	Status ActionStatus
 	// Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)
 	Critical bool
-	// Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}
+	// Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "codec.bitrate_mbps", "op": "eq", "value": 20}]}
 	Verify json.RawMessage
-	// Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern
+	// Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern; bei übergeordneten Läufen die Zusammenfassung inkl. übersprungener Mitglieder
 	Response json.RawMessage
 	// Mensch oder Dienstkonto (API-Token)
 	RequestedByID uuid.UUID
@@ -739,13 +745,13 @@ type AppUser struct {
 	LastLoginAt *time.Time
 }
 
-// Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.
+// Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt mit actor_id = NULL: create für zum ersten Mal gesehene Elemente, appear und disappear für zurückkehrende und verschwindende, create und delete für Links. Aufbewahrung: MONIKA_RETENTION_AUDIT.
 type AuditLog struct {
 	ID uuid.UUID
 	// NULL = Monika selbst
 	ActorID *uuid.UUID
 	At      time.Time
-	// create | update | delete | login | login_failed
+	// create | update | delete | appear | disappear | login | login_failed; appear/disappear nur von der Discovery
 	Verb string
 	// rule, preset, element, element_link, device_source, role, permission_grant, forward_target, ...
 	ObjectType string
@@ -759,14 +765,16 @@ type AuditLog struct {
 // Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle
 // besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
 // Zu jeder Quelle legt der Core ein Zugangs-Element (kind = access) an.
-// Quellen werden nie gelöscht, nur deaktiviert. Verbindungszustand und
-// Lebenszeichen liegen im Speicher des Core; ein Ausfall steht als Befund
-// source.unreachable am Zugangs-Element.
+// Eine Quelle kann deaktiviert oder gelöscht werden; Löschen entfernt ihre
+// Elemente und Links. Verbindungszustand und Lebenszeichen liegen im Speicher
+// des Core; ein Ausfall steht als Befund source.unreachable am Zugangs-Element.
+// Ändern erfordert source_edit (global), weil eine Quelle mit Secret sonst
+// Zugangsdaten an einen beliebigen Host schicken könnte.
 type DeviceSource struct {
 	ID uuid.UUID
 	// Element mit kind = device (gesichert in der Anwendung)
 	DeviceID uuid.UUID
-	// videoxlink, embrionix, directout-ravio, ipmi, ...
+	// Treibername = Paketname, nur [a-z0-9]: videoxlink, embrionix, ravio, http, ipmi, ...
 	Driver string
 	// Management-Host/IP
 	Address *string
@@ -774,7 +782,7 @@ type DeviceSource struct {
 	Config json.RawMessage
 	// Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen
 	SecretID *uuid.UUID
-	// false = deaktiviert: kein Befund, Elemente der Quelle unknown
+	// false = deaktiviert: Treiber läuft nicht, Elemente gelten als nicht überwacht (keine Health)
 	Enabled   bool
 	Vendor    *string
 	Model     *string
@@ -797,11 +805,14 @@ type DeviceSource struct {
 //
 //	ON element (source_id, external_id) NULLS NOT DISTINCT
 //	WHERE source_id IS NOT NULL;
+//
+// Löschen: Ein Gerät löscht seine Quellen und Elemente, eine Quelle ihre
+// Elemente (CASCADE). Was mitgelöscht wird, steht im Audit des Löschens.
 type Element struct {
 	ID uuid.UUID
-	// device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger
+	// device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, path, tunnel, processing, sensor, trigger; siehe docs/contracts/vocabulary.md
 	Kind string
-	// nur physische/strukturelle Hierarchie
+	// nur physische/strukturelle Hierarchie; Treiber-Elemente ohne Eltern im Treiber hängen am Zugangs-Element
 	ParentID *uuid.UUID
 	// zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen
 	DeviceID *uuid.UUID
@@ -809,7 +820,7 @@ type Element struct {
 	SourceID *uuid.UUID
 	// stabile ID innerhalb der Quelle, z.B. Slot-Pfad oder UnitID; NULL nur beim Zugangs-Element
 	ExternalID *string
-	// global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern
+	// global eindeutige ID mit Namensraum (xlink:X8A9001-E1, nmos:<uuid>); am Zugangs-Element die des Geräts (xlink:X8A9001). Nur am Element im eigenen Baum, nie an Stellvertretern
 	GlobalRef *string
 	// sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...
 	Transport *string
@@ -817,27 +828,27 @@ type Element struct {
 	Direction *PortDirection
 	// Name, wie das Gerät ihn meldet
 	Name *string
-	// statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)
+	// statische Treiber-Attribute, nur zur Anzeige
 	Attributes json.RawMessage
 	// Sortierung innerhalb des Parents
 	Position *int32
-	// unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}
+	// unterstützte Befehle, z.B. {start,stop,reboot,videoxlink.reset_video_buffer}
 	Actions []string
 	// Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)
 	CriticalActions []string
-	// schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}
+	// schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical bzw. write_only, z.B. {"codec.bitrate_mbps": {"type": "float", "min": 1, "max": 100}, "ptp.domain": {"type": "int", "critical": true}}
 	Settings json.RawMessage
-	// false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar
-	Present bool
-	// NULL = vom User vorab angelegt, vom Treiber noch nie gesehen
+	// Parameter-Schemas von Aktionen, die an diesem Element ein eigenes Schema haben (Sende-Ziele: trigger), z.B. {"trigger": {"state": {"type": "enum", "values": ["off", "program"], "default": "off"}}}
+	Params json.RawMessage
+	// false = verschwunden; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar
+	Present     bool
 	FirstSeenAt *time.Time
-	LastSeenAt  *time.Time
-	Label       *string
-	Notes       *string
-	// false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id
+	// zuletzt in einem Snapshot gesehen; ohne Strukturänderung höchstens alle 5 min geschrieben
+	LastSeenAt *time.Time
+	Label      *string
+	Notes      *string
+	// false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id; eine deaktivierte Quelle wirkt wie false
 	Monitored bool
-	// weich gelöscht (nur Gerät und Gruppe); Zeilen bleiben für Läufe, Befunde und Audit
-	DeletedAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -870,9 +881,9 @@ type ElementLink struct {
 // Nur, was der Core ableitet. Aktuelle Fakten liegen nur im Speicher des Core und gehen im festen Takt nach InfluxDB.
 type ElementState struct {
 	ElementID uuid.UUID
-	// vom Core; NULL = keine Health (nicht überwacht oder verschwunden)
+	// vom Core; NULL = keine Health (nicht überwacht, verschwunden oder ungeprüft)
 	Health *Health
-	// nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}
+	// nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unchecked": 40, "unmonitored": 2, "missing": 1}
 	Rollup json.RawMessage
 	// Zeitpunkt des Schreibens
 	UpdatedAt time.Time
@@ -881,19 +892,22 @@ type ElementState struct {
 // Höchstens ein aktiver Befund pro Element, Code und Regel. DBML kennt keine
 // Teilindizes; finding_active_uq steht deshalb in migrations/00002_finding_active_uq.sql.
 type Finding struct {
-	ID        uuid.UUID
+	ID uuid.UUID
+	// ohne Fremdschlüssel: die Historie überlebt das Löschen des Elements
 	ElementID uuid.UUID
-	Origin    FindingOrigin
+	// Anzeigename des Elements beim Entstehen, z.B. L1 · X8A1001 / D1
+	ElementPath string
+	Origin      FindingOrigin
 	// bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt
 	RuleID *uuid.UUID
-	// rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable
+	// rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, source.discovery_failed
 	Code     string
 	Severity Severity
 	// lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds
 	Message *string
-	// Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted)
+	// Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, fact_missing, source_disabled, deleted)
 	Details json.RawMessage
-	// NULL = Ursache, sonst Symptom
+	// NULL = Ursache, sonst Symptom: zeigt auf die Wurzel; wird bei jeder Befundänderung neu abgeleitet und friert mit dem Ende ein
 	CausedByID *uuid.UUID
 	RaisedAt   time.Time
 	// NULL = aktiv
@@ -903,13 +917,13 @@ type Finding struct {
 	AckedByID *uuid.UUID
 }
 
-// Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox.
+// Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox. Format der Ereignisse: docs/ARCHITECTURE.md Abschnitt 13.
 type ForwardTarget struct {
 	ID      uuid.UUID
 	Name    string
 	Kind    ForwardKind
 	Enabled bool
-	// syslog: host, port, protocol, facility · webhook: url, method, headers, body (Vorlage)
+	// syslog: host, port, protocol (udp, tcp, tls), facility · webhook: url, method, headers, body (Vorlage); Platzhalter {{secret.<schlüssel>}} nur in url und headers
 	Config json.RawMessage
 	// z.B. Token im Webhook-Header
 	SecretID *uuid.UUID
@@ -917,7 +931,7 @@ type ForwardTarget struct {
 	Events []string
 	// nur für finding.*; NULL = alle
 	MinSeverity *Severity
-	// Gerät oder Gruppe, rekursiv; NULL = alles
+	// Geltungsbereich wie bei Regeln und Rechten; NULL = alles
 	ScopeElementID *uuid.UUID
 	LastSentAt     *time.Time
 	LastError      *string
@@ -929,7 +943,7 @@ type PermissionGrant struct {
 	ID         uuid.UUID
 	RoleID     uuid.UUID
 	Permission Permission
-	// Gruppe (Mitglieder rekursiv), Gerät (alle Elemente) oder Element (mit Kindern); NULL = überall
+	// Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren); NULL = überall
 	ScopeElementID *uuid.UUID
 	CreatedAt      time.Time
 }
@@ -944,7 +958,7 @@ type Preset struct {
 	UpdatedAt   time.Time
 }
 
-// Ein Element mit Preset-Schritten ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.
+// Ein Element mit Preset-Schritten (bei Geräten und Quellen: auf eines ihrer Elemente) ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.
 type PresetStep struct {
 	ID       uuid.UUID
 	PresetID uuid.UUID
@@ -956,13 +970,15 @@ type PresetStep struct {
 	DelayMs int32
 	// Element, Gerät oder Gruppe (Verteilung auf Mitglieder)
 	ElementID uuid.UUID
-	// start, stop, set, reboot, trigger, vxl.*
+	// start, stop, set, reboot, trigger, videoxlink.*
 	Action string
-	// bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides
+	// bei set: {"codec.bitrate_mbps": 25, "codec.format": "HEVC"}; bei trigger: Overrides
 	Params json.RawMessage
 	// false = Fehler bricht das Preset ab
 	ContinueOnError bool
-	// Pflicht bei Aktionen für das ganze Gerät (an Zugangs-Elementen) auf Geräte oder Gruppen, z.B. reboot über videoxlink
+	// nur bei Gerät oder Gruppe als Ziel: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente
+	DeviceLevel bool
+	// Filter auf Quellen dieses Treibers; Pflicht bei device_level = true, z.B. reboot über videoxlink
 	Driver *string
 }
 
@@ -983,18 +999,19 @@ type RoleMember struct {
 }
 
 // Alle Regeln kommen vom User; es gibt keine mitgelieferten Standardregeln.
-// Operator und Typ von value werden in Go beim Speichern geprüft.
+// Operator und Typ von value werden in Go beim Speichern gegen den
+// Fakt-Katalog geprüft.
 type Rule struct {
 	ID       uuid.UUID
 	Name     string
 	Enabled  bool
 	Severity Severity
-	// Element, Gerät (inkl. Kinder) oder Gruppe (inkl. Mitglieder, rekursiv)
+	// Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren)
 	ScopeElementID *uuid.UUID
 	MatchKind      *string
 	MatchTransport *string
 	MatchDriver    *string
-	// running, signal_present, format.rate, ptp_offset, vxl.cpu_temp, ...
+	// Fakt-Schlüssel, z.B. state.signal_present, ptp.offset_ns, sdi.crc_errors_per_s, videoxlink.needs_reboot
 	Fact string
 	Op   RuleOp
 	// true | 50 | "i" | [50, 59.94]
@@ -1006,14 +1023,17 @@ type Rule struct {
 	ClearValue json.RawMessage
 	// Verletzung muss so lange anliegen, bevor ein Befund entsteht
 	HoldSeconds int32
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Sollzustand muss so lange ununterbrochen anliegen, bevor der Befund endet (gegen Flattern); Zurückziehen wirkt sofort
+	ClearHoldSeconds int32
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // Ver- und Entschlüsselung nur in Go, nie per pgcrypto (Schlüssel würde im SQL landen).
 // Associated Data = id, damit Werte nicht zwischen Zeilen vertauscht werden können.
 // Werte werden nie angezeigt, geloggt oder ins Audit geschrieben.
-// Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: inventory_edit.
+// Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: source_edit.
+// Ersetzen startet alle Quellen mit diesem Secret neu.
 type Secret struct {
 	ID uuid.UUID
 	// z.B. xlink-admin; in der UI auswählbar

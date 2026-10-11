@@ -6,8 +6,8 @@ ORDER BY raised_at, id;
 
 -- name: RaiseFinding :exec
 -- Schlägt mit 23505 (finding_active_uq) fehl, wenn derselbe Befund schon aktiv ist.
-INSERT INTO finding (id, element_id, origin, rule_id, code, severity, message, details, caused_by_id, raised_at)
-VALUES (@id, @element_id, @origin, @rule_id, @code, @severity, @message, @details, @caused_by_id,
+INSERT INTO finding (id, element_id, element_path, origin, rule_id, code, severity, message, details, caused_by_id, raised_at)
+VALUES (@id, @element_id, @element_path, @origin, @rule_id, @code, @severity, @message, @details, @caused_by_id,
         COALESCE(sqlc.narg(raised_at)::timestamptz, now()));
 
 -- name: EndFinding :execrows

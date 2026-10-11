@@ -56,7 +56,7 @@ func (q *Queries) EndFinding(ctx context.Context, arg EndFindingParams) (int64, 
 }
 
 const listActiveFindings = `-- name: ListActiveFindings :many
-SELECT id, element_id, origin, rule_id, code, severity, message, details, caused_by_id, raised_at, cleared_at, acked_at, acked_by_id FROM finding
+SELECT id, element_id, element_path, origin, rule_id, code, severity, message, details, caused_by_id, raised_at, cleared_at, acked_at, acked_by_id FROM finding
 WHERE cleared_at IS NULL
 ORDER BY raised_at, id
 `
@@ -74,6 +74,7 @@ func (q *Queries) ListActiveFindings(ctx context.Context) ([]Finding, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.ElementID,
+			&i.ElementPath,
 			&i.Origin,
 			&i.RuleID,
 			&i.Code,
@@ -97,22 +98,23 @@ func (q *Queries) ListActiveFindings(ctx context.Context) ([]Finding, error) {
 }
 
 const raiseFinding = `-- name: RaiseFinding :exec
-INSERT INTO finding (id, element_id, origin, rule_id, code, severity, message, details, caused_by_id, raised_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-        COALESCE($10::timestamptz, now()))
+INSERT INTO finding (id, element_id, element_path, origin, rule_id, code, severity, message, details, caused_by_id, raised_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        COALESCE($11::timestamptz, now()))
 `
 
 type RaiseFindingParams struct {
-	ID         uuid.UUID
-	ElementID  uuid.UUID
-	Origin     FindingOrigin
-	RuleID     *uuid.UUID
-	Code       string
-	Severity   Severity
-	Message    *string
-	Details    json.RawMessage
-	CausedByID *uuid.UUID
-	RaisedAt   *time.Time
+	ID          uuid.UUID
+	ElementID   uuid.UUID
+	ElementPath string
+	Origin      FindingOrigin
+	RuleID      *uuid.UUID
+	Code        string
+	Severity    Severity
+	Message     *string
+	Details     json.RawMessage
+	CausedByID  *uuid.UUID
+	RaisedAt    *time.Time
 }
 
 // Schlägt mit 23505 (finding_active_uq) fehl, wenn derselbe Befund schon aktiv ist.
@@ -120,6 +122,7 @@ func (q *Queries) RaiseFinding(ctx context.Context, arg RaiseFindingParams) erro
 	_, err := q.db.Exec(ctx, raiseFinding,
 		arg.ID,
 		arg.ElementID,
+		arg.ElementPath,
 		arg.Origin,
 		arg.RuleID,
 		arg.Code,

@@ -8,7 +8,6 @@ package db
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -93,7 +92,7 @@ func (q *Queries) GetPreset(ctx context.Context, id uuid.UUID) (GetPresetRow, er
 }
 
 const listPresetSteps = `-- name: ListPresetSteps :many
-SELECT id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, driver FROM preset_step
+SELECT id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, device_level, driver FROM preset_step
 WHERE preset_id = $1
 ORDER BY stage, position, id
 `
@@ -117,6 +116,7 @@ func (q *Queries) ListPresetSteps(ctx context.Context, presetID uuid.UUID) ([]Pr
 			&i.Action,
 			&i.Params,
 			&i.ContinueOnError,
+			&i.DeviceLevel,
 			&i.Driver,
 		); err != nil {
 			return nil, err
@@ -168,39 +168,47 @@ func (q *Queries) ListPresets(ctx context.Context) ([]ListPresetsRow, error) {
 	return items, nil
 }
 
+const lockStepSources = `-- name: LockStepSources :exec
+SELECT s.id
+FROM device_source s
+WHERE s.id IN (SELECT e.source_id FROM element e WHERE e.id = ANY ($1::uuid[]))
+ORDER BY s.id
+FOR SHARE
+`
+
+// Sperrt die Quellen der Ziel-Elemente (FOR SHARE) gegen gleichzeitiges DeleteSource.
+func (q *Queries) LockStepSources(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockStepSources, ids)
+	return err
+}
+
 const lockStepTargets = `-- name: LockStepTargets :many
 WITH t AS (
   SELECT e.id, e.device_id FROM element e WHERE e.id = ANY ($1::uuid[])
 )
-SELECT e.id, e.device_id, e.deleted_at
+SELECT e.id
 FROM element e
 WHERE e.id IN (SELECT t.id FROM t UNION SELECT t.device_id FROM t WHERE t.device_id IS NOT NULL)
 ORDER BY e.id
 FOR SHARE
 `
 
-type LockStepTargetsRow struct {
-	ID        uuid.UUID
-	DeviceID  *uuid.UUID
-	DeletedAt *time.Time
-}
-
 // Sperrt die Ziel-Elemente und ihre Geräte (FOR SHARE, in fester Reihenfolge) gegen
-// gleichzeitiges Löschen und liefert sie samt deleted_at. DeleteDevice und DeleteGroup sperren
+// gleichzeitiges Löschen und liefert die vorhandenen. DeleteDevice und DeleteGroup sperren
 // Gerät bzw. Gruppe FOR UPDATE; wer zuerst sperrt, sieht danach das Ergebnis des anderen.
-func (q *Queries) LockStepTargets(ctx context.Context, ids []uuid.UUID) ([]LockStepTargetsRow, error) {
+func (q *Queries) LockStepTargets(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, lockStepTargets, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []LockStepTargetsRow
+	var items []uuid.UUID
 	for rows.Next() {
-		var i LockStepTargetsRow
-		if err := rows.Scan(&i.ID, &i.DeviceID, &i.DeletedAt); err != nil {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

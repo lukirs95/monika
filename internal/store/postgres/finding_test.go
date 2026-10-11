@@ -28,12 +28,12 @@ func TestFindings(t *testing.T) {
 	}
 	raisedAt := time.Now().Add(-time.Minute).Truncate(time.Microsecond)
 	cause := evaluation.Finding{
-		ID: newID(), ElementID: device, Origin: evaluation.OriginSystem, Code: "source.unreachable",
+		ID: newID(), ElementID: device, ElementPath: "X8A1001 / XLink-API", Origin: evaluation.OriginSystem, Code: "source.unreachable",
 		Severity: evaluation.SeverityError, Message: "XLink-API nicht erreichbar",
 		Details: json.RawMessage(`{"reason": "connection refused"}`), RaisedAt: raisedAt,
 	}
 	symptom := evaluation.Finding{
-		ID: newID(), ElementID: device, Origin: evaluation.OriginDevice, Code: "srt.error",
+		ID: newID(), ElementID: device, ElementPath: "X8A1001 / srtE1", Origin: evaluation.OriginDevice, Code: "srt.error",
 		Severity: evaluation.SeverityWarning,
 	}
 	for _, f := range []evaluation.Finding{cause, symptom} {

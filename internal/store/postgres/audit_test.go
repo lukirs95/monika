@@ -203,16 +203,13 @@ func TestAuditDiscovery(t *testing.T) {
 	element := func(id uuid.UUID, kind inventory.Kind, ext string) inventory.Element {
 		return inventory.Element{ID: id, Kind: kind, ParentID: device, DeviceID: device, SourceID: source, ExternalID: ext}
 	}
-	if err := s.CreatePlannedElement(ctx, uuid.Nil, element(peer, "peer", "peer/X8A9001")); err != nil {
-		t.Fatalf("CreatePlannedElement: %v", err)
-	}
 	if _, err := pool.Exec(ctx, `TRUNCATE audit_log`); err != nil {
 		t.Fatalf("truncate audit_log: %v", err)
 	}
 
 	link := inventory.Link{ID: newID(), Type: inventory.LinkUses, SourceID: source, FromID: port, ToID: peer}
 	runs := []inventory.Discovery{
-		// Lauf 1: Port ist neu, der vorab angelegte Peer erscheint, ein Link entsteht.
+		// Lauf 1: Port und Peer sind neu, ein Link entsteht.
 		{SourceID: source, Upsert: []inventory.Element{element(port, "port", "sdi/1"), element(peer, "peer", "peer/X8A9001")},
 			Seen: []uuid.UUID{port, peer}, AddLinks: []inventory.Link{link}},
 		// Lauf 2: Peer verschwindet, der Link fällt weg.
@@ -232,18 +229,18 @@ func TestAuditDiscovery(t *testing.T) {
 			t.Errorf("entry %+v has actor, want Monika (NULL)", e)
 		}
 		entry := e.Verb + " " + e.ObjectType + " " + e.ObjectID.String()
-		if e.Verb == "update" {
+		if e.Verb == "appear" || e.Verb == "disappear" {
 			entry += " " + string(e.Before) + "→" + string(e.After)
 		}
 		got = append(got, entry)
 	}
 	want := []string{
 		"create element " + port.String(),
-		`update element ` + peer.String() + ` {"present": false}→{"present": true}`,
+		"create element " + peer.String(),
 		"create element_link " + link.ID.String(),
 		"delete element_link " + link.ID.String(),
-		`update element ` + peer.String() + ` {"present": true}→{"present": false}`,
-		`update element ` + peer.String() + ` {"present": false}→{"present": true}`,
+		`disappear element ` + peer.String() + ` {"present": true}→{"present": false}`,
+		`appear element ` + peer.String() + ` {"present": false}→{"present": true}`,
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("audit entries:\n got  %q\n want %q", got, want)

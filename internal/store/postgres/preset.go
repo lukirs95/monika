@@ -137,24 +137,24 @@ func saveSteps(ctx context.Context, q *db.Queries, p preset.Preset) error {
 	return err
 }
 
-// checkTargets sperrt Ziele und Geräte gegen gleichzeitiges Löschen und lehnt unbekannte oder
-// gelöschte Ziele sowie Elemente gelöschter Geräte ab.
+// checkTargets sperrt Ziele, ihre Geräte und Quellen gegen gleichzeitiges Löschen und lehnt
+// unbekannte Ziele ab; gelöschte Geräte, Quellen und Gruppen gibt es nicht mehr.
 func checkTargets(ctx context.Context, q *db.Queries, steps []preset.Step) error {
-	rows, err := q.LockStepTargets(ctx, mapSlice(steps, func(st preset.Step) uuid.UUID { return st.ElementID }))
+	ids := mapSlice(steps, func(st preset.Step) uuid.UUID { return st.ElementID })
+	rows, err := q.LockStepTargets(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("lock step targets: %w", err)
 	}
-	locked := make(map[uuid.UUID]db.LockStepTargetsRow, len(rows))
-	for _, r := range rows {
-		locked[r.ID] = r
+	if err := q.LockStepSources(ctx, ids); err != nil {
+		return fmt.Errorf("lock step sources: %w", err)
+	}
+	locked := make(map[uuid.UUID]bool, len(rows))
+	for _, id := range rows {
+		locked[id] = true
 	}
 	for _, st := range steps {
-		t, ok := locked[st.ElementID]
-		if !ok || t.DeletedAt != nil {
-			return fmt.Errorf("%w: target %s is unknown or deleted", preset.ErrInvalidTarget, st.ElementID)
-		}
-		if t.DeviceID != nil && locked[*t.DeviceID].DeletedAt != nil {
-			return fmt.Errorf("%w: target %s belongs to a deleted device", preset.ErrInvalidTarget, st.ElementID)
+		if !locked[st.ElementID] {
+			return fmt.Errorf("%w: target %s is unknown", preset.ErrInvalidTarget, st.ElementID)
 		}
 	}
 	return nil

@@ -26,15 +26,23 @@ WHERE p.id = @id;
 
 -- name: LockStepTargets :many
 -- Sperrt die Ziel-Elemente und ihre Geräte (FOR SHARE, in fester Reihenfolge) gegen
--- gleichzeitiges Löschen und liefert sie samt deleted_at. DeleteDevice und DeleteGroup sperren
+-- gleichzeitiges Löschen und liefert die vorhandenen. DeleteDevice und DeleteGroup sperren
 -- Gerät bzw. Gruppe FOR UPDATE; wer zuerst sperrt, sieht danach das Ergebnis des anderen.
 WITH t AS (
   SELECT e.id, e.device_id FROM element e WHERE e.id = ANY (@ids::uuid[])
 )
-SELECT e.id, e.device_id, e.deleted_at
+SELECT e.id
 FROM element e
 WHERE e.id IN (SELECT t.id FROM t UNION SELECT t.device_id FROM t WHERE t.device_id IS NOT NULL)
 ORDER BY e.id
+FOR SHARE;
+
+-- name: LockStepSources :exec
+-- Sperrt die Quellen der Ziel-Elemente (FOR SHARE) gegen gleichzeitiges DeleteSource.
+SELECT s.id
+FROM device_source s
+WHERE s.id IN (SELECT e.source_id FROM element e WHERE e.id = ANY (@ids::uuid[]))
+ORDER BY s.id
 FOR SHARE;
 
 -- name: CreatePresetRow :exec

@@ -21,7 +21,7 @@ WITH r AS (
     $2::uuid, $3::text, $4::boolean, $5::severity, $6, $7, $8, $9,
     $10::text, $11::rule_op, $12::jsonb, $13, $14, $15, $16, $17::int
   )
-  RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
+  RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
 SELECT $1::uuid, 'create', 'rule', r.id, to_jsonb(r) FROM r
@@ -72,7 +72,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) error {
 
 const deleteRule = `-- name: DeleteRule :execrows
 WITH r AS (
-  DELETE FROM rule WHERE rule.id = $2::uuid RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
+  DELETE FROM rule WHERE rule.id = $2::uuid RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
 SELECT $1::uuid, 'delete', 'rule', r.id, to_jsonb(r) FROM r
@@ -93,7 +93,7 @@ func (q *Queries) DeleteRule(ctx context.Context, arg DeleteRuleParams) (int64, 
 }
 
 const listRules = `-- name: ListRules :many
-SELECT id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at FROM rule
+SELECT id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at FROM rule
 ORDER BY id
 `
 
@@ -124,6 +124,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]Rule, error) {
 			&i.WhenValue,
 			&i.ClearValue,
 			&i.HoldSeconds,
+			&i.ClearHoldSeconds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -139,7 +140,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]Rule, error) {
 
 const updateRule = `-- name: UpdateRule :execrows
 WITH before AS (
-  SELECT id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at FROM rule WHERE id = $2::uuid
+  SELECT id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at FROM rule WHERE id = $2::uuid
 ), r AS (
   UPDATE rule
   SET name             = $3::text,
@@ -159,7 +160,7 @@ WITH before AS (
       hold_seconds     = $17::int,
       updated_at       = now()
   WHERE rule.id = $2::uuid
-  RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
+  RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
 SELECT $1::uuid, 'update', 'rule', r.id, to_jsonb(before), to_jsonb(r)

@@ -40,7 +40,7 @@ func TestDeleteGroup(t *testing.T) {
 	}{
 		{`INSERT INTO rule (id, name, fact, op, value, scope_element_id) VALUES ($1, 'Signal', 'signal_present', 'eq', 'true', $2)`, []any{boxRule, box}},
 		{`INSERT INTO rule (id, name, fact, op, value, scope_element_id) VALUES ($1, 'Da', 'present', 'eq', 'true', $2)`, []any{stageRule, stage}},
-		{`INSERT INTO finding (element_id, origin, rule_id, code, severity, raised_at) VALUES ($1, 'rule', $2, 'rule.violated', 'error', now())`, []any{port, boxRule}},
+		{`INSERT INTO finding (element_id, element_path, origin, rule_id, code, severity, raised_at) VALUES ($1, 'X8 / SDI 1', 'rule', $2, 'rule.violated', 'error', now())`, []any{port, boxRule}},
 		{`INSERT INTO role (id, name) VALUES ($1, 'Operator')`, []any{role}},
 		{`INSERT INTO permission_grant (role_id, permission, scope_element_id) VALUES ($1, 'operate', $2)`, []any{role, box}},
 		{`INSERT INTO forward_target (name, kind, events, scope_element_id) VALUES ('hook', 'webhook', '{}', $1)`, []any{box}},
@@ -55,16 +55,15 @@ func TestDeleteGroup(t *testing.T) {
 		t.Fatalf("DeleteGroup: %v", err)
 	}
 
-	if e := element(t, q, box); e.DeletedAt == nil {
-		t.Fatalf("group = %+v, want deleted_at set", e)
-	}
 	checks := []struct {
 		name string
 		sql  string
 		args []any
 		want int
 	}{
+		{"group deleted", `SELECT count(*) FROM element WHERE id = $1`, []any{box}, 0},
 		{"memberships removed in both directions", `SELECT count(*) FROM element_link WHERE from_id = $1 OR to_id = $1`, []any{box}, 0},
+		{"member kept", `SELECT count(*) FROM element WHERE id = $1`, []any{port}, 1},
 		{"rule of group deleted", `SELECT count(*) FROM rule WHERE id = $1`, []any{boxRule}, 0},
 		{"rule of parent group kept", `SELECT count(*) FROM rule WHERE id = $1`, []any{stageRule}, 1},
 		{"finding at member withdrawn", `SELECT count(*) FROM finding WHERE cleared_at IS NOT NULL AND details->>'cleared_reason' = 'rule_deleted'`, nil, 1},
@@ -77,8 +76,8 @@ func TestDeleteGroup(t *testing.T) {
 			t.Errorf("%s: count = %d, %v; want %d", c.name, got, err, c.want)
 		}
 	}
-	if err := s.DeleteGroup(ctx, uuid.Nil, box); err != nil {
-		t.Fatalf("DeleteGroup again: %v", err)
+	if err := s.DeleteGroup(ctx, uuid.Nil, box); !errors.Is(err, inventory.ErrNotFound) {
+		t.Fatalf("DeleteGroup again = %v, want ErrNotFound", err)
 	}
 }
 

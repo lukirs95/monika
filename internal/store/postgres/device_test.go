@@ -34,29 +34,79 @@ func TestDeleteDevice(t *testing.T) {
 		t.Fatalf("DeleteDevice: %v", err)
 	}
 
-	if e := element(t, q, device); e.DeletedAt == nil || e.Monitored {
-		t.Fatalf("device = %+v, want deleted_at set and not monitored", e)
+	// Hart gelöscht: Gerät, Quelle, Zugang, Elemente und Links sind weg, die Gruppe bleibt.
+	counts := []struct {
+		name string
+		sql  string
+		want int
+	}{
+		{"elements", `SELECT count(*) FROM element WHERE kind <> 'group'`, 0},
+		{"sources", `SELECT count(*) FROM device_source`, 0},
+		{"links", `SELECT count(*) FROM element_link`, 0},
+		{"group kept", `SELECT count(*) FROM element WHERE kind = 'group'`, 1},
 	}
-	sources, err := q.ListDeviceSources(ctx)
-	if err != nil || len(sources) != 1 || sources[0].Enabled {
-		t.Fatalf("ListDeviceSources = %+v, %v; want source disabled", sources, err)
+	for _, c := range counts {
+		if got := count(t, pool, c.sql); got != c.want {
+			t.Errorf("%s: count = %d, want %d", c.name, got, c.want)
+		}
 	}
-	// Das Element verschwindet; sein eigenes monitored bleibt, stillgelegt ist es über das Gerät.
-	if e := element(t, q, port); e.Present || !e.Monitored {
-		t.Fatalf("element = %+v, want missing with own monitored flag kept", e)
-	}
-	links, err := q.ListElementLinks(ctx)
-	if err != nil || len(links) != 0 {
-		t.Fatalf("ListElementLinks = %+v, %v; want group membership removed", links, err)
-	}
-
-	// Quellen gelöschter Geräte lassen sich nicht wieder aktivieren.
+	// Eine Quelle des gelöschten Geräts gibt es nicht mehr.
 	n, err := q.UpdateDeviceSource(ctx, db.UpdateDeviceSourceParams{ID: source, Config: json.RawMessage(`{}`), Enabled: true})
 	if err != nil || n != 0 {
 		t.Fatalf("UpdateDeviceSource = %d, %v; want 0, nil", n, err)
 	}
-	if err := postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device); err != nil {
-		t.Fatalf("DeleteDevice again: %v", err)
+	if err := postgres.New(pool).DeleteDevice(ctx, uuid.Nil, device); !errors.Is(err, inventory.ErrNotFound) {
+		t.Fatalf("DeleteDevice again = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteSource(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	q := db.New(pool)
+	s := postgres.New(pool)
+
+	device, xlink := newDeviceWithSource(t, q, "videoxlink")
+	ipmi := newID()
+	newSource(t, q, device, ipmi, "ipmi")
+	port, err := upsert(ctx, q, driverElement(device, xlink, "sdi/1"))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	fan, err := upsert(ctx, q, driverElement(device, ipmi, "fan/1"))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO finding (element_id, element_path, origin, code, severity, raised_at) VALUES ($1, 'X8 / SDI 1', 'device', 'los', 'error', now())`,
+		port); err != nil {
+		t.Fatalf("insert finding: %v", err)
+	}
+
+	if err := s.DeleteSource(ctx, uuid.Nil, xlink); err != nil {
+		t.Fatalf("DeleteSource: %v", err)
+	}
+
+	checks := []struct {
+		name string
+		sql  string
+		want int
+	}{
+		{"source deleted", `SELECT count(*) FROM device_source WHERE id = '` + xlink.String() + `'`, 0},
+		{"its elements deleted", `SELECT count(*) FROM element WHERE id = '` + port.String() + `'`, 0},
+		{"other source kept", `SELECT count(*) FROM element WHERE id = '` + fan.String() + `'`, 1},
+		{"device kept", `SELECT count(*) FROM element WHERE id = '` + device.String() + `'`, 1},
+		{"finding kept as history", `SELECT count(*) FROM finding WHERE details->>'cleared_reason' = 'deleted' AND element_path = 'X8 / SDI 1'`, 1},
+		{"audit entry", `SELECT count(*) FROM audit_log WHERE verb = 'delete' AND object_type = 'device_source' AND object_id = '` + xlink.String() + `'`, 1},
+	}
+	for _, c := range checks {
+		if got := count(t, pool, c.sql); got != c.want {
+			t.Errorf("%s: count = %d, want %d", c.name, got, c.want)
+		}
+	}
+	if err := s.DeleteSource(ctx, uuid.Nil, xlink); !errors.Is(err, inventory.ErrNotFound) {
+		t.Fatalf("DeleteSource again = %v, want ErrNotFound", err)
 	}
 }
 
@@ -86,8 +136,8 @@ func TestDeleteDeviceUsedByPreset(t *testing.T) {
 	if !errors.As(err, &inUse) || len(inUse.Presets) != 1 || inUse.Presets[0].ID != preset {
 		t.Fatalf("DeleteDevice = %v, want InUseError naming preset %s", err, preset)
 	}
-	if e := element(t, q, port); !e.Monitored {
-		t.Fatalf("element %s no longer monitored after refused delete", port)
+	if e := element(t, q, port); !e.Present {
+		t.Fatalf("element %s gone after refused delete", port)
 	}
 }
 
@@ -118,7 +168,7 @@ func TestDeleteDeviceRemovesScopedConfig(t *testing.T) {
 	}{
 		{`INSERT INTO rule (id, name, fact, op, value, scope_element_id) VALUES ($1, 'Signal', 'signal_present', 'eq', 'true', $2)`, []any{scoped, port}},
 		{`INSERT INTO rule (id, name, fact, op, value) VALUES ($1, 'Temperatur', 'vxl.cpu_temp', 'lte', '80')`, []any{global}},
-		{`INSERT INTO finding (element_id, origin, rule_id, code, severity, raised_at) VALUES ($1, 'rule', $2, 'rule.violated', 'error', now())`, []any{port, scoped}},
+		{`INSERT INTO finding (element_id, element_path, origin, rule_id, code, severity, raised_at) VALUES ($1, 'X8 / SDI 1', 'rule', $2, 'rule.violated', 'error', now())`, []any{port, scoped}},
 		{`INSERT INTO role (id, name) VALUES ($1, 'Operator')`, []any{role}},
 		{`INSERT INTO permission_grant (role_id, permission, scope_element_id) VALUES ($1, 'operate', $2)`, []any{role, device}},
 		{`INSERT INTO forward_target (name, kind, events, scope_element_id) VALUES ('hook', 'webhook', '{}', $1)`, []any{port}},
@@ -144,7 +194,7 @@ func TestDeleteDeviceRemovesScopedConfig(t *testing.T) {
 		{"permission grant deleted", `SELECT count(*) FROM permission_grant`, nil, 0},
 		{"forward target deleted", `SELECT count(*) FROM forward_target`, nil, 0},
 		{"no active finding", `SELECT count(*) FROM finding WHERE cleared_at IS NULL`, nil, 0},
-		{"finding withdrawn", `SELECT count(*) FROM finding WHERE details->>'cleared_reason' = 'device_deleted' AND rule_id IS NULL`, nil, 1},
+		{"finding withdrawn", `SELECT count(*) FROM finding WHERE details->>'cleared_reason' = 'deleted' AND rule_id IS NULL`, nil, 1},
 	}
 	for _, c := range checks {
 		var got int

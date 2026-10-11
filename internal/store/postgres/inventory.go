@@ -30,7 +30,7 @@ func (s *Store) Load(ctx context.Context) (inventory.Snapshot, error) {
 			return fmt.Errorf("list links: %w", err)
 		}
 		snap = inventory.Snapshot{
-			Sources:  mapSlice(sources, toSource),
+			Sources:  mapSlice(sources, toSourceRow),
 			Elements: mapSlice(elements, toElement),
 			Links:    mapSlice(links, toLink),
 		}
@@ -56,6 +56,16 @@ func (s *Store) ApplyDiscovery(ctx context.Context, d inventory.Discovery) ([]uu
 		}
 		if err := upsertElements(ctx, q, d.Upsert); err != nil {
 			return err
+		}
+		if d.GlobalRef != nil {
+			if _, err := q.SetAccessGlobalRef(ctx, db.SetAccessGlobalRefParams{SourceID: d.SourceID, GlobalRef: nullable(*d.GlobalRef)}); err != nil {
+				return fmt.Errorf("set access global_ref: %w", err)
+			}
+			if *d.GlobalRef != "" {
+				if err := resolveAccessRef(ctx, q, d.SourceID, *d.GlobalRef); err != nil {
+					return err
+				}
+			}
 		}
 		// Erst löschen, dann einfügen: ein ersetzter Link kann dieselben Endpunkte haben.
 		if len(d.RemoveLinks) > 0 {
@@ -135,37 +145,29 @@ func (s *Store) CreateDevice(ctx context.Context, actor uuid.UUID, e inventory.E
 
 // DeleteDevice sperrt das Gerät und prüft die Presets in derselben Transaktion, damit
 // zwischen Prüfung und Löschen kein Preset-Schritt entstehen kann. Danach werden die aktiven
-// Befunde zurückgezogen, die Konfiguration mit diesem Geltungsbereich gelöscht und das Gerät
-// weich gelöscht.
+// Befunde zurückgezogen, die Konfiguration an seinen Elementen mit Audit gelöscht und das
+// Gerät hart gelöscht; Quellen, Elemente und Links folgen per CASCADE.
 func (s *Store) DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
-		deletedAt, err := q.LockDevice(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := q.LockDevice(ctx, id); errors.Is(err, pgx.ErrNoRows) {
 			return inventory.ErrNotFound
-		}
-		if err != nil {
+		} else if err != nil {
 			return fmt.Errorf("lock device: %w", err)
 		}
-		if deletedAt != nil {
-			return nil
-		}
-
 		presets, err := q.ListPresetsUsingDevice(ctx, id)
 		if err != nil {
 			return fmt.Errorf("list presets using device: %w", err)
 		}
 		if len(presets) > 0 {
-			return &inventory.InUseError{Presets: mapSlice(presets, func(p db.ListPresetsUsingDeviceRow) inventory.PresetRef {
-				return inventory.PresetRef{ID: p.ID, Name: p.Name}
-			})}
+			return inUse(presets, func(p db.ListPresetsUsingDeviceRow) (uuid.UUID, string) { return p.ID, p.Name })
 		}
-
-		if _, err := q.WithdrawDeviceFindings(ctx, id); err != nil {
-			return fmt.Errorf("withdraw findings: %w", err)
+		ids, err := q.ListDeviceElementIDs(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list device elements: %w", err)
 		}
-		if err := q.DeleteDeviceScopedConfig(ctx, db.DeleteDeviceScopedConfigParams{ActorID: nullable(actor), DeviceID: id}); err != nil {
-			return fmt.Errorf("delete scoped config: %w", err)
+		if err := clearElements(ctx, q, actor, ids); err != nil {
+			return err
 		}
 		if err := q.DeleteDevice(ctx, db.DeleteDeviceParams{ActorID: nullable(actor), DeviceID: id}); err != nil {
 			return fmt.Errorf("delete device: %w", err)
@@ -174,40 +176,96 @@ func (s *Store) DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID)
 	})
 }
 
+// DeleteSource arbeitet wie DeleteDevice, für die Elemente einer Quelle.
+func (s *Store) DeleteSource(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := db.New(tx)
+		if _, err := q.LockSource(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+			return inventory.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("lock source: %w", err)
+		}
+		presets, err := q.ListPresetsUsingSource(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list presets using source: %w", err)
+		}
+		if len(presets) > 0 {
+			return inUse(presets, func(p db.ListPresetsUsingSourceRow) (uuid.UUID, string) { return p.ID, p.Name })
+		}
+		ids, err := q.ListSourceElementIDs(ctx, id)
+		if err != nil {
+			return fmt.Errorf("list source elements: %w", err)
+		}
+		if err := clearElements(ctx, q, actor, ids); err != nil {
+			return err
+		}
+		if err := q.DeleteSource(ctx, db.DeleteSourceParams{ActorID: nullable(actor), SourceID: id}); err != nil {
+			return fmt.Errorf("delete source: %w", err)
+		}
+		return nil
+	})
+}
+
 // DeleteGroup arbeitet wie DeleteDevice: Sperre, Prüfung der Presets, Befunde der Regeln mit
-// diesem Geltungsbereich zurückziehen, dann weich löschen.
+// diesem Geltungsbereich zurückziehen, Konfiguration und Mitgliedschaften mit Audit löschen,
+// dann die Gruppe hart löschen.
 func (s *Store) DeleteGroup(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
-		deletedAt, err := q.LockGroup(ctx, id)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := q.LockGroup(ctx, id); errors.Is(err, pgx.ErrNoRows) {
 			return inventory.ErrNotFound
-		}
-		if err != nil {
+		} else if err != nil {
 			return fmt.Errorf("lock group: %w", err)
 		}
-		if deletedAt != nil {
-			return nil
-		}
-
 		presets, err := q.ListPresetsUsingGroup(ctx, id)
 		if err != nil {
 			return fmt.Errorf("list presets using group: %w", err)
 		}
 		if len(presets) > 0 {
-			return &inventory.InUseError{Presets: mapSlice(presets, func(p db.ListPresetsUsingGroupRow) inventory.PresetRef {
-				return inventory.PresetRef{ID: p.ID, Name: p.Name}
-			})}
+			return inUse(presets, func(p db.ListPresetsUsingGroupRow) (uuid.UUID, string) { return p.ID, p.Name })
 		}
-
 		if _, err := q.WithdrawGroupRuleFindings(ctx, id); err != nil {
 			return fmt.Errorf("withdraw rule findings: %w", err)
+		}
+		if err := q.DeleteScopedConfig(ctx, db.DeleteScopedConfigParams{ActorID: nullable(actor), ElementIds: []uuid.UUID{id}}); err != nil {
+			return fmt.Errorf("delete scoped config: %w", err)
 		}
 		if err := q.DeleteGroup(ctx, db.DeleteGroupParams{ActorID: nullable(actor), GroupID: id}); err != nil {
 			return fmt.Errorf("delete group: %w", err)
 		}
 		return nil
 	})
+}
+
+// clearElements zieht die aktiven Befunde an den Elementen zurück und löscht die Konfiguration,
+// die an ihnen hängt, mit Audit; danach können die Elemente hart gelöscht werden.
+func clearElements(ctx context.Context, q *db.Queries, actor uuid.UUID, ids []uuid.UUID) error {
+	if _, err := q.WithdrawFindings(ctx, ids); err != nil {
+		return fmt.Errorf("withdraw findings: %w", err)
+	}
+	if err := q.DeleteScopedConfig(ctx, db.DeleteScopedConfigParams{ActorID: nullable(actor), ElementIds: ids}); err != nil {
+		return fmt.Errorf("delete scoped config: %w", err)
+	}
+	return nil
+}
+
+func inUse[T any](rows []T, ref func(T) (uuid.UUID, string)) error {
+	return &inventory.InUseError{Presets: mapSlice(rows, func(r T) inventory.PresetRef {
+		id, name := ref(r)
+		return inventory.PresetRef{ID: id, Name: name}
+	})}
+}
+
+// resolveAccessRef löst unaufgelöste Links auf das Zugangs-Element der Quelle auf.
+func resolveAccessRef(ctx context.Context, q *db.Queries, sourceID uuid.UUID, globalRef string) error {
+	accessID, err := q.AccessElementID(ctx, sourceID)
+	if err != nil {
+		return fmt.Errorf("access element of source %s: %w", sourceID, err)
+	}
+	if _, err := q.ResolveLinkRef(ctx, db.ResolveLinkRefParams{GlobalRef: globalRef, ElementID: accessID}); err != nil {
+		return fmt.Errorf("resolve links to %s: %w", globalRef, err)
+	}
+	return nil
 }
 
 func (s *Store) CreateSource(ctx context.Context, actor uuid.UUID, src inventory.Source, accessID uuid.UUID) error {
@@ -239,20 +297,6 @@ func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory
 
 func (s *Store) CreateGroup(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
 	return s.q.CreateGroup(ctx, db.CreateGroupParams{ActorID: nullable(actor), ID: e.ID, Label: nullable(e.Label), Notes: nullable(e.Notes)})
-}
-
-func (s *Store) CreatePlannedElement(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
-	return s.q.CreatePlannedElement(ctx, db.CreatePlannedElementParams{
-		ActorID:    nullable(actor),
-		ID:         e.ID,
-		Kind:       string(e.Kind),
-		ParentID:   e.ParentID,
-		DeviceID:   e.DeviceID,
-		SourceID:   e.SourceID,
-		ExternalID: e.ExternalID,
-		Label:      nullable(e.Label),
-		Notes:      nullable(e.Notes),
-	})
 }
 
 func (s *Store) UpdateUserFields(ctx context.Context, actor uuid.UUID, id uuid.UUID, f inventory.UserFields) error {
@@ -327,13 +371,13 @@ func toElement(e db.Element) inventory.Element {
 		Actions:         e.Actions,
 		CriticalActions: e.CriticalActions,
 		Settings:        e.Settings,
+		Params:          e.Params,
 		Present:         e.Present,
 		FirstSeenAt:     value(e.FirstSeenAt),
 		LastSeenAt:      value(e.LastSeenAt),
 		Label:           value(e.Label),
 		Notes:           value(e.Notes),
 		Monitored:       e.Monitored,
-		DeletedAt:       value(e.DeletedAt),
 	}
 }
 
@@ -354,7 +398,14 @@ func toUpsertParams(e inventory.Element) db.UpsertDriverElementParams {
 		Actions:         nonNil(e.Actions),
 		CriticalActions: nonNil(e.CriticalActions),
 		Settings:        e.Settings,
+		Params:          e.Params,
 	}
+}
+
+func toSourceRow(r db.ListDeviceSourcesRow) inventory.Source {
+	s := toSource(r.DeviceSource)
+	s.AccessElementID = r.AccessElementID
+	return s
 }
 
 func toSource(s db.DeviceSource) inventory.Source {

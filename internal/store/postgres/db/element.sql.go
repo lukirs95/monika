@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,7 +15,7 @@ const createGroup = `-- name: CreateGroup :exec
 WITH e AS (
   INSERT INTO element (id, kind, label, notes)
   VALUES ($2::uuid, 'group', $3, $4)
-  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
 SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
@@ -39,74 +38,12 @@ func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) error 
 	return err
 }
 
-const createPlannedElement = `-- name: CreatePlannedElement :exec
-WITH e AS (
-  INSERT INTO element (id, kind, parent_id, device_id, source_id, external_id, label, notes, present)
-  VALUES ($2::uuid, $3::text, $4::uuid, $5::uuid, $6::uuid, $7::text, $8, $9, false)
-  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
-)
-INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
-SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
-`
-
-type CreatePlannedElementParams struct {
-	ActorID    *uuid.UUID
-	ID         uuid.UUID
-	Kind       string
-	ParentID   uuid.UUID
-	DeviceID   uuid.UUID
-	SourceID   uuid.UUID
-	ExternalID string
-	Label      *string
-	Notes      *string
-}
-
-// Vom User vorab angelegtes Treiber-Element, das der Treiber noch nie gesehen hat.
-func (q *Queries) CreatePlannedElement(ctx context.Context, arg CreatePlannedElementParams) error {
-	_, err := q.db.Exec(ctx, createPlannedElement,
-		arg.ActorID,
-		arg.ID,
-		arg.Kind,
-		arg.ParentID,
-		arg.DeviceID,
-		arg.SourceID,
-		arg.ExternalID,
-		arg.Label,
-		arg.Notes,
-	)
-	return err
-}
-
 const deleteGroup = `-- name: DeleteGroup :exec
-WITH before AS (
-  SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element WHERE id = $2::uuid
-), rules AS (
-  DELETE FROM rule WHERE scope_element_id = $2::uuid RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
-), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id = $2::uuid RETURNING id, role_id, permission, scope_element_id, created_at
-), forwards AS (
-  DELETE FROM forward_target WHERE scope_element_id = $2::uuid RETURNING id, name, kind, enabled, config, secret_id, events, min_severity, scope_element_id, last_sent_at, last_error, created_at, updated_at
-), memberships AS (
-  DELETE FROM element_link
-  WHERE type = 'member' AND (from_id = $2::uuid OR to_id = $2::uuid)
-  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
-), upd AS (
-  UPDATE element
-  SET deleted_at = now(), updated_at = now()
-  WHERE element.id = $2::uuid
-  RETURNING element.id, element.kind, element.parent_id, element.device_id, element.source_id, element.external_id, element.global_ref, element.transport, element.direction, element.name, element.attributes, element.position, element.actions, element.critical_actions, element.settings, element.present, element.first_seen_at, element.last_seen_at, element.label, element.notes, element.monitored, element.deleted_at, element.created_at, element.updated_at
+WITH del AS (
+  DELETE FROM element WHERE id = $2::uuid AND kind = 'group' RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at
 )
-INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
-SELECT $1::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
-FROM upd JOIN before ON before.id = upd.id
-UNION ALL
-SELECT $1::uuid, 'delete', 'rule', rules.id, to_jsonb(rules), NULL FROM rules
-UNION ALL
-SELECT $1::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants), NULL FROM grants
-UNION ALL
-SELECT $1::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards), NULL FROM forwards
-UNION ALL
-SELECT $1::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL FROM memberships
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'element', del.id, to_jsonb(del) FROM del
 `
 
 type DeleteGroupParams struct {
@@ -114,10 +51,8 @@ type DeleteGroupParams struct {
 	GroupID uuid.UUID
 }
 
-// Weiches Löschen: Regeln, Rechte und Weiterleitungen mit dem Geltungsbereich der Gruppe und
-// alle Mitgliedschaften in beide Richtungen entfernen. Vorher die Befunde zurückziehen.
-// Nur über postgres.Store.DeleteGroup aufrufen (Sperre und Prüfung der Presets).
-// Audit: ein Eintrag für die Gruppe und je einer pro mitgelöschtem Objekt.
+// Löscht die Gruppe hart. Regeln, Rechte, Weiterleitungen und Mitgliedschaften entfernt vorher
+// DeleteScopedConfig mit Audit. Nur über postgres.Store.DeleteGroup aufrufen.
 func (q *Queries) DeleteGroup(ctx context.Context, arg DeleteGroupParams) error {
 	_, err := q.db.Exec(ctx, deleteGroup, arg.ActorID, arg.GroupID)
 	return err
@@ -141,7 +76,7 @@ WITH seen AS (
   RETURNING element.id, element.present, seen.was_present
 ), audit AS (
   INSERT INTO audit_log (verb, object_type, object_id, before, after)
-  SELECT 'update', 'element', updated.id,
+  SELECT CASE WHEN updated.present THEN 'appear' ELSE 'disappear' END, 'element', updated.id,
          jsonb_build_object('present', updated.was_present), jsonb_build_object('present', updated.present)
   FROM updated
   WHERE updated.present IS DISTINCT FROM updated.was_present
@@ -159,8 +94,8 @@ type FinishDiscoveryParams struct {
 // gesehen (last_seen_at), alle übrigen der Quelle verschwinden (present = false).
 // Das Zugangs-Element (external_id NULL) gilt immer als gesehen; sein last_seen_at zeigt
 // die letzte vollständige Discovery.
-// Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
-// Audit (actor NULL): jeder Wechsel von present, in beide Richtungen.
+// Treiber-Elemente werden nie gelöscht; kommen sie zurück, sind Label und Gruppen wieder da.
+// Audit (actor NULL): jeder Wechsel von present, als disappear bzw. appear.
 // Liefert die IDs der in diesem Lauf verschwundenen Elemente.
 func (q *Queries) FinishDiscovery(ctx context.Context, arg FinishDiscoveryParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, finishDiscovery, arg.SeenIds, arg.SourceID)
@@ -183,7 +118,7 @@ func (q *Queries) FinishDiscovery(ctx context.Context, arg FinishDiscoveryParams
 }
 
 const listElements = `-- name: ListElements :many
-SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element
+SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at FROM element
 ORDER BY id
 `
 
@@ -213,13 +148,13 @@ func (q *Queries) ListElements(ctx context.Context) ([]Element, error) {
 			&i.Actions,
 			&i.CriticalActions,
 			&i.Settings,
+			&i.Params,
 			&i.Present,
 			&i.FirstSeenAt,
 			&i.LastSeenAt,
 			&i.Label,
 			&i.Notes,
 			&i.Monitored,
-			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -268,18 +203,18 @@ func (q *Queries) ListPresetsUsingGroup(ctx context.Context, groupID uuid.UUID) 
 }
 
 const lockGroup = `-- name: LockGroup :one
-SELECT deleted_at
+SELECT id
 FROM element
 WHERE id = $1 AND kind = 'group'
 FOR UPDATE
 `
 
-// Sperrt das Gruppen-Element bis zum Ende der Transaktion; liefert deleted_at.
-func (q *Queries) LockGroup(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+// Sperrt das Gruppen-Element bis zum Ende der Transaktion.
+func (q *Queries) LockGroup(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, lockGroup, id)
-	var deleted_at *time.Time
-	err := row.Scan(&deleted_at)
-	return deleted_at, err
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const updateElementUserFields = `-- name: UpdateElementUserFields :execrows

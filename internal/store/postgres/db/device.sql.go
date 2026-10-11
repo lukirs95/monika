@@ -8,16 +8,26 @@ package db
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/google/uuid"
 )
+
+const accessElementID = `-- name: AccessElementID :one
+SELECT id FROM element WHERE source_id = $1::uuid AND kind = 'access'
+`
+
+func (q *Queries) AccessElementID(ctx context.Context, sourceID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, accessElementID, sourceID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
 
 const createDevice = `-- name: CreateDevice :exec
 WITH e AS (
   INSERT INTO element (id, kind, device_id, label, notes)
   VALUES ($2::uuid, 'device', $2::uuid, $3, $4)
-  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at
+  RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, after)
 SELECT $1::uuid, 'create', 'element', e.id, to_jsonb(e) FROM e
@@ -46,7 +56,7 @@ WITH src AS (
   INSERT INTO device_source (id, device_id, driver, address, config, secret_id, enabled)
   SELECT $2::uuid, e.id, $3::text, $4, $5::jsonb, $6, $7::boolean
   FROM element e
-  WHERE e.id = $8::uuid AND e.kind = 'device' AND e.deleted_at IS NULL
+  WHERE e.id = $8::uuid AND e.kind = 'device'
   RETURNING id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at
 ), access AS (
   INSERT INTO element (id, kind, device_id, parent_id, source_id, name)
@@ -70,7 +80,7 @@ type CreateDeviceSourceParams struct {
 }
 
 // Legt die Quelle und ihr Zugangs-Element (kind = access) in einem Statement an.
-// Ist das Gerät unbekannt oder gelöscht, wird nichts angelegt (0 Zeilen).
+// Ist das Gerät unbekannt, wird nichts angelegt (0 Zeilen).
 func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createDeviceSource,
 		arg.ActorID,
@@ -90,32 +100,11 @@ func (q *Queries) CreateDeviceSource(ctx context.Context, arg CreateDeviceSource
 }
 
 const deleteDevice = `-- name: DeleteDevice :exec
-WITH before AS (
-  SELECT id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, present, first_seen_at, last_seen_at, label, notes, monitored, deleted_at, created_at, updated_at FROM element WHERE id = $2::uuid
-), sources AS (
-  UPDATE device_source
-  SET enabled = false, updated_at = now()
-  WHERE device_id = $2::uuid
-), memberships AS (
-  DELETE FROM element_link l
-  USING element e
-  WHERE l.type = 'member' AND l.to_id = e.id AND e.device_id = $2::uuid
-  RETURNING l.id, l.type, l.source_id, l.from_id, l.from_ref, l.to_id, l.to_ref, l.position, l.label, l.created_at
-), upd AS (
-  UPDATE element
-  SET present    = false,
-      monitored  = CASE WHEN element.id = $2::uuid THEN false ELSE element.monitored END,
-      deleted_at = CASE WHEN element.id = $2::uuid THEN now() ELSE element.deleted_at END,
-      updated_at = now()
-  WHERE element.device_id = $2::uuid
-  RETURNING element.id, element.kind, element.parent_id, element.device_id, element.source_id, element.external_id, element.global_ref, element.transport, element.direction, element.name, element.attributes, element.position, element.actions, element.critical_actions, element.settings, element.present, element.first_seen_at, element.last_seen_at, element.label, element.notes, element.monitored, element.deleted_at, element.created_at, element.updated_at
+WITH del AS (
+  DELETE FROM element WHERE id = $2::uuid AND kind = 'device' RETURNING id, kind, parent_id, device_id, source_id, external_id, global_ref, transport, direction, name, attributes, position, actions, critical_actions, settings, params, present, first_seen_at, last_seen_at, label, notes, monitored, created_at, updated_at
 )
-INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
-SELECT $1::uuid, 'delete', 'element', upd.id, to_jsonb(before), to_jsonb(upd)
-FROM upd JOIN before ON before.id = upd.id
-UNION ALL
-SELECT $1::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships), NULL
-FROM memberships
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'element', del.id, to_jsonb(del) FROM del
 `
 
 type DeleteDeviceParams struct {
@@ -123,26 +112,25 @@ type DeleteDeviceParams struct {
 	DeviceID uuid.UUID
 }
 
-// Weiches Löschen: Quellen deaktivieren, alle Elemente des Geräts verschwinden (present = false),
-// das Gerät wird stillgelegt (monitored vererbt sich) und aus allen Gruppen entfernt.
-// Die Zeilen bleiben, damit Läufe, Befunde und Audit lesbar bleiben.
-// Audit: ein Eintrag für das Gerät (Folgen wie present = false stehen nur dort) und je einer
-// pro entfernter Mitgliedschaft.
-// Nur über postgres.Store.DeleteDevice aufrufen (Sperre und Prüfung der Presets).
+// Löscht das Gerät hart; seine Quellen, Elemente, Links und element_state folgen per CASCADE.
+// Audit: ein Eintrag für das Gerät; die mitgelöschten Quellen und Elemente stehen nur dort.
+// Nur über postgres.Store.DeleteDevice aufrufen (Sperre, Presets, Befunde, Konfiguration).
 func (q *Queries) DeleteDevice(ctx context.Context, arg DeleteDeviceParams) error {
 	_, err := q.db.Exec(ctx, deleteDevice, arg.ActorID, arg.DeviceID)
 	return err
 }
 
-const deleteDeviceScopedConfig = `-- name: DeleteDeviceScopedConfig :exec
-WITH device_elements AS (
-  SELECT e.id FROM element e WHERE e.device_id = $2::uuid
-), rules AS (
-  DELETE FROM rule WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, created_at, updated_at
+const deleteScopedConfig = `-- name: DeleteScopedConfig :exec
+WITH rules AS (
+  DELETE FROM rule WHERE scope_element_id = ANY ($2::uuid[]) RETURNING id, name, enabled, severity, scope_element_id, match_kind, match_transport, match_driver, fact, op, value, when_fact, when_op, when_value, clear_value, hold_seconds, clear_hold_seconds, created_at, updated_at
 ), grants AS (
-  DELETE FROM permission_grant WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, role_id, permission, scope_element_id, created_at
+  DELETE FROM permission_grant WHERE scope_element_id = ANY ($2::uuid[]) RETURNING id, role_id, permission, scope_element_id, created_at
 ), forwards AS (
-  DELETE FROM forward_target WHERE scope_element_id IN (SELECT id FROM device_elements) RETURNING id, name, kind, enabled, config, secret_id, events, min_severity, scope_element_id, last_sent_at, last_error, created_at, updated_at
+  DELETE FROM forward_target WHERE scope_element_id = ANY ($2::uuid[]) RETURNING id, name, kind, enabled, config, secret_id, events, min_severity, scope_element_id, last_sent_at, last_error, created_at, updated_at
+), memberships AS (
+  DELETE FROM element_link
+  WHERE type = 'member' AND (from_id = ANY ($2::uuid[]) OR to_id = ANY ($2::uuid[]))
+  RETURNING id, type, source_id, from_id, from_ref, to_id, to_ref, position, label, created_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
 SELECT $1::uuid, 'delete', 'rule', rules.id, to_jsonb(rules) FROM rules
@@ -150,49 +138,107 @@ UNION ALL
 SELECT $1::uuid, 'delete', 'permission_grant', grants.id, to_jsonb(grants) FROM grants
 UNION ALL
 SELECT $1::uuid, 'delete', 'forward_target', forwards.id, to_jsonb(forwards) FROM forwards
+UNION ALL
+SELECT $1::uuid, 'delete', 'element_link', memberships.id, to_jsonb(memberships) FROM memberships
 `
 
-type DeleteDeviceScopedConfigParams struct {
-	ActorID  *uuid.UUID
-	DeviceID uuid.UUID
+type DeleteScopedConfigParams struct {
+	ActorID    *uuid.UUID
+	ElementIds []uuid.UUID
 }
 
-// Löscht Regeln, Rechte und Weiterleitungen, deren Geltungsbereich das Gerät oder eines seiner
-// Elemente ist; ohne ihr Ziel sind sie bedeutungslos. Vorher die Befunde zurückziehen.
-// Jedes gelöschte Objekt bekommt einen eigenen Audit-Eintrag.
-func (q *Queries) DeleteDeviceScopedConfig(ctx context.Context, arg DeleteDeviceScopedConfigParams) error {
-	_, err := q.db.Exec(ctx, deleteDeviceScopedConfig, arg.ActorID, arg.DeviceID)
+// Löscht Regeln, Rechte, Weiterleitungen und Mitgliedschaften, die an den angegebenen Elementen
+// hängen; ohne ihr Ziel sind sie bedeutungslos. Die Fremdschlüssel würden sie ohnehin löschen
+// (CASCADE); dieses Statement schreibt vorher je einen Audit-Eintrag. Vorher die Befunde
+// zurückziehen.
+func (q *Queries) DeleteScopedConfig(ctx context.Context, arg DeleteScopedConfigParams) error {
+	_, err := q.db.Exec(ctx, deleteScopedConfig, arg.ActorID, arg.ElementIds)
 	return err
 }
 
-const listDeviceSources = `-- name: ListDeviceSources :many
-SELECT id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at FROM device_source
-ORDER BY id
+const deleteSource = `-- name: DeleteSource :exec
+WITH del AS (
+  DELETE FROM device_source WHERE id = $2::uuid RETURNING id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at
+)
+INSERT INTO audit_log (actor_id, verb, object_type, object_id, before)
+SELECT $1::uuid, 'delete', 'device_source', del.id, to_jsonb(del) FROM del
 `
 
-func (q *Queries) ListDeviceSources(ctx context.Context) ([]DeviceSource, error) {
+type DeleteSourceParams struct {
+	ActorID  *uuid.UUID
+	SourceID uuid.UUID
+}
+
+// Löscht die Quelle hart; ihr Zugang, ihre Elemente und Links folgen per CASCADE.
+// Audit: ein Eintrag für die Quelle; die mitgelöschten Elemente stehen nur dort.
+// Nur über postgres.Store.DeleteSource aufrufen (Sperre, Presets, Befunde, Konfiguration).
+func (q *Queries) DeleteSource(ctx context.Context, arg DeleteSourceParams) error {
+	_, err := q.db.Exec(ctx, deleteSource, arg.ActorID, arg.SourceID)
+	return err
+}
+
+const listDeviceElementIDs = `-- name: ListDeviceElementIDs :many
+SELECT id FROM element WHERE device_id = $1::uuid
+`
+
+// Gerät, seine Zugänge und alle Treiber-Elemente.
+func (q *Queries) ListDeviceElementIDs(ctx context.Context, deviceID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDeviceElementIDs, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeviceSources = `-- name: ListDeviceSources :many
+SELECT s.id, s.device_id, s.driver, s.address, s.config, s.secret_id, s.enabled, s.vendor, s.model, s.serial, s.firmware, s.created_at, s.updated_at, a.id AS access_element_id
+FROM device_source s
+JOIN element a ON a.source_id = s.id AND a.kind = 'access'
+ORDER BY s.id
+`
+
+type ListDeviceSourcesRow struct {
+	DeviceSource    DeviceSource
+	AccessElementID uuid.UUID
+}
+
+// Mit der ID des Zugangs-Elements (genau eines pro Quelle).
+func (q *Queries) ListDeviceSources(ctx context.Context) ([]ListDeviceSourcesRow, error) {
 	rows, err := q.db.Query(ctx, listDeviceSources)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []DeviceSource
+	var items []ListDeviceSourcesRow
 	for rows.Next() {
-		var i DeviceSource
+		var i ListDeviceSourcesRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.DeviceID,
-			&i.Driver,
-			&i.Address,
-			&i.Config,
-			&i.SecretID,
-			&i.Enabled,
-			&i.Vendor,
-			&i.Model,
-			&i.Serial,
-			&i.Firmware,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.DeviceSource.ID,
+			&i.DeviceSource.DeviceID,
+			&i.DeviceSource.Driver,
+			&i.DeviceSource.Address,
+			&i.DeviceSource.Config,
+			&i.DeviceSource.SecretID,
+			&i.DeviceSource.Enabled,
+			&i.DeviceSource.Vendor,
+			&i.DeviceSource.Model,
+			&i.DeviceSource.Serial,
+			&i.DeviceSource.Firmware,
+			&i.DeviceSource.CreatedAt,
+			&i.DeviceSource.UpdatedAt,
+			&i.AccessElementID,
 		); err != nil {
 			return nil, err
 		}
@@ -239,19 +285,115 @@ func (q *Queries) ListPresetsUsingDevice(ctx context.Context, deviceID uuid.UUID
 	return items, nil
 }
 
+const listPresetsUsingSource = `-- name: ListPresetsUsingSource :many
+SELECT DISTINCT p.id, p.name
+FROM preset p
+JOIN preset_step s ON s.preset_id = p.id
+JOIN element e ON e.id = s.element_id
+WHERE e.source_id = $1::uuid
+ORDER BY p.name, p.id
+`
+
+type ListPresetsUsingSourceRow struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// Presets mit Schritten, die auf ein Element der Quelle zielen; sie blockieren das Löschen.
+func (q *Queries) ListPresetsUsingSource(ctx context.Context, sourceID uuid.UUID) ([]ListPresetsUsingSourceRow, error) {
+	rows, err := q.db.Query(ctx, listPresetsUsingSource, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPresetsUsingSourceRow
+	for rows.Next() {
+		var i ListPresetsUsingSourceRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSourceElementIDs = `-- name: ListSourceElementIDs :many
+SELECT id FROM element WHERE source_id = $1::uuid
+`
+
+// Zugang und Treiber-Elemente einer Quelle.
+func (q *Queries) ListSourceElementIDs(ctx context.Context, sourceID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listSourceElementIDs, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockDevice = `-- name: LockDevice :one
-SELECT deleted_at
+SELECT id
 FROM element
 WHERE id = $1 AND kind = 'device'
 FOR UPDATE
 `
 
-// Sperrt das Geräte-Element bis zum Ende der Transaktion; liefert deleted_at.
-func (q *Queries) LockDevice(ctx context.Context, id uuid.UUID) (*time.Time, error) {
+// Sperrt das Geräte-Element bis zum Ende der Transaktion.
+func (q *Queries) LockDevice(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, lockDevice, id)
-	var deleted_at *time.Time
-	err := row.Scan(&deleted_at)
-	return deleted_at, err
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockSource = `-- name: LockSource :one
+SELECT id
+FROM device_source
+WHERE id = $1
+FOR UPDATE
+`
+
+// Sperrt die Quelle bis zum Ende der Transaktion.
+func (q *Queries) LockSource(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockSource, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const setAccessGlobalRef = `-- name: SetAccessGlobalRef :execrows
+UPDATE element
+SET global_ref = $1, updated_at = now()
+WHERE source_id = $2::uuid AND kind = 'access'
+  AND global_ref IS DISTINCT FROM $1
+`
+
+type SetAccessGlobalRefParams struct {
+	GlobalRef *string
+	SourceID  uuid.UUID
+}
+
+// global_ref des Zugangs-Elements: die Identität des Geräts aus Sicht dieser Quelle.
+func (q *Queries) SetAccessGlobalRef(ctx context.Context, arg SetAccessGlobalRefParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAccessGlobalRef, arg.GlobalRef, arg.SourceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateDeviceSource = `-- name: UpdateDeviceSource :execrows
@@ -265,7 +407,6 @@ WITH before AS (
       enabled    = $6,
       updated_at = now()
   WHERE device_source.id = $2::uuid
-    AND device_source.device_id IN (SELECT e.id FROM element e WHERE e.kind = 'device' AND e.deleted_at IS NULL)
   RETURNING id, device_id, driver, address, config, secret_id, enabled, vendor, model, serial, firmware, created_at, updated_at
 )
 INSERT INTO audit_log (actor_id, verb, object_type, object_id, before, after)
@@ -283,7 +424,6 @@ type UpdateDeviceSourceParams struct {
 }
 
 // Treiber und Gerät einer Quelle stehen fest; sonst würden ihre Elemente den Besitzer wechseln.
-// Quellen gelöschter Geräte bleiben unverändert (0 Zeilen).
 func (q *Queries) UpdateDeviceSource(ctx context.Context, arg UpdateDeviceSourceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateDeviceSource,
 		arg.ActorID,
@@ -332,17 +472,18 @@ func (q *Queries) UpdateSourceIdentity(ctx context.Context, arg UpdateSourceIden
 	return result.RowsAffected(), nil
 }
 
-const withdrawDeviceFindings = `-- name: WithdrawDeviceFindings :execrows
+const withdrawFindings = `-- name: WithdrawFindings :execrows
 UPDATE finding
 SET cleared_at = now(),
-    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "device_deleted"}'::jsonb
+    details    = COALESCE(details, '{}'::jsonb) || '{"cleared_reason": "deleted"}'::jsonb
 WHERE cleared_at IS NULL
-  AND element_id IN (SELECT e.id FROM element e WHERE e.device_id = $1::uuid)
+  AND element_id = ANY ($1::uuid[])
 `
 
-// Zieht alle aktiven Befunde an Elementen des Geräts zurück (cleared_reason device_deleted).
-func (q *Queries) WithdrawDeviceFindings(ctx context.Context, deviceID uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, withdrawDeviceFindings, deviceID)
+// Zieht alle aktiven Befunde an den angegebenen Elementen zurück (cleared_reason deleted).
+// Die Befunde bleiben als Verlauf; element_id verweist ohne Fremdschlüssel weiter auf das Element.
+func (q *Queries) WithdrawFindings(ctx context.Context, elementIds []uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, withdrawFindings, elementIds)
 	if err != nil {
 		return 0, err
 	}

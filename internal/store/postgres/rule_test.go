@@ -32,7 +32,7 @@ func activeFinding(t *testing.T, pool *pgxpool.Pool, element, rule uuid.UUID) uu
 	t.Helper()
 	id := newID()
 	if _, err := pool.Exec(t.Context(),
-		`INSERT INTO finding (id, element_id, origin, rule_id, code, severity, raised_at) VALUES ($1, $2, 'rule', $3, 'rule.violated', 'error', now())`,
+		`INSERT INTO finding (id, element_id, element_path, origin, rule_id, code, severity, raised_at) VALUES ($1, $2, 'X8 / SDI 1', 'rule', $3, 'rule.violated', 'error', now())`,
 		id, element, rule); err != nil {
 		t.Fatalf("insert finding: %v", err)
 	}

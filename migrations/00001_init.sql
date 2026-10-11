@@ -1,5 +1,5 @@
 -- +goose Up
--- Generiert aus docs/schema/monika.dbml mit `make db-generate`. Nicht von Hand ändern.
+-- Generiert aus schema/monika.dbml mit `make db-generate`. Nicht von Hand ändern.
 -- +goose StatementBegin
 CREATE TYPE "link_type" AS ENUM (
   'feeds',
@@ -56,6 +56,7 @@ CREATE TYPE "permission" AS ENUM (
   'configure',
   'critical',
   'inventory_edit',
+  'source_edit',
   'rule_edit',
   'preset_run',
   'preset_edit',
@@ -94,13 +95,13 @@ CREATE TABLE "element" (
   "actions" text[] NOT NULL DEFAULT ('{}'),
   "critical_actions" text[] NOT NULL DEFAULT ('{}'),
   "settings" jsonb,
+  "params" jsonb,
   "present" boolean NOT NULL DEFAULT true,
   "first_seen_at" timestamptz,
   "last_seen_at" timestamptz,
   "label" text,
   "notes" text,
   "monitored" boolean NOT NULL DEFAULT true,
-  "deleted_at" timestamptz,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
   "updated_at" timestamptz NOT NULL DEFAULT (now()),
   CONSTRAINT "element_class_check" CHECK ((kind = 'device'
@@ -118,7 +119,6 @@ CREATE TABLE "element" (
     (kind NOT IN ('device', 'group', 'access')
        AND device_id IS NOT NULL AND parent_id IS NOT NULL
        AND source_id IS NOT NULL AND external_id IS NOT NULL)),
-  CONSTRAINT "element_deleted_check" CHECK (deleted_at IS NULL OR kind IN ('device', 'group')),
   CONSTRAINT "element_critical_actions_check" CHECK (critical_actions <@ actions)
 );
 
@@ -172,16 +172,18 @@ CREATE TABLE "rule" (
   "when_value" jsonb,
   "clear_value" jsonb,
   "hold_seconds" int NOT NULL DEFAULT 0,
+  "clear_hold_seconds" int NOT NULL DEFAULT 0,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
   "updated_at" timestamptz NOT NULL DEFAULT (now()),
   CONSTRAINT "rule_when_check" CHECK ((when_fact IS NULL AND when_op IS NULL AND when_value IS NULL)
     OR (when_fact IS NOT NULL AND when_op IS NOT NULL AND when_value IS NOT NULL)),
-  CONSTRAINT "rule_hold_check" CHECK (hold_seconds >= 0)
+  CONSTRAINT "rule_hold_check" CHECK (hold_seconds >= 0 AND clear_hold_seconds >= 0)
 );
 
 CREATE TABLE "finding" (
   "id" uuid PRIMARY KEY DEFAULT (uuidv7()),
   "element_id" uuid NOT NULL,
+  "element_path" text NOT NULL,
   "origin" finding_origin NOT NULL,
   "rule_id" uuid,
   "code" text NOT NULL,
@@ -214,6 +216,7 @@ CREATE TABLE "preset_step" (
   "action" text NOT NULL,
   "params" jsonb,
   "continue_on_error" boolean NOT NULL DEFAULT false,
+  "device_level" boolean NOT NULL DEFAULT false,
   "driver" text,
   CONSTRAINT "preset_step_check" CHECK (stage >= 1 AND delay_ms >= 0)
 );
@@ -224,6 +227,7 @@ CREATE TABLE "action_run" (
   "preset_id" uuid,
   "preset_step_id" uuid,
   "element_id" uuid,
+  "element_path" text,
   "source_id" uuid,
   "action" text NOT NULL,
   "params" jsonb,
@@ -282,7 +286,7 @@ CREATE TABLE "permission_grant" (
   "permission" permission NOT NULL,
   "scope_element_id" uuid,
   "created_at" timestamptz NOT NULL DEFAULT (now()),
-  CONSTRAINT "permission_grant_global_check" CHECK (permission NOT IN ('preset_run', 'preset_edit', 'admin')
+  CONSTRAINT "permission_grant_global_check" CHECK (permission NOT IN ('preset_run', 'preset_edit', 'source_edit', 'admin')
     OR scope_element_id IS NULL)
 );
 
@@ -418,6 +422,8 @@ CREATE INDEX ON "finding" ("caused_by_id");
 
 CREATE INDEX ON "finding" ("raised_at");
 
+CREATE INDEX ON "finding" ("cleared_at");
+
 CREATE INDEX ON "preset_step" ("preset_id", "stage", "position");
 
 CREATE INDEX ON "preset_step" ("element_id");
@@ -433,6 +439,8 @@ CREATE INDEX ON "action_run" ("requested_at");
 CREATE INDEX ON "action_run" ("status");
 
 CREATE INDEX ON "action_run" ("requested_by_id");
+
+CREATE INDEX ON "action_run" ("finished_at");
 
 CREATE UNIQUE INDEX ON "user_identity" ("issuer", "subject");
 
@@ -452,7 +460,11 @@ CREATE INDEX ON "user_session" ("user_id");
 
 CREATE INDEX ON "user_session" ("token_id");
 
+CREATE INDEX ON "user_session" ("expires_at");
+
 CREATE INDEX ON "user_recovery_code" ("user_id");
+
+CREATE INDEX ON "user_recovery_code" ("used_at");
 
 CREATE INDEX ON "audit_log" ("object_type", "object_id");
 
@@ -474,11 +486,14 @@ nach source_id ab:
 CREATE UNIQUE INDEX element_source_external_uq
   ON element (source_id, external_id) NULLS NOT DISTINCT
   WHERE source_id IS NOT NULL;
+
+Löschen: Ein Gerät löscht seine Quellen und Elemente, eine Quelle ihre
+Elemente (CASCADE). Was mitgelöscht wird, steht im Audit des Löschens.
 ';
 
-COMMENT ON COLUMN "element"."kind" IS 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger';
+COMMENT ON COLUMN "element"."kind" IS 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, path, tunnel, processing, sensor, trigger; siehe docs/contracts/vocabulary.md';
 
-COMMENT ON COLUMN "element"."parent_id" IS 'nur physische/strukturelle Hierarchie';
+COMMENT ON COLUMN "element"."parent_id" IS 'nur physische/strukturelle Hierarchie; Treiber-Elemente ohne Eltern im Treiber hängen am Zugangs-Element';
 
 COMMENT ON COLUMN "element"."device_id" IS 'zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen';
 
@@ -486,7 +501,7 @@ COMMENT ON COLUMN "element"."source_id" IS 'besitzende Quelle; NULL bei Gerät u
 
 COMMENT ON COLUMN "element"."external_id" IS 'stabile ID innerhalb der Quelle, z.B. Slot-Pfad oder UnitID; NULL nur beim Zugangs-Element';
 
-COMMENT ON COLUMN "element"."global_ref" IS 'global eindeutige ID (XLink-UnitID, NMOS-UUID). Nur am Element im eigenen Baum, nie an Stellvertretern';
+COMMENT ON COLUMN "element"."global_ref" IS 'global eindeutige ID mit Namensraum (xlink:X8A9001-E1, nmos:<uuid>); am Zugangs-Element die des Geräts (xlink:X8A9001). Nur am Element im eigenen Baum, nie an Stellvertretern';
 
 COMMENT ON COLUMN "element"."transport" IS 'sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...';
 
@@ -494,35 +509,37 @@ COMMENT ON COLUMN "element"."direction" IS 'Fähigkeit des Anschlusses; die aktu
 
 COMMENT ON COLUMN "element"."name" IS 'Name, wie das Gerät ihn meldet';
 
-COMMENT ON COLUMN "element"."attributes" IS 'statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)';
+COMMENT ON COLUMN "element"."attributes" IS 'statische Treiber-Attribute, nur zur Anzeige';
 
 COMMENT ON COLUMN "element"."position" IS 'Sortierung innerhalb des Parents';
 
-COMMENT ON COLUMN "element"."actions" IS 'unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}';
+COMMENT ON COLUMN "element"."actions" IS 'unterstützte Befehle, z.B. {start,stop,reboot,videoxlink.reset_video_buffer}';
 
 COMMENT ON COLUMN "element"."critical_actions" IS 'Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)';
 
-COMMENT ON COLUMN "element"."settings" IS 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}';
+COMMENT ON COLUMN "element"."settings" IS 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical bzw. write_only, z.B. {"codec.bitrate_mbps": {"type": "float", "min": 1, "max": 100}, "ptp.domain": {"type": "int", "critical": true}}';
 
-COMMENT ON COLUMN "element"."present" IS 'false = verschwunden oder noch nie gesehen; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar';
+COMMENT ON COLUMN "element"."params" IS 'Parameter-Schemas von Aktionen, die an diesem Element ein eigenes Schema haben (Sende-Ziele: trigger), z.B. {"trigger": {"state": {"type": "enum", "values": ["off", "program"], "default": "off"}}}';
 
-COMMENT ON COLUMN "element"."first_seen_at" IS 'NULL = vom User vorab angelegt, vom Treiber noch nie gesehen';
+COMMENT ON COLUMN "element"."present" IS 'false = verschwunden; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar';
 
-COMMENT ON COLUMN "element"."monitored" IS 'false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id';
+COMMENT ON COLUMN "element"."last_seen_at" IS 'zuletzt in einem Snapshot gesehen; ohne Strukturänderung höchstens alle 5 min geschrieben';
 
-COMMENT ON COLUMN "element"."deleted_at" IS 'weich gelöscht (nur Gerät und Gruppe); Zeilen bleiben für Läufe, Befunde und Audit';
+COMMENT ON COLUMN "element"."monitored" IS 'false = von Regeln und Gerätealarmen ausgenommen, keine Health; vererbt sich entlang parent_id; eine deaktivierte Quelle wirkt wie false';
 
 COMMENT ON TABLE "device_source" IS 'Ein Gerät kann mehrere Quellen haben (z.B. XLink-API und IPMI). Jede Quelle
 besitzt ihre eigenen Elemente und Links; ein Re-Discovery fasst nur diese an.
 Zu jeder Quelle legt der Core ein Zugangs-Element (kind = access) an.
-Quellen werden nie gelöscht, nur deaktiviert. Verbindungszustand und
-Lebenszeichen liegen im Speicher des Core; ein Ausfall steht als Befund
-source.unreachable am Zugangs-Element.
+Eine Quelle kann deaktiviert oder gelöscht werden; Löschen entfernt ihre
+Elemente und Links. Verbindungszustand und Lebenszeichen liegen im Speicher
+des Core; ein Ausfall steht als Befund source.unreachable am Zugangs-Element.
+Ändern erfordert source_edit (global), weil eine Quelle mit Secret sonst
+Zugangsdaten an einen beliebigen Host schicken könnte.
 ';
 
 COMMENT ON COLUMN "device_source"."device_id" IS 'Element mit kind = device (gesichert in der Anwendung)';
 
-COMMENT ON COLUMN "device_source"."driver" IS 'videoxlink, embrionix, directout-ravio, ipmi, ...';
+COMMENT ON COLUMN "device_source"."driver" IS 'Treibername = Paketname, nur [a-z0-9]: videoxlink, embrionix, ravio, http, ipmi, ...';
 
 COMMENT ON COLUMN "device_source"."address" IS 'Management-Host/IP';
 
@@ -530,7 +547,7 @@ COMMENT ON COLUMN "device_source"."config" IS 'treiberspezifische Verbindungspar
 
 COMMENT ON COLUMN "device_source"."secret_id" IS 'Zugangsdaten aus dem Secret-Store; viele Quellen können dasselbe Secret nutzen';
 
-COMMENT ON COLUMN "device_source"."enabled" IS 'false = deaktiviert: kein Befund, Elemente der Quelle unknown';
+COMMENT ON COLUMN "device_source"."enabled" IS 'false = deaktiviert: Treiber läuft nicht, Elemente gelten als nicht überwacht (keine Health)';
 
 COMMENT ON TABLE "element_link" IS 'Regeln:
 - Treiber-Links (feeds, uses, represents) werden bei Wegfall gelöscht,
@@ -552,12 +569,13 @@ COMMENT ON COLUMN "element_link"."position" IS 'Position in der Gruppe, z.B. Sta
 COMMENT ON COLUMN "element_link"."label" IS 'Label in diesem Kontext';
 
 COMMENT ON TABLE "rule" IS 'Alle Regeln kommen vom User; es gibt keine mitgelieferten Standardregeln.
-Operator und Typ von value werden in Go beim Speichern geprüft.
+Operator und Typ von value werden in Go beim Speichern gegen den
+Fakt-Katalog geprüft.
 ';
 
-COMMENT ON COLUMN "rule"."scope_element_id" IS 'Element, Gerät (inkl. Kinder) oder Gruppe (inkl. Mitglieder, rekursiv)';
+COMMENT ON COLUMN "rule"."scope_element_id" IS 'Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren)';
 
-COMMENT ON COLUMN "rule"."fact" IS 'running, signal_present, format.rate, ptp_offset, vxl.cpu_temp, ...';
+COMMENT ON COLUMN "rule"."fact" IS 'Fakt-Schlüssel, z.B. state.signal_present, ptp.offset_ns, sdi.crc_errors_per_s, videoxlink.needs_reboot';
 
 COMMENT ON COLUMN "rule"."value" IS 'true | 50 | "i" | [50, 59.94]';
 
@@ -565,19 +583,25 @@ COMMENT ON COLUMN "rule"."clear_value" IS 'Hysterese, nur numerisch: Befund ende
 
 COMMENT ON COLUMN "rule"."hold_seconds" IS 'Verletzung muss so lange anliegen, bevor ein Befund entsteht';
 
+COMMENT ON COLUMN "rule"."clear_hold_seconds" IS 'Sollzustand muss so lange ununterbrochen anliegen, bevor der Befund endet (gegen Flattern); Zurückziehen wirkt sofort';
+
 COMMENT ON TABLE "finding" IS 'Höchstens ein aktiver Befund pro Element, Code und Regel. DBML kennt keine
 Teilindizes; finding_active_uq steht deshalb in migrations/00002_finding_active_uq.sql.
 ';
 
+COMMENT ON COLUMN "finding"."element_id" IS 'ohne Fremdschlüssel: die Historie überlebt das Löschen des Elements';
+
+COMMENT ON COLUMN "finding"."element_path" IS 'Anzeigename des Elements beim Entstehen, z.B. L1 · X8A1001 / D1';
+
 COMMENT ON COLUMN "finding"."rule_id" IS 'bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt';
 
-COMMENT ON COLUMN "finding"."code" IS 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable';
+COMMENT ON COLUMN "finding"."code" IS 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, source.discovery_failed';
 
 COMMENT ON COLUMN "finding"."message" IS 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds';
 
-COMMENT ON COLUMN "finding"."details" IS 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, source_disabled, device_deleted)';
+COMMENT ON COLUMN "finding"."details" IS 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, fact_missing, source_disabled, deleted)';
 
-COMMENT ON COLUMN "finding"."caused_by_id" IS 'NULL = Ursache, sonst Symptom';
+COMMENT ON COLUMN "finding"."caused_by_id" IS 'NULL = Ursache, sonst Symptom: zeigt auf die Wurzel; wird bei jeder Befundänderung neu abgeleitet und friert mit dem Ende ein';
 
 COMMENT ON COLUMN "finding"."cleared_at" IS 'NULL = aktiv';
 
@@ -585,7 +609,7 @@ COMMENT ON COLUMN "finding"."acked_at" IS 'Quittierung ändert nicht die Health,
 
 COMMENT ON TABLE "preset" IS 'Gespeicherte Befehlsfolge, kein Sollzustand. Stufen laufen nacheinander, Schritte einer Stufe parallel.';
 
-COMMENT ON TABLE "preset_step" IS 'Ein Element mit Preset-Schritten ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.';
+COMMENT ON TABLE "preset_step" IS 'Ein Element mit Preset-Schritten (bei Geräten und Quellen: auf eines ihrer Elemente) ist nicht löschbar: Presets verlieren keine Schritte stillschweigend.';
 
 COMMENT ON COLUMN "preset_step"."stage" IS 'gleiche Stufe = parallel; Stufen nacheinander, jede wartet auf Endzustand aller Läufe der vorigen';
 
@@ -595,16 +619,19 @@ COMMENT ON COLUMN "preset_step"."delay_ms" IS 'Wartezeit ab Beginn der Stufe, be
 
 COMMENT ON COLUMN "preset_step"."element_id" IS 'Element, Gerät oder Gruppe (Verteilung auf Mitglieder)';
 
-COMMENT ON COLUMN "preset_step"."action" IS 'start, stop, set, reboot, trigger, vxl.*';
+COMMENT ON COLUMN "preset_step"."action" IS 'start, stop, set, reboot, trigger, videoxlink.*';
 
-COMMENT ON COLUMN "preset_step"."params" IS 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides';
+COMMENT ON COLUMN "preset_step"."params" IS 'bei set: {"codec.bitrate_mbps": 25, "codec.format": "HEVC"}; bei trigger: Overrides';
 
 COMMENT ON COLUMN "preset_step"."continue_on_error" IS 'false = Fehler bricht das Preset ab';
 
-COMMENT ON COLUMN "preset_step"."driver" IS 'Pflicht bei Aktionen für das ganze Gerät (an Zugangs-Elementen) auf Geräte oder Gruppen, z.B. reboot über videoxlink';
+COMMENT ON COLUMN "preset_step"."device_level" IS 'nur bei Gerät oder Gruppe als Ziel: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente';
+
+COMMENT ON COLUMN "preset_step"."driver" IS 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true, z.B. reboot über videoxlink';
 
 COMMENT ON TABLE "action_run" IS 'Zugleich Audit-Log aller Aktionen: wer, was, wann, mit welchem Ergebnis.
-Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen.
+Übergeordnete Läufe (Preset, Sammelaktion) fassen den Status ihrer Kinder zusammen;
+ein selbst abgebrochener übergeordneter Lauf endet als cancelled.
 Gelöschte Presets und Schritte lassen die Läufe stehen (preset_id, preset_step_id werden NULL).
 ';
 
@@ -612,19 +639,21 @@ COMMENT ON COLUMN "action_run"."parent_id" IS 'Hierarchie: Preset-Lauf → Schri
 
 COMMENT ON COLUMN "action_run"."preset_id" IS 'gesetzt am Wurzel-Lauf eines Presets';
 
-COMMENT ON COLUMN "action_run"."element_id" IS 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf';
+COMMENT ON COLUMN "action_run"."element_id" IS 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf. Ohne Fremdschlüssel: die Historie überlebt das Löschen';
 
-COMMENT ON COLUMN "action_run"."source_id" IS 'ausführende Quelle; NULL bei übergeordneten Läufen';
+COMMENT ON COLUMN "action_run"."element_path" IS 'Anzeigename des Ziels beim Anlegen; NULL nur am Preset-Wurzel-Lauf';
 
-COMMENT ON COLUMN "action_run"."action" IS 'start, stop, set, reboot, vxl.*; am Preset-Wurzel-Lauf: preset';
+COMMENT ON COLUMN "action_run"."source_id" IS 'ausführende Quelle; NULL bei übergeordneten Läufen. Ohne Fremdschlüssel';
+
+COMMENT ON COLUMN "action_run"."action" IS 'start, stop, set, reboot, videoxlink.*; am Preset-Wurzel-Lauf: preset';
 
 COMMENT ON COLUMN "action_run"."params" IS 'bei set: zu setzende Werte; bei trigger: Overrides nur für diesen Aufruf';
 
 COMMENT ON COLUMN "action_run"."critical" IS 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)';
 
-COMMENT ON COLUMN "action_run"."verify" IS 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}';
+COMMENT ON COLUMN "action_run"."verify" IS 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "codec.bitrate_mbps", "op": "eq", "value": 20}]}';
 
-COMMENT ON COLUMN "action_run"."response" IS 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern';
+COMMENT ON COLUMN "action_run"."response" IS 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern; bei übergeordneten Läufen die Zusammenfassung inkl. übersprungener Mitglieder';
 
 COMMENT ON COLUMN "action_run"."requested_by_id" IS 'Mensch oder Dienstkonto (API-Token)';
 
@@ -648,7 +677,7 @@ COMMENT ON COLUMN "role"."external_ref" IS 'Wert im Groups-Claim des IdP; Mitgli
 
 COMMENT ON COLUMN "role_member"."origin" IS 'manual | idp; idp-Mitgliedschaften werden beim Login überschrieben';
 
-COMMENT ON COLUMN "permission_grant"."scope_element_id" IS 'Gruppe (Mitglieder rekursiv), Gerät (alle Elemente) oder Element (mit Kindern); NULL = überall';
+COMMENT ON COLUMN "permission_grant"."scope_element_id" IS 'Element (mit allen Nachfahren) oder Gruppe (Mitglieder rekursiv, mit Nachfahren); NULL = überall';
 
 COMMENT ON COLUMN "api_token"."user_id" IS 'meist ein Dienstkonto';
 
@@ -682,11 +711,11 @@ COMMENT ON COLUMN "user_recovery_code"."code_hash" IS 'Hash des Wiederherstellun
 
 COMMENT ON COLUMN "user_recovery_code"."used_at" IS 'NULL = noch gültig';
 
-COMMENT ON TABLE "audit_log" IS 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.';
+COMMENT ON TABLE "audit_log" IS 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt mit actor_id = NULL: create für zum ersten Mal gesehene Elemente, appear und disappear für zurückkehrende und verschwindende, create und delete für Links. Aufbewahrung: MONIKA_RETENTION_AUDIT.';
 
 COMMENT ON COLUMN "audit_log"."actor_id" IS 'NULL = Monika selbst';
 
-COMMENT ON COLUMN "audit_log"."verb" IS 'create | update | delete | login | login_failed';
+COMMENT ON COLUMN "audit_log"."verb" IS 'create | update | delete | appear | disappear | login | login_failed; appear/disappear nur von der Discovery';
 
 COMMENT ON COLUMN "audit_log"."object_type" IS 'rule, preset, element, element_link, device_source, role, permission_grant, forward_target, ...';
 
@@ -694,9 +723,9 @@ COMMENT ON COLUMN "audit_log"."before" IS 'Geheimnisse geschwärzt';
 
 COMMENT ON COLUMN "audit_log"."after" IS 'Geheimnisse geschwärzt';
 
-COMMENT ON TABLE "forward_target" IS 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox.';
+COMMENT ON TABLE "forward_target" IS 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox. Format der Ereignisse: docs/ARCHITECTURE.md Abschnitt 13.';
 
-COMMENT ON COLUMN "forward_target"."config" IS 'syslog: host, port, protocol, facility · webhook: url, method, headers, body (Vorlage)';
+COMMENT ON COLUMN "forward_target"."config" IS 'syslog: host, port, protocol (udp, tcp, tls), facility · webhook: url, method, headers, body (Vorlage); Platzhalter {{secret.<schlüssel>}} nur in url und headers';
 
 COMMENT ON COLUMN "forward_target"."secret_id" IS 'z.B. Token im Webhook-Header';
 
@@ -704,12 +733,13 @@ COMMENT ON COLUMN "forward_target"."events" IS 'finding.raised, finding.cleared,
 
 COMMENT ON COLUMN "forward_target"."min_severity" IS 'nur für finding.*; NULL = alle';
 
-COMMENT ON COLUMN "forward_target"."scope_element_id" IS 'Gerät oder Gruppe, rekursiv; NULL = alles';
+COMMENT ON COLUMN "forward_target"."scope_element_id" IS 'Geltungsbereich wie bei Regeln und Rechten; NULL = alles';
 
 COMMENT ON TABLE "secret" IS 'Ver- und Entschlüsselung nur in Go, nie per pgcrypto (Schlüssel würde im SQL landen).
 Associated Data = id, damit Werte nicht zwischen Zeilen vertauscht werden können.
 Werte werden nie angezeigt, geloggt oder ins Audit geschrieben.
-Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: inventory_edit.
+Anlegen/Ersetzen/Löschen: Recht admin. Zuweisen an eine Quelle: source_edit.
+Ersetzen startet alle Quellen mit diesem Secret neu.
 ';
 
 COMMENT ON COLUMN "secret"."name" IS 'z.B. xlink-admin; in der UI auswählbar';
@@ -722,37 +752,35 @@ COMMENT ON COLUMN "secret"."key_id" IS 'Version des Master-Keys, mit dem verschl
 
 COMMENT ON TABLE "element_state" IS 'Nur, was der Core ableitet. Aktuelle Fakten liegen nur im Speicher des Core und gehen im festen Takt nach InfluxDB.';
 
-COMMENT ON COLUMN "element_state"."health" IS 'vom Core; NULL = keine Health (nicht überwacht oder verschwunden)';
+COMMENT ON COLUMN "element_state"."health" IS 'vom Core; NULL = keine Health (nicht überwacht, verschwunden oder ungeprüft)';
 
-COMMENT ON COLUMN "element_state"."rollup" IS 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unmonitored": 2, "missing": 1}';
+COMMENT ON COLUMN "element_state"."rollup" IS 'nur Gerät/Gruppe: {"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unchecked": 40, "unmonitored": 2, "missing": 1}';
 
 COMMENT ON COLUMN "element_state"."updated_at" IS 'Zeitpunkt des Schreibens';
 
-ALTER TABLE "element" ADD FOREIGN KEY ("parent_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element" ADD FOREIGN KEY ("parent_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "element" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "element" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "device_source" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "device_source" ADD FOREIGN KEY ("device_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "device_source" ADD FOREIGN KEY ("secret_id") REFERENCES "secret" ("id") ON DELETE RESTRICT DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "element_link" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "element_link" ADD FOREIGN KEY ("from_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "element_link" ADD FOREIGN KEY ("to_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "rule" ADD FOREIGN KEY ("scope_element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element_link" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "finding" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "finding" ADD FOREIGN KEY ("caused_by_id") REFERENCES "finding" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "rule" ADD FOREIGN KEY ("scope_element_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "finding" ADD FOREIGN KEY ("acked_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "finding" ADD FOREIGN KEY ("rule_id") REFERENCES "rule" ("id") ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "finding" ADD FOREIGN KEY ("caused_by_id") REFERENCES "finding" ("id") ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "preset" ADD FOREIGN KEY ("created_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
@@ -760,13 +788,9 @@ ALTER TABLE "preset_step" ADD FOREIGN KEY ("preset_id") REFERENCES "preset" ("id
 
 ALTER TABLE "preset_step" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") ON DELETE RESTRICT DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "action_run" ADD FOREIGN KEY ("parent_id") REFERENCES "action_run" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "action_run" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE "action_run" ADD FOREIGN KEY ("source_id") REFERENCES "device_source" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
 ALTER TABLE "action_run" ADD FOREIGN KEY ("requested_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "action_run" ADD FOREIGN KEY ("parent_id") REFERENCES "action_run" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "action_run" ADD FOREIGN KEY ("preset_id") REFERENCES "preset" ("id") ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE;
 
@@ -794,14 +818,14 @@ ALTER TABLE "user_recovery_code" ADD FOREIGN KEY ("user_id") REFERENCES "app_use
 
 ALTER TABLE "audit_log" ADD FOREIGN KEY ("actor_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "forward_target" ADD FOREIGN KEY ("scope_element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
-
 ALTER TABLE "forward_target" ADD FOREIGN KEY ("secret_id") REFERENCES "secret" ("id") ON DELETE RESTRICT DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "forward_target" ADD FOREIGN KEY ("scope_element_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "secret" ADD FOREIGN KEY ("created_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "secret" ADD FOREIGN KEY ("updated_by_id") REFERENCES "app_user" ("id") DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE "element_state" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "element_state" ADD FOREIGN KEY ("element_id") REFERENCES "element" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE;
 
 -- +goose StatementEnd

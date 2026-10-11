@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/lukirs95/monika/internal/store/postgres/db"
 )
@@ -76,6 +77,16 @@ func element(t *testing.T, q *db.Queries, id uuid.UUID) db.Element {
 	return elements[i]
 }
 
+// count führt eine Abfrage mit einer Zahl als Ergebnis aus.
+func count(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(t.Context(), sql, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return n
+}
+
 func TestCreateDevice(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -117,22 +128,6 @@ func TestUpsertDriverElement(t *testing.T) {
 		}
 		if e := element(t, q, id); *e.Label != "Kamera 1" || *e.Name != "SDI In 1" {
 			t.Fatalf("element = %+v, want label kept and name updated", e)
-		}
-	})
-
-	t.Run("adopts planned element", func(t *testing.T) {
-		planned := newID()
-		if err := q.CreatePlannedElement(ctx, db.CreatePlannedElementParams{
-			ID: planned, Kind: "peer", ParentID: device, DeviceID: device, SourceID: source, ExternalID: "peer/X8A9001",
-		}); err != nil {
-			t.Fatalf("CreatePlannedElement: %v", err)
-		}
-		got, err := upsert(ctx, q, driverElement(device, source, "peer/X8A9001"))
-		if err != nil || got != planned {
-			t.Fatalf("adopt: id = %s, err = %v; want %s", got, err, planned)
-		}
-		if e := element(t, q, planned); !e.Present || e.FirstSeenAt == nil {
-			t.Fatalf("element = %+v, want present and first_seen_at set", e)
 		}
 	})
 

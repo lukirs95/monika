@@ -22,16 +22,17 @@ func (s *Store) ListActiveFindings(ctx context.Context) ([]evaluation.Finding, e
 
 func (s *Store) RaiseFinding(ctx context.Context, f evaluation.Finding) error {
 	err := s.q.RaiseFinding(ctx, db.RaiseFindingParams{
-		ID:         f.ID,
-		ElementID:  f.ElementID,
-		Origin:     db.FindingOrigin(f.Origin),
-		RuleID:     nullable(f.RuleID),
-		Code:       f.Code,
-		Severity:   db.Severity(f.Severity),
-		Message:    nullable(f.Message),
-		Details:    f.Details,
-		CausedByID: nullable(f.CausedByID),
-		RaisedAt:   nullable(f.RaisedAt),
+		ID:          f.ID,
+		ElementID:   f.ElementID,
+		ElementPath: f.ElementPath,
+		Origin:      db.FindingOrigin(f.Origin),
+		RuleID:      nullable(f.RuleID),
+		Code:        f.Code,
+		Severity:    db.Severity(f.Severity),
+		Message:     nullable(f.Message),
+		Details:     f.Details,
+		CausedByID:  nullable(f.CausedByID),
+		RaisedAt:    nullable(f.RaisedAt),
 	})
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok &&
 		pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == "finding_active_uq" {
@@ -57,18 +58,19 @@ func (s *Store) AckFinding(ctx context.Context, actor uuid.UUID, id uuid.UUID) e
 
 func toFinding(f db.Finding) evaluation.Finding {
 	return evaluation.Finding{
-		ID:         f.ID,
-		ElementID:  f.ElementID,
-		Origin:     evaluation.Origin(f.Origin),
-		RuleID:     value(f.RuleID),
-		Code:       f.Code,
-		Severity:   evaluation.Severity(f.Severity),
-		Message:    value(f.Message),
-		Details:    f.Details,
-		CausedByID: value(f.CausedByID),
-		RaisedAt:   f.RaisedAt,
-		ClearedAt:  value(f.ClearedAt),
-		AckedAt:    value(f.AckedAt),
-		AckedByID:  value(f.AckedByID),
+		ID:          f.ID,
+		ElementID:   f.ElementID,
+		ElementPath: f.ElementPath,
+		Origin:      evaluation.Origin(f.Origin),
+		RuleID:      value(f.RuleID),
+		Code:        f.Code,
+		Severity:    evaluation.Severity(f.Severity),
+		Message:     value(f.Message),
+		Details:     f.Details,
+		CausedByID:  value(f.CausedByID),
+		RaisedAt:    f.RaisedAt,
+		ClearedAt:   value(f.ClearedAt),
+		AckedAt:     value(f.AckedAt),
+		AckedByID:   value(f.AckedByID),
 	}
 }

@@ -97,3 +97,57 @@ func findElement(t *testing.T, snap inventory.Snapshot, id uuid.UUID) inventory.
 	}
 	return snap.Elements[i]
 }
+
+// Der Zugang trägt die global_ref des Geräts; ein Peer eines anderen Geräts, der vorher auf sie
+// zeigte, wird aufgelöst. Load liefert zu jeder Quelle ihr Zugangs-Element.
+func TestAccessGlobalRef(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s := postgres.New(server.NewDB(t))
+
+	local, localSource, remote, remoteSource, peer := newID(), newID(), newID(), newID(), newID()
+	localAccess, remoteAccess := newID(), newID()
+	for _, d := range []struct{ device, source, access uuid.UUID }{
+		{local, localSource, localAccess}, {remote, remoteSource, remoteAccess},
+	} {
+		if err := s.CreateDevice(ctx, uuid.Nil, inventory.Element{ID: d.device}); err != nil {
+			t.Fatalf("CreateDevice: %v", err)
+		}
+		if err := s.CreateSource(ctx, uuid.Nil, inventory.Source{ID: d.source, DeviceID: d.device, Driver: "videoxlink"}, d.access); err != nil {
+			t.Fatalf("CreateSource: %v", err)
+		}
+	}
+
+	// Das lokale Gerät meldet einen Peer, der das Remote-Gerät repräsentiert, bevor es bekannt ist.
+	link := inventory.Link{ID: newID(), Type: inventory.LinkRepresents, SourceID: localSource, FromID: peer, ToRef: "xlink:X8A9001"}
+	if _, err := s.ApplyDiscovery(ctx, inventory.Discovery{
+		SourceID: localSource,
+		Upsert: []inventory.Element{{ID: peer, Kind: "peer", ParentID: localAccess, DeviceID: local, SourceID: localSource, ExternalID: "peer/X8A9001"}},
+		Seen:     []uuid.UUID{peer},
+		AddLinks: []inventory.Link{link},
+	}); err != nil {
+		t.Fatalf("ApplyDiscovery local: %v", err)
+	}
+	ref := "xlink:X8A9001"
+	if _, err := s.ApplyDiscovery(ctx, inventory.Discovery{SourceID: remoteSource, GlobalRef: &ref}); err != nil {
+		t.Fatalf("ApplyDiscovery remote: %v", err)
+	}
+
+	snap, err := s.Load(ctx)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, src := range snap.Sources {
+		want := map[uuid.UUID]uuid.UUID{localSource: localAccess, remoteSource: remoteAccess}[src.ID]
+		if src.AccessElementID != want {
+			t.Errorf("source %s: AccessElementID = %s, want %s", src.ID, src.AccessElementID, want)
+		}
+	}
+	i := slices.IndexFunc(snap.Elements, func(e inventory.Element) bool { return e.ID == remoteAccess })
+	if i < 0 || snap.Elements[i].GlobalRef != ref {
+		t.Fatalf("remote access element = %+v, want global_ref %s", snap.Elements, ref)
+	}
+	if len(snap.Links) != 1 || snap.Links[0].ToID != remoteAccess || snap.Links[0].ToRef != "" {
+		t.Fatalf("links = %+v, want represents resolved to remote access element", snap.Links)
+	}
+}

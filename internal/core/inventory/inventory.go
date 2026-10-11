@@ -59,6 +59,7 @@ type Element struct {
 	Actions         []string
 	CriticalActions []string
 	Settings        json.RawMessage
+	Params          json.RawMessage // Parameter-Schemas von Aktionen mit eigenem Schema (Sende-Ziele)
 
 	// vom Core
 	Present     bool
@@ -69,7 +70,6 @@ type Element struct {
 	Label     string
 	Notes     string
 	Monitored bool
-	DeletedAt time.Time // nur Gerät und Gruppe
 }
 
 // UserFields sind die Spalten eines Elements, die nur der User pflegt.
@@ -97,6 +97,9 @@ type Source struct {
 	SecretID uuid.UUID
 	Enabled  bool
 	Identity Identity // vom Treiber
+
+	// AccessElementID ist das Zugangs-Element der Quelle, die Wurzel ihrer Elemente.
+	AccessElementID uuid.UUID
 }
 
 // Link ist eine Beziehung zwischen zwei Elementen. Ein noch unbekannter Endpunkt steht
@@ -126,6 +129,9 @@ type Snapshot struct {
 type Discovery struct {
 	SourceID uuid.UUID
 	Identity *Identity // nil = unverändert
+	// GlobalRef ist die globale ID des Geräts aus Sicht dieser Quelle (am Zugangs-Element);
+	// nil = unverändert, "" = keine.
+	GlobalRef *string
 
 	// Upsert enthält neue und geänderte Elemente, Seen alle in diesem Lauf gemeldeten.
 	Upsert []Element
