@@ -47,6 +47,7 @@ monika/
 ├─ deploy/                  lokale Umgebung und Deployment
 └─ docs/
    ├─ ARCHITECTURE.md
+   ├─ DRIVERS.md            Leitfaden: einen Treiber schreiben
    ├─ STATUS.md             Arbeitsstand, nächste Schritte, bekannte Lücken
    ├─ contracts/            Verträge (Mermaid, OpenAPI) vor dem Code
    └─ schema/monika.dbml

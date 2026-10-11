@@ -68,11 +68,12 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 - **B3:** `contracts/bootstrap.md` (eigener `.env`-Parser, unbekannte Variablen brechen ab, `errgroup`).
 - **B1:** `contracts/influx.md` (Line Protocol, Measurements aus dem Vokabular, 1 s Takt, 1 min Puffer, Schema `reporting`).
 - **C:** Aufbewahrung durch eigenen Dienst (180/180/730 Tage), Einzelinstanz-Sperre; Hochverfügbarkeit nicht in Version 1; Management-Adresse und Zugangsdaten werden **nie** über Aktionen geändert.
+- **B2:** Treiber-Leitfaden `docs/DRIVERS.md` am erfundenen Gateway „Acme GW-4“, mit typischen Fehlern und Checkliste; Testbaukasten `sdk/sdktest` im SDK-Vertrag.
 - **Vokabular:** `contracts/vocabulary.md`: ein Vokabular für Fakten und InfluxDB (Schlüssel `<measurement>.<feld>`, Einheit im Feldnamen, Richtung als Präfix), Kern-Measurement `state`, Domänen nach Broadcast-Normen, `stream` für alle Netz-Streams, Typen `bool`/`int`/`float`/`string` (echtes `int64`), Arten `status`/`gauge`/`counter`, Messpunkte und Pfade als Elemente, Präfix roher Fakten = Treibername.
 
 ## Nächste Schritte
 
-0. **Beschreibung vervollständigen**, offen: Treiber-Leitfaden `docs/DRIVERS.md` mit erfundenem Beispielgerät (B2), Betrieb und Deployment (B4), danach eine vollständige Durchsicht aller Dokumente (D). Die UI folgt nach dem Backend.
+0. **Beschreibung vervollständigen**, offen: Betrieb und Deployment (B4), danach eine vollständige Durchsicht aller Dokumente (D). Die UI folgt nach dem Backend.
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`

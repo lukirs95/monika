@@ -184,7 +184,7 @@ Pro Hersteller bzw. Gerätetyp gibt es einen Treiber. Treiber laufen im Monika-P
 - **Abhängigkeitsrichtung:** Treiber importieren ausschließlich das öffentliche Paket `sdk/` (Interfaces, Vokabular, Registry) und ihre Gerätelibrary, nie `internal/`. Die Ordnerstruktur steht im `README.md` im Projektstamm.
 - Optional: Build-Tags pro Treiber für schlanke Builds.
 - **Treiber sind dünne Adapter.** Gerätelibraries (z. B. `goxlinkclient`) bleiben eigenständige Repositories ohne Abhängigkeit zu Monika; der Treiber übersetzt nur zwischen Library und Monika-Interfaces.
-- **Vertrag:** Typen, Interfaces und Abläufe des SDK stehen in [`contracts/sdk.md`](contracts/sdk.md).
+- **Vertrag:** Typen, Interfaces und Abläufe des SDK stehen in [`contracts/sdk.md`](contracts/sdk.md), die Namen in [`contracts/vocabulary.md`](contracts/vocabulary.md); wie man einen Treiber schreibt, zeigt [`DRIVERS.md`](DRIVERS.md).
 - **Fehlerisolation:** Jede Treiber-Goroutine läuft hinter einer `recover()`-Grenze. Ein Panic wird zum Befund `source.unreachable` mit Fehlermeldung und Neustart der Quelle, nicht zum Absturz von Monika.
 
 Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separate Prozesse per gRPC (widerspricht dem Monolithen; Isolation wird über `recover()` erreicht), WASM (für netzwerklastige Treiber nicht ausgereift).
