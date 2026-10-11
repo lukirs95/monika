@@ -2,14 +2,8 @@
 
 Öffentliche Schnittstelle zwischen Core und Treibern. Das einzige Paket, das Treiber importieren.
 
-- Treiber-Interfaces (Discovery, Fakten, Alarme, Links, Ausführung)
-- Registry für die Registrierung in `init()`
-- Vokabular: `kind`, `transport`, Kern- und bekannte Fakt-Schlüssel, Kern-Aktionen; reservierte Werte (`kind` `device`, `group`, `access`; Fakt `present`)
-- Typen für Aktionsdefinitionen (Parameter-Schema, Prüfbedingung, `critical`), `settings` und `critical_actions`
-- Zähler-Helfer: Rohwerte → `<fakt>.rate` pro Sekunde, mit Erkennung von Reset und Überlauf
-- Vertrag: vollständiger Stand beim (Wieder-)Verbinden, Lebenszeichen mit erwartetem Abstand, Zugangs-Element mit leerer `external_id`
-- JSON-Schema für die Treiberkonfiguration
+- `sdk`: `Driver`, `Source`, `Reporter`, `Scheduler`, Meldungen (`Snapshot`, `Update`, `Element`, `Link`, `Alarm`), Ausführung (`Command`, `Result`, `ActionDef`, `Setting`, `Param`), Registry (`Register`, `Lookup`, `Drivers`) mit Prüfung des Katalogs, `Driver.CheckElement`, Zähler-Helfer `Counter`
+- `sdk/vocab`: Vokabular mit Arten, Transporten, Fakten (`<measurement>.<feld>` mit Typ und Art), Aktionen, Namensräumen und reservierten Namen
+- `sdk/sdktest`: Testbaukasten für Treiber und Core (aufzeichnender `Reporter`, `Conformance`, programmierbarer Fake-Treiber)
 
-Die konkreten Interfaces sind noch offen.
-
-Siehe `docs/ARCHITECTURE.md`, Abschnitt 4.
+Verträge: `docs/contracts/sdk.md`, `docs/contracts/vocabulary.md`; Leitfaden: `docs/DRIVERS.md`.
