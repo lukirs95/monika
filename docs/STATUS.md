@@ -95,7 +95,12 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    2. ~~Konfiguration~~ (`internal/config`): erledigt
    3. ~~Fakten und Lebenszeichen~~ (`internal/core/state`): erledigt
    4. ~~Inventar-Logik~~ (`internal/core/inventory`): erledigt; Inventar im Speicher mit `Path` und `FactsByID`, `ApplySnapshot` (Prüfung, Abgleich, Links über Quellen, 5-min-Regel), Befehle als Methoden (Entscheidung B vom 2026-10-11: Befehls-Structs nur im Core, IDs vergibt die API)
-   5. Bewertung: Präzedenz, `when`, Befunde, Health und Rollup, Ursache/Symptom, `InScope` (`internal/core/evaluation`)
+   5. Bewertung (`internal/core/evaluation`), in fünf Teilen; Entscheidungen vom 2026-10-11: Die Bewertung liest den Zustand über ein Interface `evaluation.State` (die `View` erfüllt es, kein Importzyklus), der Graph liegt im Inventar, nur der Evaluator schreibt Befunde, Gerätealarme kommen über `Evaluator.Alarms`
+      - ~~5a Graph und Geltungsbereich~~ (`inventory.Graph`: `Scopes`, `InScope`, `ScopeElements`, effektives `Monitored`): erledigt
+      - 5b Regeln: Gelten, Präzedenz, `op`/`when`/Hysterese, Prüfung gegen den Fakt-Katalog, `EffectiveRules`
+      - 5c Befunde: Zustandsmaschine mit Haltezeiten, Gerätealarme, Systembefunde, Zurückziehen, Schreiben mit Wiederholung, Regelbefehle
+      - 5d Ursache und Symptom
+      - 5e Health und Rollup
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
    7. Supervisor und Scheduler (`internal/core/supervisor`)
    8. Executor und Preset-Runner (`internal/action`, `internal/preset`)

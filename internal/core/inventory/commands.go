@@ -43,6 +43,7 @@ func (inv *Inventory) DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid
 	}
 	for sid, s := range inv.sources {
 		if s.DeviceID == id {
+			inv.graph = nil
 			delete(inv.sources, sid)
 			delete(inv.lastSeenWrite, sid)
 		}
@@ -89,6 +90,7 @@ func (inv *Inventory) UpdateSource(ctx context.Context, actor uuid.UUID, s Sourc
 		return Diff{}, fmt.Errorf("update source %s: %w", s.ID, err)
 	}
 	inv.sources[s.ID] = next
+	inv.graph = nil
 	return Diff{}, nil
 }
 
@@ -100,6 +102,7 @@ func (inv *Inventory) DeleteSource(ctx context.Context, actor uuid.UUID, id uuid
 	if err := inv.store.DeleteSource(ctx, actor, id); err != nil {
 		return Diff{}, fmt.Errorf("delete source %s: %w", id, err)
 	}
+	inv.graph = nil
 	delete(inv.sources, id)
 	delete(inv.lastSeenWrite, id)
 	return inv.deleteElements(func(e Element) bool { return e.SourceID == id }), nil
@@ -139,7 +142,7 @@ func (inv *Inventory) UpdateUserFields(ctx context.Context, actor uuid.UUID, id 
 		return Diff{}, fmt.Errorf("update element %s: %w", id, err)
 	}
 	e.Label, e.Notes, e.Monitored = f.Label, f.Notes, f.Monitored
-	inv.elements[id] = e
+	inv.putElement(e)
 	return Diff{Changed: []uuid.UUID{id}}, nil
 }
 
@@ -164,6 +167,7 @@ func (inv *Inventory) AddGroupMember(ctx context.Context, actor uuid.UUID, l Lin
 		return Diff{}, fmt.Errorf("add group member: %w", err)
 	}
 	inv.links[m.ID] = m
+	inv.graph = nil
 	return Diff{LinksChanged: true}, nil
 }
 
@@ -178,6 +182,7 @@ func (inv *Inventory) UpdateGroupMember(ctx context.Context, actor uuid.UUID, l 
 		return Diff{}, fmt.Errorf("update group member %s: %w", l.ID, err)
 	}
 	inv.links[l.ID] = next
+	inv.graph = nil
 	return Diff{LinksChanged: true}, nil
 }
 
@@ -190,6 +195,7 @@ func (inv *Inventory) RemoveGroupMember(ctx context.Context, actor uuid.UUID, id
 		return Diff{}, fmt.Errorf("remove group member %s: %w", id, err)
 	}
 	delete(inv.links, id)
+	inv.graph = nil
 	return Diff{LinksChanged: true}, nil
 }
 

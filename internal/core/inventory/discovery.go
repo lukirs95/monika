@@ -127,6 +127,7 @@ func (inv *Inventory) ApplySnapshot(ctx context.Context, sourceID uuid.UUID, s s
 		return Diff{}, fmt.Errorf("apply discovery of source %s: %w", sourceID, err)
 	}
 	inv.lastSeenWrite[sourceID] = now
+	inv.graph = nil
 
 	// Ab hier nur noch der Speicher, in derselben Reihenfolge wie der Store.
 	if d.Identity != nil {

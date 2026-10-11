@@ -30,6 +30,8 @@ type Inventory struct {
 	byRef    map[string]uuid.UUID // global_ref → Element
 
 	lastSeenWrite map[uuid.UUID]time.Time // je Quelle: letzter Abschluss einer Discovery in der Datenbank
+
+	graph *Graph // nil = nach einer Änderung neu bauen; jede Änderung im Speicher setzt es zurück
 }
 
 type extKey struct {
@@ -54,6 +56,7 @@ func New(store Store, drivers func(name string) (sdk.Driver, bool), log *slog.Lo
 
 // Load übernimmt das gesamte Inventar, wie es beim Start aus der Datenbank kommt.
 func (inv *Inventory) Load(snap Snapshot) {
+	inv.graph = nil
 	for _, s := range snap.Sources {
 		inv.sources[s.ID] = s
 	}
@@ -128,6 +131,7 @@ func (inv *Inventory) Path(id uuid.UUID) string {
 }
 
 func (inv *Inventory) putElement(e Element) {
+	inv.graph = nil
 	if old, ok := inv.elements[e.ID]; ok && old.GlobalRef != e.GlobalRef && inv.byRef[old.GlobalRef] == e.ID {
 		delete(inv.byRef, old.GlobalRef)
 	}
@@ -145,6 +149,7 @@ func (inv *Inventory) deleteElement(id uuid.UUID) {
 	if !ok {
 		return
 	}
+	inv.graph = nil
 	delete(inv.elements, id)
 	if e.SourceID != uuid.Nil {
 		delete(inv.byExt, extKey{e.SourceID, e.ExternalID})

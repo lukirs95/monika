@@ -33,8 +33,7 @@ classDiagram
     class View {
         <<struct, unveränderlich>>
         +Version uint64
-        +Elements map~ID, Element~
-        +Links Links
+        +Graph *inventory.Graph
         +Facts map~ID, Facts~
         +Health map~ID, ElementHealth~
         +Findings map~ID, Finding~
@@ -104,8 +103,25 @@ classDiagram
         +RemoveGroupMember(ctx, actor, id) (Diff, error)
         +Element(id) (Element, bool)
         +ByExternalID(sourceID, extID) (ID, bool)
+        +Graph() *Graph
         +FactsByID(sourceID, facts map~string, sdk.Facts~) (map~ID, sdk.Facts~, unknown []string)
         +Path(id) string
+    }
+    class Graph {
+        <<inventory, unveränderlich>>
+        +Element(id) (Element, bool)
+        +Source(id) (Source, bool)
+        +Link(id) (Link, bool)
+        +All() iter.Seq2~ID, Element~
+        +Links() iter.Seq2~ID, Link~
+        +Outgoing(id) iter.Seq~Link~
+        +Incoming(id) iter.Seq~Link~
+        +Children(id) iter.Seq~ID~
+        +Ancestors(id) iter.Seq~ID~
+        +Scopes(id) map~ID, int~
+        +InScope(scope, id) bool
+        +ScopeElements(scope) iter.Seq~ID~
+        +Monitored(id) bool
     }
     class Diff {
         <<struct>>
@@ -148,9 +164,18 @@ classDiagram
     class Evaluator {
         <<evaluation>>
         +Load(rules []Rule, active []Finding)
-        +Evaluate(ctx, now, elements []ID, v *View) ([]FindingChange, error)
-        +Tick(ctx, now, v *View) ([]FindingChange, error)
-        +Health(v *View, elements []ID) []ElementHealth
+        +Evaluate(ctx, now, elements []ID, s State) ([]FindingChange, error)
+        +Alarms(ctx, now, sourceID, alarms map~ID, []sdk.Alarm~, replace bool, s State) ([]FindingChange, error)
+        +Tick(ctx, now, s State) ([]FindingChange, error)
+        +Health(s State, elements []ID) []ElementHealth
+    }
+    class State {
+        <<interface, evaluation>>
+        +Graph() *inventory.Graph
+        +Facts(elementID) sdk.Facts
+        +Live(sourceID) bool
+        +Unreachable(sourceID) bool
+        +Heartbeat(sourceID) time.Duration
     }
     class FindingChange {
         <<struct>>
@@ -169,6 +194,9 @@ classDiagram
     Core ..> Command : nimmt an
     Core ..> Message : nimmt an
     View *-- SourceStatus
+    View *-- Graph
+    View ..|> State
+    Inventory ..> Graph
     Inventory ..> Diff
     Facts ..> Changed
     Evaluator ..> FindingChange
@@ -179,14 +207,20 @@ classDiagram
 | `Core.Reporter(sourceID)` | die Umsetzung von `sdk.Reporter` für eine Quelle: verpackt jede Meldung als Nachricht an die Schleife |
 | `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
 | `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}`; Influx-Schreiber: `InfluxStatus`; Datenbank-Wächter: `DBPing{ok, err}` |
-| `View.Links` | alle Links mit Index pro Element (ausgehend und eingehend, nach Typ); für `GET /state`, Ursache/Symptom und die Anzeige von Verbindungen über `represents` |
+| `View.Graph` | Elemente, Quellen und Links mit Index pro Element (Kinder, Vorfahren, Mitgliedschaften, Links ausgehend und eingehend); für `GET /state`, Geltungsbereiche, Ursache/Symptom und die Anzeige von Verbindungen über `represents`. Baut das Inventar nach jeder Änderung neu (`Inventory.Graph`), sonst wird er übernommen |
+| `Graph.Scopes(id)` | alle Geltungsbereiche, die das Element umfassen, mit Abstand: das Element selbst (0), seine Vorfahren über `parent_id` und die Gruppen, die es oder einen Vorfahren rekursiv enthalten; der Abstand zählt Schritte über Eltern und Mitgliedschaften zusammen (Präzedenz der Regeln) |
+| `Graph.ScopeElements(scope)` | alle Elemente im Geltungsbereich, jedes genau einmal, mit dem Geltungsbereich selbst; `uuid.Nil` = alle |
+| `Graph.Monitored(id)` | effektives `monitored`: das Element und alle Vorfahren überwacht, die Quelle aktiviert |
 | `View.Rules`, `View.Runs` | alle Regeln; laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
-| `View.InScope(scope, element)` | **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
+| `View.InScope(scope, element)` | = `Graph.InScope`; **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
 | `View.EffectiveRules(element)` | pro Fakt und Richtung die geltenden und die überschriebenen Regeln (für die UI) |
 | `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
 | `View.DB` | Datenbank erreichbar: letzter Ping **und** letzte Schreibvorgänge erfolgreich, höchstens 5 s alt. Ein kleiner Wächter (eigene Goroutine des Core) pingt alle 5 s mit 2 s Timeout und meldet `DBPing`. Ist er falsch, meldet die API `503` an `GET /healthz` und die UI zeigt ein Banner; `/healthz` liest nur diesen Wert |
 | `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
+| `State` | was die Bewertung vom Zustand liest; die `View` erfüllt es. Ein Interface beim Verwender, weil `core` `evaluation` importiert und nicht umgekehrt |
+| `Evaluator.Alarms` | Gerätealarme einer Quelle: bei `Snapshot` (`replace`) ersetzen sie alle Alarme der Quelle, bei `Update` nur die der genannten Elemente. Ein neuer Alarm erzeugt sofort einen Befund, ein fehlender beendet ihn als behoben |
+| Schreiben der Befunde | nur der Evaluator ruft `evaluation.Store` (`CLAUDE.md`); gescheiterte Schreibvorgänge bleiben offen und wiederholt `Tick` |
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Inventory.FactsByID` | übersetzt die Fakten einer Meldung von `external_id`s in Element-IDs; unbekannte `external_id`s kommen zurück, die Schleife loggt sie einmal pro Quelle |
@@ -222,9 +256,10 @@ sequenceDiagram
     L->>F: Drop(Diff.Missing)
     L->>F: Replace(sourceID, s.Facts)
     F-->>L: Changed
+    L->>E: Alarms(sourceID, s.Alarms, replace, View)
     L->>E: Evaluate(Diff ∪ Changed, View)
+    E->>S: RaiseFinding / EndFinding / SetFindingCause
     E-->>L: FindingChanges
-    L->>S: RaiseFinding / EndFinding / SetFindingCause
     L->>E: Health(betroffene Elemente und ihre Geräte, Gruppen)
     E-->>L: geänderte Health
     L->>L: neue View veröffentlichen
@@ -259,9 +294,10 @@ sequenceDiagram
     L->>F: Merge(sourceID, u.Facts)
     F-->>L: Changed (nur echte Änderungen)
     opt Quelle Live und etwas hat sich geändert
+        L->>E: Alarms(sourceID, u.Alarms, View)
         L->>E: Evaluate(Changed, View)
+        E->>S: Befunde schreiben
         E-->>L: FindingChanges
-        L->>S: Befunde schreiben
         L->>L: Health, neue View
         L->>B: Ereignisse
     end
@@ -270,8 +306,8 @@ sequenceDiagram
         L->>F: Unreachable(now)
         F-->>L: Quellen nicht Live seit 3 × Heartbeat nach dem letzten Lebenszeichen
         L->>E: Tick(now, View)
+        E->>S: Befunde schreiben, SaveHealth (gesammelt)
         E-->>L: FindingChanges (source.unreachable, abgelaufene Haltezeiten, Wiederholungen)
-        L->>S: Befunde schreiben, SaveHealth (gesammelt)
         L->>B: Ereignisse
     end
 ```
