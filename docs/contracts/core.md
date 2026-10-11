@@ -37,7 +37,7 @@ classDiagram
         +Facts map~ID, Facts~
         +Health map~ID, ElementHealth~
         +Findings map~ID, Finding~
-        +Rules map~ID, Rule~
+        +Rules *evaluation.Rules
         +Runs map~ID, Run~
         +Sources map~ID, SourceStatus~
         +DB DBStatus
@@ -177,6 +177,19 @@ classDiagram
         +Unreachable(sourceID) bool
         +Heartbeat(sourceID) time.Duration
     }
+    class Rules {
+        <<evaluation, unveränderlich>>
+        +Rule(id) (Rule, bool)
+        +All() iter.Seq~Rule~
+        +EffectiveRules(s State, element ID) []RuleSet
+    }
+    class RuleSet {
+        <<struct>>
+        +Fact string
+        +Direction Direction
+        +Rules []Rule
+        +Overridden []Rule
+    }
     class FindingChange {
         <<struct>>
         +Raised *Finding
@@ -200,6 +213,9 @@ classDiagram
     Inventory ..> Diff
     Facts ..> Changed
     Evaluator ..> FindingChange
+    Evaluator *-- Rules
+    View *-- Rules
+    Rules ..> RuleSet
 ```
 
 | Typ | Bedeutung |
@@ -211,9 +227,11 @@ classDiagram
 | `Graph.Scopes(id)` | alle Geltungsbereiche, die das Element umfassen, mit Abstand: das Element selbst (0), seine Vorfahren über `parent_id` und die Gruppen, die es oder einen Vorfahren rekursiv enthalten; der Abstand zählt Schritte über Eltern und Mitgliedschaften zusammen (Präzedenz der Regeln) |
 | `Graph.ScopeElements(scope)` | alle Elemente im Geltungsbereich, jedes genau einmal, mit dem Geltungsbereich selbst; `uuid.Nil` = alle |
 | `Graph.Monitored(id)` | effektives `monitored`: das Element und alle Vorfahren überwacht, die Quelle aktiviert |
-| `View.Rules`, `View.Runs` | alle Regeln; laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
+| `View.Rules`, `View.Runs` | alle gültigen Regeln, geprüft und unveränderlich (`evaluation.Rules`, vom Evaluator bei jeder Änderung ersetzt); laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
+| Prüfung einer Regel | gegen den Fakt-Katalog (`evaluation.RegistryFactTypes`: Vokabular, `present` als `bool`, rohe Fakten beim Treiber ihres Präfixes): Fakt bekannt, Operator passt zum Typ (`lt` … `gte` nur für Zahlen, `in`/`not_in` mit nicht leerer Liste), Wert passt zum Fakt, Hysterese nur bei Ober- oder Untergrenze und auf der guten Seite (`lte 80` mit `clear_value 75`), dazu Schwere, Haltezeiten ≥ 0, bekannte `match_kind`/`match_transport`. Sonst `ErrInvalidRule`. Regeln aus der Datenbank, die nicht mehr passen (Treiber nicht mehr registriert), bleiben beim Laden draußen und werden geloggt |
+| Vergleich | ganze Zahlen exakt als `int64`, sonst `float64`; Fakt und Wert vom falschen Typ: Die Regel gilt nicht |
 | `View.InScope(scope, element)` | = `Graph.InScope`; **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
-| `View.EffectiveRules(element)` | pro Fakt und Richtung die geltenden und die überschriebenen Regeln (für die UI) |
+| `View.EffectiveRules(element)` | = `Rules.EffectiveRules(View, element)`: pro Fakt und Richtung die geltenden (gewinnende Stufe) und die überschriebenen Regeln (für die UI); dieselbe Auswahl verwendet der Evaluator |
 | `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
 | `View.DB` | Datenbank erreichbar: letzter Ping **und** letzte Schreibvorgänge erfolgreich, höchstens 5 s alt. Ein kleiner Wächter (eigene Goroutine des Core) pingt alle 5 s mit 2 s Timeout und meldet `DBPing`. Ist er falsch, meldet die API `503` an `GET /healthz` und die UI zeigt ein Banner; `/healthz` liest nur diesen Wert |
 | `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
