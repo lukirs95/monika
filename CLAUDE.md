@@ -25,7 +25,7 @@ Arbeitsregeln für Claude in diesem Repository.
   - Paketnamen kurz, klein, ohne `util`/`common`/`helpers`
   - strukturiertes Logging mit `log/slog`; Gerätelibraries nehmen einen `*slog.Logger` als Option an, Treiber loggen nur über den Logger aus `sdk.SourceConfig`
   - table-driven Tests
-- Code ist mit `gofmt`/`goimports` formatiert und besteht `go vet` sowie den Linter.
+- Code ist mit `gofmt`/`goimports` formatiert und besteht `make vet` sowie `make lint` (golangci-lint, Konfiguration in `.golangci.yml`).
 
 ## Persistenz
 

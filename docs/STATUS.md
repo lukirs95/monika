@@ -89,14 +89,27 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
    5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api/openapi.yaml` (OpenAPI 3.0.3, `make api-check`)
 2. ~~**Code an das Audit anpassen**~~: erledigt am 2026-10-11 in drei Commits: Schema neu erzeugt und Inventar mit hartem Löschen (`DeleteSource` neu, `global_ref` am Zugang, `Source.AccessElementID`, Audit `appear`/`disappear`, `element.params`); Befunde und Läufe mit `element_path`, `ClearReason`, `Rollup.Unchecked`, `clear_hold_seconds`; `preset_step.device_level`, Recht `source_edit`, Migration `00004_reporting.sql`. Für den Core bleibt: Eltern `""` = Zugang beim Übersetzen der Discovery, `element_path` nach der Regel aus `ARCHITECTURE.md` Abschnitt 5 bilden.
-3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
+3. **Erst der ganze Kern, dann Treiber** (Entscheidung vom 2026-10-11): Alles unter `internal/` (dazu das SDK ohne Treiber, Bootstrap und Deployment) entsteht lauffähig und getestet, bevor der erste echte Treiber geschrieben wird. Getestet wird mit einem programmierbaren Fake-Treiber aus `sdk/sdktest`. Reihenfolge:
+   0. ~~`make lint`~~ (golangci-lint v2.14.0 per `go run`, `.golangci.yml`): erledigt, 0 Befunde
+   1. SDK ohne Treiber: Typen, Vokabular, Registry, `Counter`, `sdktest` mit Fake-Treiber (`sdk/`)
+   2. Konfiguration (`internal/config`)
+   3. Fakten und Lebenszeichen (`internal/core/state`)
+   4. Inventar-Logik: Snapshot → `Discovery`, `Diff`, Eltern `""` = Zugang (`internal/core/inventory`)
+   5. Bewertung: Präzedenz, `when`, Befunde, Health und Rollup, Ursache/Symptom, `InScope` (`internal/core/evaluation`)
+   6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
+   7. Supervisor und Scheduler (`internal/core/supervisor`)
+   8. Executor und Preset-Runner (`internal/action`, `internal/preset`)
+   9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
+   10. Anmeldung und Rechte (`internal/auth`)
+   11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
+   12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
+4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
 
 ## Bekannte Lücken
 
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
 - Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
 - `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.
-- Kein Linter festgelegt: `CLAUDE.md` verlangt einen, es gibt aber noch kein `make lint` (Vorschlag: golangci-lint).
 - testcontainers schreibt viele Logzeilen in die Testausgabe.
 
 ## Offene Fragen an den User

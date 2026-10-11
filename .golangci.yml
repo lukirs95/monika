@@ -1,0 +1,40 @@
+# Konfiguration für `make lint` (golangci-lint v2).
+version: "2"
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - nilerr
+    - noctx
+    - revive
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+  settings:
+    errcheck:
+      exclude-functions:
+        # deferred Rollback nach Commit liefert nur „tx is closed“
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+    revive:
+      rules:
+        - name: exported
+          disabled: true # Doku-Kommentare sind deutsch und folgen nicht dem englischen Muster
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: strict # internal/store/postgres/db (sqlc)
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/lukirs95/monika

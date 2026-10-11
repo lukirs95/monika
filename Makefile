@@ -10,6 +10,7 @@ COMPOSE := $(DOCKER) compose -f deploy/compose.yaml
 
 # Go wird lokal vorausgesetzt. Übrige Werkzeuge mit fester Version per go run bzw. als fertiges Docker-Image.
 GOOSE          := $(GO) run github.com/pressly/goose/v3/cmd/goose@v3.28.0
+GOLANGCI_LINT  := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 DBML2SQL       := $(DOCKER) run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false \
                   -v $(CURDIR)/schema:/schema:ro node:24-alpine \
                   npx --yes --loglevel=error -p @dbml/cli@10.3.0 dbml2sql --postgres
@@ -42,6 +43,10 @@ test-integration: ## Integrationstests; startet PostgreSQL per testcontainers in
 vet: ## go vet, inklusive Integrationstests
 	$(GO) vet ./...
 	$(GO) vet -tags integration ./...
+
+.PHONY: lint
+lint: ## golangci-lint (Konfiguration in .golangci.yml), inklusive Integrationstests
+	$(GOLANGCI_LINT) run --build-tags integration ./...
 
 # --- Dokumentation -----------------------------------------------------------
 
