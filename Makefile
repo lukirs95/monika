@@ -39,6 +39,13 @@ test: ## Unit-Tests (ohne Docker)
 test-integration: ## Integrationstests; startet PostgreSQL per testcontainers in Docker
 	$(GO) test -tags integration ./...
 
+BENCH     ?= .
+BENCHTIME ?= 1s
+
+.PHONY: bench
+bench: ## Benchmarks des Core in Stufen bis 1000 Geräte; Auswahl mit BENCH=Muster, Dauer mit BENCHTIME
+	$(GO) test -run '^$$' -bench '$(BENCH)' -benchtime $(BENCHTIME) -benchmem -timeout 60m ./internal/core/...
+
 .PHONY: vet
 vet: ## go vet, inklusive Integrationstests
 	$(GO) vet ./...
