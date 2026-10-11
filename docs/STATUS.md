@@ -112,10 +112,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~8a Executor: Ziele und Anlegen~~ (Auflösung, `critical` und Prüfbedingung einfrieren, Zusammenfassung; `executor.Store`, `evaluation.Condition.Check`): erledigt
       - ~~8b Executor: Ausführung~~ (FIFO pro Element, `Execute` mit Timeout, Prüfbedingung über `FactsChanged`, übergeordnete Läufe, `Cancel`, Stopp nach F8; `Run.Finished`): erledigt
       - ~~8c Preset-Runner~~ (Verwaltung, Start mit eingefrorenen Zielen und Vorabprüfung, Stufen mit Wartezeit, Abbruch, verlorene Ereignisse, Stopp; Entscheidungen K1–K5; `auth.Principal`, `Executor.Targets`/`Finish`/`Result`): erledigt
-   9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`); Entscheidungen L1–L7 vom 2026-10-11 in `services.md`:
+   9. ~~Weiterleitung, Influx-Schreiber, Aufbewahrung~~ (`internal/forward`, `internal/history/influx`, `internal/retention`): erledigt; Entscheidungen L1–L7 vom 2026-10-11 in `services.md`:
       - ~~9a Influx-Schreiber~~ (Punkte pro Element und Measurement, Raten nur ohne Zähler, Health, Rollup, `monika`; gzip, Batches, 1 min Puffer, `InfluxStatus`, Rest beim Stopp): erledigt
       - ~~9b Weiterleitung~~ (Format, Vorlagen, Syslog RFC 5424 über udp/tcp/tls, Webhook; Filter nach Typ, Schwere und Geltungsbereich, Ende auch nach dem Löschen; Warteschlange und Wiederholungen pro Ziel, gesammelte Ergebnisse): erledigt
-      - 9c Aufbewahrung
+      - ~~9c Aufbewahrung~~ (Queries `retention.sql`, `retention.Store` in `postgres` mit Integrationstest, `Cleaner` 1 min nach dem Start und täglich 03:30 Uhr in Batches): erledigt
    10. Anmeldung und Rechte (`internal/auth`)
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
