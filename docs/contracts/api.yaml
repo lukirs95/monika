@@ -496,6 +496,28 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /elements/{element_id}/rules:
+    get:
+      tags: [evaluation]
+      operationId: getElementRules
+      summary: Welche Regeln an einem Element gelten und welche sie überschreiben (view am Element)
+      description: |
+        Pro Fakt und Richtung (`upper`, `lower`, `equality`) die geltenden und die überschriebenen Regeln,
+        aus `View.EffectiveRules`. Enthalten sind auch Regeln, deren Geltungsbereich der Benutzer nicht
+        sehen darf; von ihnen erscheint nur die Art des Geltungsbereichs, nicht dessen Name.
+      parameters:
+        - $ref: '#/components/parameters/ElementID'
+      responses:
+        '200':
+          description: Regeln pro Fakt und Richtung
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EffectiveRuleSet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /elements/{element_id}/user-fields:
     put:
       tags: [inventory]
@@ -1233,7 +1255,7 @@ paths:
           schema: { type: string }
         - name: verb
           in: query
-          schema: { type: string, enum: [create, update, delete, login, login_failed] }
+          schema: { type: string, enum: [create, update, delete, appear, disappear, login, login_failed] }
       responses:
         '200':
           description: Eine Seite
@@ -1506,11 +1528,12 @@ components:
           items: { $ref: '#/components/schemas/FactDef' }
     FactDef:
       type: object
-      required: [key, type]
+      required: [key, type, kind, historized]
       properties:
-        key: { type: string }
-        type: { type: string, enum: [bool, number, string] }
-        unit: { type: string, nullable: true }
+        key: { type: string, description: '<measurement>.<feld> (Vokabular) bzw. <treiber>.<name> (roh); Einheit als Endung' }
+        type: { type: string, enum: [bool, int, float, string] }
+        kind: { type: string, enum: [status, gauge, counter] }
+        historized: { type: boolean, description: 'geht nach InfluxDB; rohe Fakten nie' }
         description: { type: string, nullable: true }
     ActionDef:
       type: object
@@ -1632,6 +1655,27 @@ components:
         clear_value: { type: number, nullable: true, description: 'Hysterese, nur numerisch' }
         hold_seconds: { type: integer, minimum: 0 }
         clear_hold_seconds: { type: integer, minimum: 0, default: 0, description: 'Sollzustand muss so lange anliegen, bevor der Befund endet' }
+    EffectiveRuleSet:
+      type: object
+      required: [fact, direction, effective, overridden]
+      properties:
+        fact: { type: string }
+        direction: { type: string, enum: [upper, lower, equality] }
+        effective:
+          type: array
+          items: { $ref: '#/components/schemas/RuleRef' }
+        overridden:
+          type: array
+          items: { $ref: '#/components/schemas/RuleRef' }
+    RuleRef:
+      type: object
+      required: [rule_id, scope]
+      properties:
+        rule_id: { type: string, format: uuid }
+        name: { type: string }
+        scope: { type: string, enum: [element, ancestor, device, group, global] }
+        scope_element_id: { type: string, format: uuid, nullable: true, description: 'nur, wenn der Benutzer den Geltungsbereich sehen darf' }
+        satisfied: { type: boolean, nullable: true, description: 'nur bei geltenden Regeln: aktuell erfüllt' }
     Rule:
       allOf:
         - type: object
@@ -1736,7 +1780,7 @@ components:
         name: { type: string, minLength: 1 }
         kind: { type: string, enum: [syslog, webhook] }
         enabled: { type: boolean }
-        config: { type: object, additionalProperties: true, description: 'syslog: host, port, protocol, facility; webhook: url, method, headers, body (Vorlage)' }
+        config: { type: object, additionalProperties: true, description: 'syslog: host, port, protocol (udp, tcp, tls), facility; webhook: url, method, headers, body (Vorlage, ohne = Ereignis als JSON). Platzhalter {{secret.<schlüssel>}} nur in url und headers (422 secret_in_body). Format: docs/ARCHITECTURE.md Abschnitt 13' }
         secret_id: { type: string, format: uuid, nullable: true }
         events:
           type: array
@@ -2032,14 +2076,16 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: Statische Treiber-Attribute, nur zur Anzeige
+        params:
+          type: object
+          nullable: true
           description: |
-            Statische Treiber-Attribute, nur zur Anzeige. Reservierter Schlüssel `params`
-            (nur bei Sende-Zielen, `kind = trigger`): Parameter-Schema des Aufrufs als Map auf
-            Param; die UI baut daraus das Formular für `trigger`.
-          properties:
-            params:
-              type: object
-              additionalProperties: { $ref: '#/components/schemas/Param' }
+            Parameter-Schemas von Aktionen mit eigenem Schema an diesem Element (Sende-Ziele: `trigger`):
+            Aktion → Parameter → Param. Die UI baut daraus das Formular.
+          additionalProperties:
+            type: object
+            additionalProperties: { $ref: '#/components/schemas/Param' }
         actions:
           type: array
           items: { type: string }
@@ -2165,7 +2211,7 @@ components:
 
     Facts:
       type: object
-      description: 'Fakten eines Elements; Werte sind bool, Zahl oder String'
+      description: 'Fakten eines Elements, Schlüssel <measurement>.<feld> bzw. <treiber>.<name>; Werte sind bool, Zahl oder String. Ob eine Zahl int oder float ist, sagt der Fakt-Katalog (GET /drivers); Ganzzahlen über 2^53 kann JavaScript nicht exakt darstellen'
       additionalProperties:
         oneOf:
           - type: boolean

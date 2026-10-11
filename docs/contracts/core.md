@@ -42,6 +42,7 @@ classDiagram
         +Runs map~ID, Run~
         +Sources map~ID, SourceStatus~
         +DB DBStatus
+        +History InfluxStatus
         +InScope(scope, element ID) bool
         +EffectiveRules(element ID) []RuleSet
     }
@@ -57,6 +58,7 @@ classDiagram
         SourceStarted, SourceStopped
         SourceFailed, SourceStuck
         RunChanged
+        InfluxStatus
     }
     class Event {
         <<interface>>
@@ -150,13 +152,14 @@ classDiagram
 |---|---|
 | `Core.Reporter(sourceID)` | die Umsetzung von `sdk.Reporter` für eine Quelle: verpackt jede Meldung als Nachricht an die Schleife |
 | `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
-| `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}` |
+| `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}`; Influx-Schreiber: `InfluxStatus` |
 | `View.Links` | alle Links mit Index pro Element (ausgehend und eingehend, nach Typ); für `GET /state`, Ursache/Symptom und die Anzeige von Verbindungen über `represents` |
 | `View.Rules`, `View.Runs` | alle Regeln; laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
 | `View.InScope(scope, element)` | **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
 | `View.EffectiveRules(element)` | pro Fakt und Richtung die geltenden und die überschriebenen Regeln (für die UI) |
 | `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
 | `View.DB` | ob die letzten Schreibvorgänge gelangen; die API meldet sonst `503` an `GET /healthz`, die UI zeigt ein Banner |
+| `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Diff` | was die Discovery bzw. ein Befehl am Inventar geändert hat; `Missing`/`Returned` sind Wechsel von `present` |
 | `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben |
@@ -244,7 +247,7 @@ sequenceDiagram
 **Zusagen bei Last.** Läuft die Schleife hinterher, fasst der Reporter aufeinanderfolgende `Update`s einer Quelle zusammen. Wie er das tut, ist Sache der Implementierung; zugesagt ist:
 
 - **Es gilt immer der neueste Wert** pro Element und Fakt, bei Alarmen die neueste Liste pro Element.
-- **Zwischenwerte können entfallen.** Ein kurzer Wechsel (`signal_present` false und gleich wieder true) ist für die Bewertung dann womöglich nicht sichtbar. Regeln mit `hold_seconds` sollen so kurze Wechsel ohnehin nicht melden.
+- **Zwischenwerte können entfallen.** Ein kurzer Wechsel (`state.signal_present` false und gleich wieder true) ist für die Bewertung dann womöglich nicht sichtbar. Regeln mit `hold_seconds` sollen so kurze Wechsel ohnehin nicht melden.
 - **Die Reihenfolge bleibt erhalten:** Ein `Update` wird nie mit einem `Snapshot` zusammengefasst oder an ihm vorbei verarbeitet; `Connected` und `Disconnected` bleiben einzeln.
 - **Treiber blockieren nicht**, auch wenn die Schleife hinterherhängt.
 

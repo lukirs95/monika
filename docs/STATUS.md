@@ -3,7 +3,7 @@
 Zwischenstand der Implementierung, damit die Arbeit in einer neuen Sitzung nahtlos weitergeht.
 Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 
-Stand: 2026-10-10
+Stand: 2026-10-11
 
 ## Erledigt
 
@@ -60,8 +60,19 @@ Ein externes Audit hat Widersprüche und Lücken gefunden; alle Punkte sind ents
 - **API:** Verteiler mit einem Abo, sofort schreiben und bei Rückstau zusammenfassen, Ringpuffer (100, ohne Fakten) für Netzaussetzer.
 - **Bewusst akzeptiert:** PostgreSQL in der Schleife (mit Absicherung), wiederverwendete IDs (nur dokumentiert), Rechte an Stellvertretern folgen dem Weg; Management-IP und Zugangsdaten ändern später als gekoppelte Abläufe (ARCHITECTURE §17).
 
+## Beschreibung vervollständigen (2026-10-11)
+
+Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erledigt:
+
+- **A:** Konfiguration (öffentliche URL, Proxys, Sitzungen, Logging; TLS nur über Reverse-Proxy), `GET /elements/{id}/rules`, Format der Weiterleitung (JSON, Syslog RFC 5424, Webhook mit Secrets nur in `url`/`headers`), Audit-Verben `appear`/`disappear`, Spalte `element.params`.
+- **B3:** `contracts/bootstrap.md` (eigener `.env`-Parser, unbekannte Variablen brechen ab, `errgroup`).
+- **B1:** `contracts/influx.md` (Line Protocol, Measurements aus dem Vokabular, 1 s Takt, 1 min Puffer, Schema `reporting`).
+- **C:** Aufbewahrung durch eigenen Dienst (180/180/730 Tage), Einzelinstanz-Sperre; Hochverfügbarkeit nicht in Version 1; Management-Adresse und Zugangsdaten werden **nie** über Aktionen geändert.
+- **Vokabular:** `contracts/vocabulary.md`: ein Vokabular für Fakten und InfluxDB (Schlüssel `<measurement>.<feld>`, Einheit im Feldnamen, Richtung als Präfix), Kern-Measurement `state`, Domänen nach Broadcast-Normen, `stream` für alle Netz-Streams, Typen `bool`/`int`/`float`/`string` (echtes `int64`), Arten `status`/`gauge`/`counter`, Messpunkte und Pfade als Elemente, Präfix roher Fakten = Treibername.
+
 ## Nächste Schritte
 
+0. **Beschreibung vervollständigen**, offen: Treiber-Leitfaden `docs/DRIVERS.md` mit erfundenem Beispielgerät (B2), Betrieb und Deployment (B4), danach eine vollständige Durchsicht aller Dokumente (D). Die UI folgt nach dem Backend.
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`
@@ -75,6 +86,7 @@ Ein externes Audit hat Widersprüche und Lücken gefunden; alle Punkte sind ents
    - `rule.clear_hold_seconds`, `preset_step.device_level`, `permission` `source_edit` (`auth.Permission.Global`).
    - `ApplyDiscovery`: Eltern `""` = Zugang, `global_ref` am Zugang.
    - `evaluation.ClearReason`: `fact_missing`, `deleted`; `Rollup.Unchecked`.
+   - `element.params`, Audit-Verben `appear`/`disappear`, `finding.caused_by_id` `SET NULL`, `action_run.parent_id` `CASCADE`, Migration für das Schema `reporting`.
 3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken

@@ -22,6 +22,10 @@ Project monika {
     Was nur angezeigt wird, kommt ins JSONB.
   - Inventar und Health (PostgreSQL), aktuelle Fakten (nur im Speicher des Core)
     und Historie (InfluxDB) werden getrennt.
+  - Externe Werkzeuge (Grafana, Reporting) lesen nur das Schema reporting
+    (handgeschriebene Views in migrations/), nie diese Tabellen direkt.
+  - Aufbewahrung: beendete Befunde, abgeschlossene Läufe und Audit werden nach
+    MONIKA_RETENTION_* gelöscht; aktive Befunde und laufende Läufe nie.
   - Abgrenzung: Was ohne Wissen über Struktur und Topologie funktioniert,
     gehört nicht in Monika (Zeitreihen-Abfragen → Grafana,
     Benachrichtigungs-Routing → Webhook/Alertmanager).
@@ -48,10 +52,12 @@ Project monika {
     wenn das Element gelöscht ist.
 
   Bewertung
-  - Fakten: flache Map mit Punkt-Schlüsseln (running, signal_present,
-    format.rate, ptp_offset, vxl.cpu_temp). Vokabular in Go, drei Stufen:
-    Kern (Pflicht), bekannte Metriken, Rohwerte mit Namespace.
-  - Jeder Fakt-Schlüssel hat einen festen Typ (bool, number, string) aus dem
+  - Fakten: flache Map mit Schlüsseln <measurement>.<feld> (state.running,
+    state.signal_present, video.frame_rate, ptp.offset_ns) bzw. roh
+    <treiber>.<name> (videoxlink.needs_reboot). Vokabular in Go
+    (docs/contracts/vocabulary.md), drei Stufen: Kern (state), bekannte
+    Domänen, Rohwerte. Dieselben Namen sind Measurement und Feld in InfluxDB.
+  - Jeder Fakt-Schlüssel hat einen festen Typ (bool, int, float, string) aus dem
     Fakt-Katalog des SDK bzw. des Treibers; andere Werte verwirft der Core.
   - Regeln beschreiben den Sollzustand: fact <op> value, optional when
     (gelesen als: wenn when, dann fact <op> value).
@@ -59,7 +65,7 @@ Project monika {
     das Element überwacht ist und fact (bei when auch when_fact) dort existiert.
     Unerfülltes when = Sollzustand erfüllt.
   - present ist ein reservierter Fakt: der Core blendet element.present ein.
-  - Zähler: Raten berechnet der Treiber (<fakt>.rate, pro Sekunde), nie die Regel.
+  - Zähler: Raten berechnet der Treiber (<feld>_per_s, pro Sekunde), nie die Regel.
   - Pro Element, Fakt und Richtung (Obergrenze lt/lte, Untergrenze gt/gte,
     Gleichheit eq/ne/in/not_in) gewinnt der spezifischste Geltungsbereich
     (Element > Vorfahren, nähere zuerst > Gruppe, kürzerer Weg zuerst > global),
@@ -86,7 +92,7 @@ Project monika {
 
   Aktionen
   - Aktionen sind einmalige Befehle mit "Übernehmen", nie Regler mit Live-Wirkung.
-  - Befehle (start, stop, reboot, vxl.*) stehen in element.actions.
+  - Befehle (start, stop, reboot, videoxlink.*) stehen in element.actions.
   - Einstellungen sind schreibbare Fakten: Aktion set mit {"schlüssel": wert}.
     Schlüssel = Fakt-Schlüssel; Grenzen stehen in element.settings.
     Prüfung automatisch: jeder gesetzte Schlüssel eq Wert.
@@ -109,10 +115,10 @@ Project monika {
   - Systeme, an die Monika sendet, deren Zustand sie aber nicht liest.
   - Jeder konfigurierte Aufruf ist ein Element (kind = trigger, actions = {trigger}).
   - Parameter gehören zum Aufruf (trigger {...}); die Konfiguration enthält nur
-    Vorlagen und Standardwerte. Parameter-Schema in element.attributes, der
+    Vorlagen und Standardwerte. Parameter-Schema in element.params, der
     Treiber prüft. Kein set, keine settings; der Treiber ändert seine
     Konfiguration nie.
-  - Fakten nur über Aufrufe: last_ok, last_called_at, last_duration_ms,
+  - Fakten nur über Aufrufe: last_ok, last_called_at, last_duration,
     protokollspezifisch z.B. http.status.
   - Ergebnis: angenommen → accepted (Endzustand), abgelehnt → rejected,
     nicht erreicht → failed.
@@ -249,7 +255,7 @@ Enum finding_origin {
 
 Table element {
   id            uuid        [pk, default: `uuidv7()`]
-  kind          text        [not null, note: 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, tunnel, processing, sensor, trigger']
+  kind          text        [not null, note: 'device, group, access (reserviert, nur vom Core), module, port, network_interface, clock, sender, receiver, peer, path, tunnel, processing, sensor, trigger; siehe docs/contracts/vocabulary.md']
   parent_id     uuid        [note: 'nur physische/strukturelle Hierarchie; Treiber-Elemente ohne Eltern im Treiber hängen am Zugangs-Element']
   device_id     uuid        [note: 'zugehöriges Gerät (Element mit kind = device, gesichert in der Anwendung); beim Gerät selbst = eigene id; NULL bei Gruppen']
   source_id     uuid        [note: 'besitzende Quelle; NULL bei Gerät und Gruppe']
@@ -262,11 +268,12 @@ Table element {
   transport     text        [note: 'sdi, madi, analog, aes3, st2110-20, st2110-30, st2110-40, aes67, xlink, srt, ndi, ...']
   direction     port_direction [note: 'Fähigkeit des Anschlusses; die aktuelle Richtung steht in den Fakten']
   name          text        [note: 'Name, wie das Gerät ihn meldet']
-  attributes    jsonb       [not null, default: `'{}'::jsonb`, note: 'statische Treiber-Attribute, nur zur Anzeige; bei Sende-Zielen unter params das Parameter-Schema des Aufrufs (wie settings, zusätzlich default)']
+  attributes    jsonb       [not null, default: `'{}'::jsonb`, note: 'statische Treiber-Attribute, nur zur Anzeige']
   position      int         [note: 'Sortierung innerhalb des Parents']
-  actions       text[]      [not null, default: `'{}'`, note: 'unterstützte Befehle, z.B. {start,stop,reboot,vxl.reset_video_buffer}']
+  actions       text[]      [not null, default: `'{}'`, note: 'unterstützte Befehle, z.B. {start,stop,reboot,videoxlink.reset_video_buffer}']
   critical_actions text[]   [not null, default: `'{}'`, note: 'Befehle, die an diesem Element zusätzlich kritisch sind (Teilmenge von actions)']
-  settings      jsonb       [note: 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical, z.B. {"bitrate": {"type": "int", "min": 1, "max": 100}, "eth0.ip": {"type": "ipv4", "critical": true}}']
+  settings      jsonb       [note: 'schreibbare Fakt-Schlüssel mit Typ, Grenzen und optional critical bzw. write_only, z.B. {"codec.bitrate_mbps": {"type": "float", "min": 1, "max": 100}, "ptp.domain": {"type": "int", "critical": true}}']
+  params        jsonb       [note: 'Parameter-Schemas von Aktionen, die an diesem Element ein eigenes Schema haben (Sende-Ziele: trigger), z.B. {"trigger": {"state": {"type": "enum", "values": ["off", "program"], "default": "off"}}}']
 
   // --- Lebenszyklus, vom Core ---
   present       boolean     [not null, default: true, note: 'false = verschwunden; Zeile bleibt erhalten. Bei der Bewertung als reservierter Fakt present sichtbar']
@@ -434,7 +441,7 @@ Table rule {
   match_driver     text
 
   // Sollzustand: fact <op> value
-  fact             text     [not null, note: 'running, signal_present, format.rate, ptp_offset, vxl.cpu_temp, ...']
+  fact             text     [not null, note: 'Fakt-Schlüssel, z.B. state.signal_present, ptp.offset_ns, sdi.crc_errors_per_s, videoxlink.needs_reboot']
   op               rule_op  [not null]
   value            jsonb    [not null, note: 'true | 50 | "i" | [50, 59.94]']
 
@@ -481,7 +488,7 @@ Table finding {
   severity     severity       [not null]
   message      text           [note: 'lesbarer Text, inkl. Regelname zum Zeitpunkt des Befunds']
   details      jsonb          [note: 'Sollwert, Istwert, Regel-Snapshot; beim Ende cleared_reason (resolved, rule_deleted, rule_disabled, rule_changed, unmonitored, element_missing, fact_missing, source_disabled, deleted)']
-  caused_by_id uuid           [ref: > finding.id, note: 'NULL = Ursache, sonst Symptom: zeigt auf die Wurzel; wird bei jeder Befundänderung neu abgeleitet und friert mit dem Ende ein']
+  caused_by_id uuid           [note: 'NULL = Ursache, sonst Symptom: zeigt auf die Wurzel; wird bei jeder Befundänderung neu abgeleitet und friert mit dem Ende ein']
 
   raised_at    timestamptz    [not null]
   cleared_at   timestamptz    [note: 'NULL = aktiv']
@@ -502,6 +509,7 @@ Table finding {
 }
 
 Ref: finding.rule_id > rule.id [delete: set null]
+Ref: finding.caused_by_id > finding.id [delete: set null]
 
 // ---------------------------------------------------------------------------
 // Aktionen und Presets
@@ -525,8 +533,8 @@ Table preset_step {
   position          int     [not null, note: 'Sortierung innerhalb der Stufe (nur Anzeige)']
   delay_ms          int     [not null, default: 0, note: 'Wartezeit ab Beginn der Stufe, bevor dieser Schritt startet']
   element_id        uuid    [not null, note: 'Element, Gerät oder Gruppe (Verteilung auf Mitglieder)']
-  action            text    [not null, note: 'start, stop, set, reboot, trigger, vxl.*']
-  params            jsonb   [note: 'bei set: {"bitrate": 25, "codec": "h265"}; bei trigger: Overrides']
+  action            text    [not null, note: 'start, stop, set, reboot, trigger, videoxlink.*']
+  params            jsonb   [note: 'bei set: {"codec.bitrate_mbps": 25, "codec.format": "HEVC"}; bei trigger: Overrides']
   continue_on_error boolean [not null, default: false, note: 'false = Fehler bricht das Preset ab']
   device_level      boolean [not null, default: false, note: 'nur bei Gerät oder Gruppe als Ziel: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente']
   driver            text    [note: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true, z.B. reboot über videoxlink']
@@ -548,19 +556,19 @@ Ref: preset_step.element_id > element.id [delete: restrict]
 
 Table action_run {
   id             uuid          [pk, default: `uuidv7()`]
-  parent_id      uuid          [ref: > action_run.id, note: 'Hierarchie: Preset-Lauf → Schritt-Lauf → Element-Läufe (bei Gruppen/Geräten)']
+  parent_id      uuid          [note: 'Hierarchie: Preset-Lauf → Schritt-Lauf → Element-Läufe (bei Gruppen/Geräten)']
   preset_id      uuid          [note: 'gesetzt am Wurzel-Lauf eines Presets']
   preset_step_id uuid
 
   element_id     uuid          [note: 'Ziel; bei Sammelaktion die Gruppe/das Gerät; NULL nur am Preset-Wurzel-Lauf. Ohne Fremdschlüssel: die Historie überlebt das Löschen']
   element_path   text          [note: 'Anzeigename des Ziels beim Anlegen; NULL nur am Preset-Wurzel-Lauf']
   source_id      uuid          [note: 'ausführende Quelle; NULL bei übergeordneten Läufen. Ohne Fremdschlüssel']
-  action         text          [not null, note: 'start, stop, set, reboot, vxl.*; am Preset-Wurzel-Lauf: preset']
+  action         text          [not null, note: 'start, stop, set, reboot, videoxlink.*; am Preset-Wurzel-Lauf: preset']
   params         jsonb         [note: 'bei set: zu setzende Werte; bei trigger: Overrides nur für diesen Aufruf']
   status         action_status [not null, default: 'pending']
   critical       boolean       [not null, default: false, note: 'Snapshot: war der Lauf kritisch (Aktion oder ein gesetzter Schlüssel)']
 
-  verify         jsonb         [note: 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "bitrate", "op": "eq", "value": 20}]}']
+  verify         jsonb         [note: 'Snapshot der Prüfbedingung: {"timeout_ms": 10000, "conditions": [{"fact": "codec.bitrate_mbps", "op": "eq", "value": 20}]}']
   response       jsonb         [note: 'Antwort des Geräts, z.B. DeviceError mit Detail und abgelehnten Feldern; bei übergeordneten Läufen die Zusammenfassung inkl. übersprungener Mitglieder']
 
   requested_by_id uuid         [not null, ref: > app_user.id, note: 'Mensch oder Dienstkonto (API-Token)']
@@ -591,6 +599,7 @@ Table action_run {
   '''
 }
 
+Ref: action_run.parent_id > action_run.id [delete: cascade]
 Ref: action_run.preset_id > preset.id [delete: set null]
 Ref: action_run.preset_step_id > preset_step.id [delete: set null]
 
@@ -742,7 +751,7 @@ Table audit_log {
   id          uuid        [pk, default: `uuidv7()`]
   actor_id    uuid        [ref: > app_user.id, note: 'NULL = Monika selbst']
   at          timestamptz [not null, default: `now()`]
-  verb        text        [not null, note: 'create | update | delete | login | login_failed']
+  verb        text        [not null, note: 'create | update | delete | appear | disappear | login | login_failed; appear/disappear nur von der Discovery']
   object_type text        [not null, note: 'rule, preset, element, element_link, device_source, role, permission_grant, forward_target, ...']
   object_id   uuid
   before      jsonb       [note: 'Geheimnisse geschwärzt']
@@ -754,7 +763,7 @@ Table audit_log {
     at
   }
 
-  Note: 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt neue und weggefallene Links sowie erscheinende und verschwindende Elemente mit actor_id = NULL.'
+  Note: 'Alle Änderungen außer Aktionen; Aktionen stehen in action_run. Die Discovery schreibt mit actor_id = NULL: create für zum ersten Mal gesehene Elemente, appear und disappear für zurückkehrende und verschwindende, create und delete für Links. Aufbewahrung: MONIKA_RETENTION_AUDIT.'
 }
 
 // ---------------------------------------------------------------------------
@@ -766,7 +775,7 @@ Table forward_target {
   name             text         [not null]
   kind             forward_kind [not null]
   enabled          boolean      [not null, default: true]
-  config           jsonb        [not null, default: `'{}'::jsonb`, note: 'syslog: host, port, protocol, facility · webhook: url, method, headers, body (Vorlage)']
+  config           jsonb        [not null, default: `'{}'::jsonb`, note: 'syslog: host, port, protocol (udp, tcp, tls), facility · webhook: url, method, headers, body (Vorlage); Platzhalter {{secret.<schlüssel>}} nur in url und headers']
   secret_id        uuid         [note: 'z.B. Token im Webhook-Header']
 
   // Filter
@@ -780,7 +789,7 @@ Table forward_target {
   created_at       timestamptz  [not null, default: `now()`]
   updated_at       timestamptz  [not null, default: `now()`]
 
-  Note: 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox.'
+  Note: 'Best effort: wenige Wiederholungen im Speicher, danach last_error. Keine Outbox. Format der Ereignisse: docs/ARCHITECTURE.md Abschnitt 13.'
 }
 
 Ref: forward_target.secret_id > secret.id [delete: restrict]

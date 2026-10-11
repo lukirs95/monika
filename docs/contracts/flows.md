@@ -14,7 +14,8 @@ Discovery-Lauf und „Fakt → Befund“ stehen in `core.md` (Abläufe: Meldunge
 | Executor | `internal/action` | Läufe: Warteschlange pro Element, Ausführung, Prüfbedingung |
 | Preset-Runner | `internal/preset` | Stufen, Verzögerungen, Rechte-Vorabprüfung |
 | Weiterleitung | `internal/forward` | Ereignisse filtern und an syslog/webhook senden |
-| Influx-Schreiber | `internal/history/influx` | Fakten und Health im festen Takt aus der `View` |
+| Influx-Schreiber | `internal/history/influx` | Fakten und Health im festen Takt aus der `View` ([`influx.md`](influx.md)) |
+| Aufbewahrung | `internal/retention` | löscht nachts alten Verlauf ([`services.md`](services.md)) |
 | Rechte | `internal/auth` | `Allowed(view, user, permission, element)` für API und Preset-Runner |
 | API | `internal/api` | Anmeldung, Rechte, Befehle an Core/Executor/Preset-Runner, Live-Push über einen Verteiler mit einem Abo am Core |
 
@@ -31,8 +32,12 @@ sequenceDiagram
     participant X as Executor, Weiterleitung, Influx
     participant A as API
 
-    M->>M: Konfiguration aus Umgebung/.env, Master-Keys parsen
+    M->>M: Konfiguration aus Umgebung/.env, Master-Keys parsen ([bootstrap.md](bootstrap.md))
     M->>DB: postgres.Open (Ping)
+    M->>DB: Einzelinstanz-Sperre (pg_try_advisory_lock)
+    alt Sperre belegt
+        M->>M: Abbruch: eine andere Monika läuft auf dieser Datenbank
+    end
     M->>DB: postgres.Migrate
     M->>Sec: VerifyAndRotate
     alt ein Secret nicht lesbar
@@ -43,7 +48,7 @@ sequenceDiagram
     M->>DB: unterbrochene Läufe abschließen (siehe Aktion)
     M->>C: Laden: Inventar, Regeln, aktive Befunde, Health
     M->>+C: go Run(ctx)
-    M->>X: go Run(ctx) (abonnieren Ereignisse)
+    M->>X: go Run(ctx) (abonnieren Ereignisse, dazu Aufbewahrung)
     C->>Sup: Start(alle aktivierten Quellen)
     loop pro Quelle
         Sup->>Sec: Value(secret_id)
@@ -55,6 +60,7 @@ sequenceDiagram
 
 - **Abbruch statt Warten:** Ist die Konfiguration ungültig, die Datenbank nicht erreichbar, eine Migration fehlerhaft oder ein Secret nicht lesbar, beendet sich Monika mit Fehler. Neustarts übernimmt die Umgebung (Docker, systemd).
 - Die API öffnet zuletzt, damit keine Anfrage einen halb gestarteten Core sieht.
+- **Einzelinstanz:** Die Sperre ist ein Advisory Lock auf Sitzungsebene und hängt an einer eigenen Verbindung, die Monika bis zum Ende hält. Zwei Instanzen auf derselben Datenbank würden alle Geräte doppelt abfragen und Aktionen doppelt ausführen. Reißt die Verbindung ab, beendet sich Monika (die Sperre wäre sonst frei für eine zweite Instanz).
 
 ## Herunterfahren
 
@@ -75,7 +81,7 @@ sequenceDiagram
     M->>Sup: alle Quellen stoppen (ctx), höchstens 10 s je Quelle
     M->>C: Schleife beenden: Rest verarbeiten, letztes SaveHealth
     M->>X: Rest senden bzw. schreiben (kurze Frist)
-    M->>DB: Pool schließen
+    M->>DB: Einzelinstanz-Sperre freigeben, Pool schließen
 ```
 
 **Offene Läufe beim Stopp** enden wie nach einem Neustart (F2), nur mit Grund „Monika gestoppt“; `cancelled` bleibt dem Abbrechen durch User oder Preset vorbehalten:
@@ -253,3 +259,4 @@ sequenceDiagram
 | F8 | Offene Läufe beim geordneten Stopp | wie F2, Grund „Monika gestoppt“; `sent` wartet höchstens 5 s auf die Antwort; `cancelled` nur bei echtem Abbrechen |
 | F9 | Wann werden Preset-Ziele aufgelöst? | beim Start, eingefroren; die Vorabprüfung gilt genau diesen Zielen |
 | F10 | Preset abbrechen | Wurzellauf über `Runner.Cancel`, alles andere über `Executor.Cancel`; ein abgebrochener übergeordneter Lauf endet als `cancelled` |
+| F11 | Zweite Instanz auf derselben Datenbank | Advisory Lock beim Start; belegt → Abbruch; Verbindung der Sperre verloren → Monika beendet sich |

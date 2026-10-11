@@ -1,6 +1,6 @@
 # Monika – Architektur
 
-**Stand:** 2026-10-10 · **Status:** verbindlich für alle folgenden Arbeiten
+**Stand:** 2026-10-11 · **Status:** verbindlich für alle folgenden Arbeiten
 **Schema-Referenz:** [`schema/monika.dbml`](schema/monika.dbml) (PostgreSQL). Dieses Dokument erklärt das *Warum* und die Regeln; das DBML ist die exakte Definition der Tabellen.
 
 ---
@@ -84,7 +84,7 @@ Die erste Treiber-Generation:
 | Erweiterbarkeit | **Plugin-getrieben nach dem Telegraf-Modell**: Treiber implementieren die Interfaces des Cores und werden **zur Compile-Zeit** eingebunden |
 | Hauptdatenbank | **PostgreSQL ≥ 18** (wegen nativem `uuidv7()`) |
 | Historie | **InfluxDB** |
-| Auswertung der Historie | **Grafana** (bestehend), liest InfluxDB und löst Namen über PostgreSQL auf |
+| Auswertung der Historie | **Grafana** (bestehend), liest InfluxDB und löst Namen über das Schema `reporting` in PostgreSQL auf |
 | IDs | **UUIDv7**, Typ `uuid` (nie `text`), im Normalfall in Go erzeugt (`uuid.NewV7()`) |
 | Anmeldung | lokal; **OIDC** ist vorbereitet und kommt später |
 | Geheimnisse | **verschlüsselter Secret-Store in PostgreSQL** (AES-256-GCM); Master-Key aus der Umgebung bzw. `.env` |
@@ -210,28 +210,29 @@ Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separa
 
 - Ein Treiber fasst **nur Elemente und Links seiner eigenen Quelle** an.
 - Ein Treiber bietet **keine Aktion an, die `feeds`-Links erzeugt oder ändert** (z. B. XLink `DecoderSender`). `uses`-Links dürfen geändert werden (z. B. Uplink-Interface eines Decoders).
-- Ein Treiber bewertet nicht. Er meldet `signal_present: false`, nicht „Fehler“.
+- Ein Treiber bewertet nicht. Er meldet `state.signal_present: false`, nicht „Fehler“.
 - Ein Treiber meldet nie Elemente mit den reservierten `kind`-Werten `device`, `group` und `access` und nie den reservierten Fakt `present`.
 - Ein Treiber verändert nie seine eigene Konfiguration (`device_source.config`); sie gehört dem User.
-- Ein Treiber bietet keine Einstellung an, die die Adresse seiner eigenen Quelle ändert (z. B. die Management-IP, für die die Quelle verbunden ist); nach dem Setzen wäre die Quelle unerreichbar (Kopplung offen, Abschnitt 17).
-- Ein Treiber bietet nie geheime Werte (Passwörter, Schlüssel) als Einstellung an: Parameter eines Laufs stehen im Klartext in `action_run.params`.
+- Ein Treiber bietet **nie** eine Einstellung an, die die Management-Adresse ändert, und nie geheime Werte (Passwörter, Schlüssel). Nach dem Setzen der Adresse wäre die Quelle unerreichbar; Parameter eines Laufs stehen im Klartext in `action_run.params`. Monika bietet dafür auch später keinen Weg: Management-Adresse und Zugangsdaten ändert der Betreiber am Gerät und in der Quelle. Bietet ein Treiber es trotzdem an, verstößt er gegen den Vertrag.
 - Zugangsdaten stehen nie in `config`, sondern werden über `secret_id` aus dem Secret-Store bezogen. Der Core entschlüsselt und übergibt dem Treiber den Klartext.
 
 ### Vokabular in drei Stufen
 
-Für Fakten und Aktionen gilt dasselbe Muster:
+Das vollständige Vokabular (Arten, Transporte, Fakten mit Typ und Einheit, Measurements, Aktionen, Namensräume, reservierte Namen) steht in [`contracts/vocabulary.md`](contracts/vocabulary.md). Für Fakten und Aktionen gilt dasselbe Muster:
 
 | Stufe | Fakten | Aktionen | Verwendung |
 |---|---|---|---|
-| **Kern** (einheitliche Bedeutung) | `reachable`, `running`, `signal_present`, `connected`, `format.*`, `last_ok`, `last_called_at`, `last_duration_ms` (Sende-Ziele) | `start`, `stop`, `reboot`, `set`, `trigger` | generische UI, Sammelaktionen, herstellerübergreifende Regeln |
-| **Bekannt** (benannt, optional) | `bitrate`, `packet_loss`, `ptp_offset`, `crc_errors`, `crc_errors.rate` | – | Regeln und Dashboards über Hersteller hinweg |
-| **Roh** (mit Namespace) | `vxl.cpu_temp`, `emb.sfp_rx_power`, `http.status` | `vxl.reset_video_buffer`, `vxl.flush_audio` | Detailseite, InfluxDB |
+| **Kern** (einheitliche Bedeutung) | Measurement `state`: `state.running`, `state.signal_present`, `state.connected`, `state.reachable`, `state.current_direction` | `start`, `stop`, `reboot`, `set`, `trigger` | generische UI, Sammelaktionen, Gruppenregeln über Hersteller und Transporte |
+| **Bekannt** (Domänen) | `system.*`, `sdi.*`, `video.*`, `audio.*`, `ptp.*`, `stream.*`, `sfp.*`, … z. B. `ptp.offset_ns`, `sfp.rx_power_dbm`, `sdi.crc_errors` | `reset_counters` | Regeln und Dashboards über Hersteller hinweg |
+| **Roh** (Treibername als Präfix) | `videoxlink.p2p`, `videoxlink.needs_reboot`, `http.status_code` | `videoxlink.reset_video_buffer`, `videoxlink.flush_audio` | Detailseite und Regeln; nie in Zeitreihen |
 
-Ein Rohwert wird zum bekannten Wert, sobald ein zweiter Treiber denselben Wert liefert. **Jeder Schlüssel hat einen festen Typ**: Kern- und bekannte Fakten im Vokabular, Rohwerte im Fakt-Katalog des Treibers. Damit prüft der Core Regeln beim Speichern gegen den Typ, und InfluxDB sieht pro Schlüssel nie zwei Typen.
+Ein Rohwert wird zum bekannten Wert, sobald ein zweiter Treiber denselben Wert liefert. **Jeder Schlüssel hat einen festen Typ und eine feste Einheit**: Kern- und bekannte Fakten im Vokabular, Rohwerte im Fakt-Katalog des Treibers. Damit prüft der Core Regeln beim Speichern gegen den Typ.
+
+**Fakten und Zeitreihen sprechen dasselbe Vokabular:** Der Fakt-Schlüssel ist `<measurement>.<feld>` mit der Einheit im Feldnamen (`ptp.offset_ns`); derselbe Name steht in Regeln, UI und InfluxDB. Ein Messpunkt, den es mehrfach gibt (Lüfter, Temperaturen, Pfade nach ST 2022-7), ist ein eigenes Element, kein Tag. Rohe Fakten gehen nie nach InfluxDB; was historisiert werden soll, kommt ins Vokabular.
 
 `present` ist ein **reservierter Fakt**: Ihn setzt kein Treiber, sondern der Core blendet bei der Bewertung die Spalte `element.present` ein. So lässt sich das Verschwinden eines Elements per Regel überwachen (Abschnitt 8).
 
-**Zähler und zeitliche Ableitungen** berechnet der Treiber, nicht die Regel. Das SDK stellt dafür einen Zähler-Helfer bereit: Er bekommt Rohwerte und liefert die Rate pro Sekunde, erkennt Resets (Aktion, Reboot) und Überläufe (bei angegebener Breite) und liefert nach dem Start erst ab dem zweiten Wert eine Rate. Abgeleitete Fakten heißen `<fakt>.rate` und sind **pro Sekunde** angegeben, damit ihre Bedeutung nicht vom Abfragetakt abhängt.
+**Zähler und zeitliche Ableitungen** berechnet der Treiber, nicht die Regel. Das SDK stellt dafür einen Zähler-Helfer bereit: Er bekommt Rohwerte und liefert die Rate pro Sekunde, erkennt Resets (Aktion, Reboot) und Überläufe (bei angegebener Breite) und liefert nach dem Start erst ab dem zweiten Wert eine Rate. Die Rate eines Zählers heißt `<feld>_per_s` (z. B. `sdi.crc_errors_per_s`) und ist **pro Sekunde** angegeben, damit ihre Bedeutung nicht vom Abfragetakt abhängt. Geräte, die nur eine Rate liefern, melden nur sie. Jeder Fakt hat einen von vier Typen: `bool`, `int` (`int64`), `float` (`float64`), `string`.
 
 ---
 
@@ -252,7 +253,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 
 ### `kind`-Vokabular
 
-`device`, `group`, `access`, `module`, `port`, `network_interface`, `clock`, `sender`, `receiver`, `peer`, `tunnel`, `processing`, `sensor`, `trigger`
+`device`, `group`, `access`, `module`, `port`, `network_interface`, `clock`, `sender`, `receiver`, `peer`, `path`, `tunnel`, `processing`, `sensor`, `trigger` (Bedeutung und Abgrenzung: [`contracts/vocabulary.md`](contracts/vocabulary.md))
 
 - **`device`, `group` und `access` sind reserviert:** Diese Elemente legt nur der Core an, Treiber melden sie nie. Alle anderen Elemente entstehen nur durch die Discovery.
 
@@ -272,7 +273,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 - Der Core legt es an, wenn eine Quelle angelegt wird; es lebt so lange wie die Quelle und verschwindet nie (`present` bleibt `true`, `last_seen_at` zeigt die letzte vollständige Discovery).
 - Es hat keine `external_id`; Treiber sprechen es mit leerer ID an. Pro Quelle gibt es genau eines.
 - **Alle Treiber-Elemente der Quelle hängen darunter.** Was über `parent_id` wirkt, wirkt damit pro Quelle: `monitored = false` am Zugang legt die Quelle still, ein Recht am Zugang gilt für die ganze Quelle, ein Fehler am Zugang ist Ursache für die Befunde ihrer Elemente.
-- Hier hängen Fakten, die das ganze Gerät betreffen (`vxl.cpu_temp`, `NeedsReboot`, Hostname des Geräts), Aktionen für das ganze Gerät (`reboot`) und die Befunde `source.unreachable` und `source.discovery_failed`.
+- Hier hängen Fakten, die das ganze Gerät betreffen (`system.temperature_c`, `system.licenses_used`, `videoxlink.needs_reboot`), Aktionen für das ganze Gerät (`reboot`) und die Befunde `source.unreachable` und `source.discovery_failed`.
 - Seine `global_ref` ist die globale ID des Geräts aus Sicht dieser Quelle (`xlink:X8A9001`), falls der Treiber eine meldet. Darüber verweisen andere Geräte auf dieses (Abschnitt 7).
 - Sein Name ist standardmäßig der Treibername (z. B. „XLink-API“). Die UI zeigt das Gerät als Teilbaum pro Quelle; der Zugang ist deren Kopf mit Fakten, Aktionen und Befunden.
 
@@ -289,7 +290,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 - Löschen und Anlegen von Geräten und Gruppen erfordert `inventory_edit` global, Quellen anlegen, ändern und löschen `source_edit` (Abschnitt 12). Was dabei mitgelöscht wird, braucht keine zusätzlichen Rechte.
 - Eine Quelle lässt sich außerdem deaktivieren (`enabled = false`): Ihr Treiber läuft nicht, ihre Elemente gelten als nicht überwacht.
 - **Abschluss jeder Discovery:** Der Core vergleicht jeden Snapshot im Speicher mit dem vorigen. Hat sich die Struktur geändert, setzt ein Statement pro Quelle `last_seen_at` aller gemeldeten Elemente und `present = false` für alle übrigen (außer dem Zugangs-Element). Ohne Strukturänderung schreibt er nur `last_seen_at`, höchstens alle 5 min; es ist damit auf 5 min genau.
-- **Audit der Discovery:** Neue und weggefallene Links sowie erscheinende und verschwindende Elemente schreibt die Discovery mit `actor_id = NULL` in `audit_log`. Änderungen an Attributen werden nicht protokolliert.
+- **Audit der Discovery:** Die Discovery schreibt mit `actor_id = NULL` in `audit_log`: `create` für ein zum ersten Mal gesehenes Element, `appear` für ein zurückgekehrtes, `disappear` für ein verschwundenes; Links mit `create` und `delete`. Änderungen an Attributen werden nicht protokolliert.
 - **Wiederverwendete IDs:** Manche Geräte vergeben gelöschte IDs neu (XLink-Units). Ein neues Element erbt dann Labels, Regeln, Mitgliedschaften, Rechte und Preset-Schritte des alten. Faustregel: **Labels, Regeln, Rechte und Preset-Ziele gehören an stabile Dinge** (Ports, Geräte, vor allem Gruppen).
 
 ### Besitz der Spalten
@@ -368,8 +369,8 @@ L1  X8A1001
 ```
 
 - Unter dem Peer hängen **nur die Remote-Units, die mit diesem lokalen Gerät verbunden sind** (Hin- und Rückwege), keine Health-Daten des Remote-Geräts.
-- Die Stellvertreter kommen aus der **lokalen Link-Konfiguration** (`Decoder.Sender`, `Encoder.Receiver`). Ist die Gegenstelle weg, bleiben Peer und Stellvertreter im Baum; der Peer meldet `connected: false`, die Stellvertreter, was das lokale Gerät über sie weiß.
-- **Der Peer repräsentiert das Remote-Gerät:** Er meldet `represents` auf die `global_ref` des Remote-Geräts (`xlink:X8A9001`). Ist das Remote-Gerät nicht in Monika, bleibt der Link unaufgelöst; der Peer zeigt die Verbindung trotzdem (`connected`, `rtt`, `p2p`).
+- Die Stellvertreter kommen aus der **lokalen Link-Konfiguration** (`Decoder.Sender`, `Encoder.Receiver`). Ist die Gegenstelle weg, bleiben Peer und Stellvertreter im Baum; der Peer meldet `state.connected: false`, die Stellvertreter, was das lokale Gerät über sie weiß.
+- **Der Peer repräsentiert das Remote-Gerät:** Er meldet `represents` auf die `global_ref` des Remote-Geräts (`xlink:X8A9001`). Ist das Remote-Gerät nicht in Monika, bleibt der Link unaufgelöst; der Peer zeigt die Verbindung trotzdem (`state.connected`, `stream.rtt_ms`, `videoxlink.p2p`).
 - Jede lokale Verbindung hat ihren eigenen Peer (L1↔R1 und L2↔R1 sind zwei Verbindungen mit eigener RTT).
 - **Wird das Remote-Gerät zusätzlich in Monika angelegt**, ist es ein normales Gerät mit eigener Quelle. Sobald diese ihren ersten Snapshot liefert, löst der Core die Links auf: Peer → Zugang des Remote-Geräts, Stellvertreter-Unit → Original-Unit. Die UI zeigt dann am Remote-Gerät, wer es sieht („L1 · verbunden · RTT 12 ms“, „L2 · nicht verbunden“). Diskrepanzen (Gerät ist erreichbar, Sicht von L2 sagt „nicht verbunden“) deuten auf die Strecke.
 - **`global_ref` steht nur am Element im eigenen Baum**, nie an Stellvertretern.
@@ -381,9 +382,9 @@ L1  X8A1001
 
 ### Fakten
 
-Die Fakten eines Elements sind eine **flache Map** aller aktuellen Werte mit Punkt-Schlüsseln, z. B. `{"running": true, "signal_present": true, "format.rate": 50}`. Sie liegen **nur im Speicher des Core** und werden im festen Takt nach InfluxDB geschrieben (Abschnitt 14), nicht in PostgreSQL. Gerätegemeldete Alarme werden direkt zu Befunden.
+Die Fakten eines Elements sind eine **flache Map** aller aktuellen Werte mit Punkt-Schlüsseln, z. B. `{"state.running": true, "state.signal_present": true, "video.frame_rate": 50, "video.scan": "i"}`. Sie liegen **nur im Speicher des Core** und werden im festen Takt nach InfluxDB geschrieben (Abschnitt 14), nicht in PostgreSQL. Gerätegemeldete Alarme werden direkt zu Befunden.
 
-- **Das Alter eines Werts sagt nichts über seine Gültigkeit.** Viele Treiber melden nur Änderungen; ein Encoder, der seit 8 Stunden läuft, hat ein 8 Stunden altes `running: true`. Solange die Quelle **Live** ist, gilt jeder zuletzt gemeldete Wert.
+- **Das Alter eines Werts sagt nichts über seine Gültigkeit.** Viele Treiber melden nur Änderungen; ein Encoder, der seit 8 Stunden läuft, hat ein 8 Stunden altes `state.running: true`. Solange die Quelle **Live** ist, gilt jeder zuletzt gemeldete Wert.
 - **Live** ist eine Quelle nach `Connected` und einem vollständigen Snapshot, solange ihre Lebenszeichen aktuell sind. Ist sie nicht Live (Start, Verbindungsaufbau, Abbruch, Fehler, hängender Treiber), bleiben ihre Fakten als „zuletzt gemeldet“ im Speicher, werden aber nicht bewertet und nicht nach InfluxDB geschrieben. Der nächste Snapshot ersetzt sie.
 - Jeder Fakt hat den festen Typ aus dem Fakt-Katalog (Abschnitt 4).
 - `present` ist ein reservierter Fakt aus der Spalte `element.present` (Abschnitt 4).
@@ -400,7 +401,7 @@ fact <op> value          [when when_fact <when_op> when_value]
 
 | Bestandteil | Inhalt |
 |---|---|
-| `fact` | Fakt-Schlüssel, z. B. `running`, `format.rate`, `vxl.cpu_temp` |
+| `fact` | Fakt-Schlüssel, z. B. `state.running`, `video.frame_rate`, `system.temperature_c` |
 | `op` | `eq`, `ne` (bool, Zahl, String) · `lt`, `lte`, `gt`, `gte` (Zahl) · `in`, `not_in` (Liste) |
 | `value` | JSONB: `true`, `50`, `"i"`, `[50, 59.94]` |
 | `when` | optionale Vorbedingung im selben Format |
@@ -427,7 +428,7 @@ Auswertung:
   2. Bei gleichem Geltungsbereich: mehr Filter (`match_*`) = spezifischer.
   3. **Alle Regeln der gewinnenden Stufe gelten**, z. B. Stufen `lte 75` (`warning`) und `lte 85` (`error`) oder gleich spezifische Regeln aus zwei unabhängigen Gruppen.
 - Der Geltungsbereich geht immer vor den Filtern: Eine globale Regel mit Filtern schlägt nie eine Gruppenregel. Die Präzedenz wird vor `when` bestimmt. Die UI zeigt pro Element, Fakt und Richtung, welche Regeln gelten und welche sie überschreiben.
-- **Ein numerisches `eq` ist Gleichheit**, nicht Ober- und Untergrenze: Global `crc_errors eq 0` und am Element `crc_errors lte 100` gelten beide. Wer überschreiben will, nimmt dieselbe Richtung; die UI zeigt, was zusätzlich gilt.
+- **Ein numerisches `eq` ist Gleichheit**, nicht Ober- und Untergrenze: Global `sdi.crc_errors eq 0` und am Element `sdi.crc_errors lte 100` gelten beide. Wer überschreiben will, nimmt dieselbe Richtung; die UI zeigt, was zusätzlich gilt.
 - Nicht überwachte Elemente (effektives `monitored = false`, Abschnitt 5) sind von allen Regeln und von Gerätealarmen ausgenommen.
 - Operator und Werttyp werden in Go beim Speichern gegen den Fakt-Katalog geprüft.
 - **Haltezeiten:** `hold_seconds` gilt beim Entstehen, `clear_hold_seconds` beim Enden; beide nur im Speicher, nach einem Neustart beginnen sie neu. Wechsel, die schneller sind als `hold_seconds`, bleiben bewusst unsichtbar; wer sie erkennen will, braucht einen Zähler am Gerät und eine Regel auf dessen Rate.
@@ -436,19 +437,19 @@ Beispiele:
 
 | Bereich | Regel | Bedeutung |
 |---|---|---|
-| Gruppe „Kamera 3 REMI“ | `signal_present eq true` | alles in der Gruppe, was Signal melden kann, soll Signal haben |
-| Peer-Element | `connected eq true` | Kernabhängigkeit einer Remote-Strecke |
-| `match_driver = videoxlink` | `vxl.cpu_temp lte 80`, Hysterese `75` | Temperatur aller X8 |
-| Ein bestimmtes X8 | `vxl.cpu_temp lte 85` | überschreibt die globale Regel für dieses Gerät |
-| Encoder E1 | `signal_present eq true` **when** `running eq true` | Signal nur prüfen, wenn die Unit läuft |
+| Gruppe „Kamera 3 REMI“ | `state.signal_present eq true` | alles in der Gruppe, was Signal melden kann, soll Signal haben |
+| Peer-Element | `state.connected eq true` | Kernabhängigkeit einer Remote-Strecke |
+| `match_driver = videoxlink` | `system.temperature_c lte 80`, Hysterese `75` | Temperatur aller X8 |
+| Ein bestimmtes X8 | `system.temperature_c lte 85` | überschreibt die globale Regel für dieses Gerät |
+| Encoder E1 | `state.signal_present eq true` **when** `state.running eq true` | Signal nur prüfen, wenn die Unit läuft |
 | Gruppe „Stagebox links“ | `present eq true` | ein Element der Gruppe ist verschwunden (z. B. SFP gezogen) |
 
 **Zähler** lassen sich auf zwei Arten überwachen:
 
 | Muster | Regel | Bedeutung | Voraussetzung |
 |---|---|---|---|
-| **Gehalten** | `crc_errors eq 0` | Jeder Fehler erzeugt einen Befund, der bleibt, bis jemand den Zähler am Gerät zurücksetzt | Gerät bietet eine Reset-Aktion |
-| **Aktuell** | `crc_errors.rate eq 0`, mit `hold_seconds` | Befund, solange Fehler auftreten; endet, wenn keine mehr kommen | Treiber liefert die Rate (Zähler-Helfer, Abschnitt 4) |
+| **Gehalten** | `sdi.crc_errors eq 0` | Jeder Fehler erzeugt einen Befund, der bleibt, bis jemand den Zähler am Gerät zurücksetzt | Gerät bietet eine Reset-Aktion |
+| **Aktuell** | `sdi.crc_errors_per_s eq 0`, mit `hold_seconds` | Befund, solange Fehler auftreten; endet, wenn keine mehr kommen | Treiber liefert die Rate (Zähler-Helfer, Abschnitt 4) oder das Gerät liefert nur sie |
 
 Regeln vergleichen nie Werte über die Zeit (kein „hat sich erhöht“); das leistet die Rate.
 
@@ -536,20 +537,20 @@ Ein frisch entdecktes Gerät ohne Regeln ist damit `ok` über seinen Zugang („
 
 ### Befehle
 
-Unterstützte Befehle stehen pro Element in `element.actions` (z. B. `{start, stop, reboot, vxl.reset_video_buffer}`). Ob ein Befehl *gerade* sinnvoll ist (Start nur, wenn gestoppt), leitet die UI aus den Fakten ab.
+Unterstützte Befehle stehen pro Element in `element.actions` (z. B. `{start, stop, reboot, videoxlink.reset_video_buffer}`). Ob ein Befehl *gerade* sinnvoll ist (Start nur, wenn gestoppt), leitet die UI aus den Fakten ab.
 
 ### Einstellungen: schreibbare Fakten
 
-- Die generische Aktion **`set`** ändert Einstellungen: `set {"bitrate": 20, "codec": "h265"}`.
+- Die generische Aktion **`set`** ändert Einstellungen: `set {"codec.bitrate_mbps": 20, "codec.format": "HEVC"}`.
 - **Der Schlüssel einer Einstellung ist derselbe wie der des Fakts**, der ihren aktuellen Wert zeigt.
 - Grenzen stehen in `element.settings`:
 
 ```json
 {
-  "bitrate":             { "type": "int",  "min": 1, "max": 100, "unit": "Mbps" },
-  "codec":               { "type": "enum", "values": ["h264", "h265", "vc5"] },
-  "video2110.interface": { "type": "enum", "values": ["eth6", "eth7"] },
-  "eth0.ip":             { "type": "ipv4", "critical": true }
+  "codec.bitrate_mbps":              { "type": "float", "min": 1, "max": 100 },
+  "codec.format":                    { "type": "enum",  "values": ["H264", "HEVC", "VC5"] },
+  "videoxlink.video2110_interface":  { "type": "enum",  "values": ["eth6", "eth7"] },
+  "ptp.domain":                      { "type": "int",   "min": 0, "max": 127, "critical": true }
 }
 ```
 
@@ -572,7 +573,7 @@ Unterstützte Befehle stehen pro Element in `element.actions` (z. B. `{start, st
 | `unconfirmed` | Timeout: angenommen, aber keine Wirkung beobachtet (z. B. XLink-Decoder ohne freie Lizenz) |
 | `cancelled` | abgebrochen (durch User oder Preset) |
 
-Die Prüfbedingung kommt aus der Aktionsdefinition (z. B. `start` → `running eq true` in 10 s) bzw. bei `set` aus den gesetzten Werten. Sie wird als Snapshot in `action_run.verify` gespeichert.
+Die Prüfbedingung kommt aus der Aktionsdefinition (z. B. `start` → `state.running eq true` in 10 s) bzw. bei `set` aus den gesetzten Werten. Sie wird als Snapshot in `action_run.verify` gespeichert.
 
 ### Sammelaktionen
 
@@ -594,7 +595,7 @@ Ein Element, das die Aktion selbst unterstützt, bekommt sie selbst. Geräte und
 
 ### Kritische Aktionen
 
-- **Kritisch ist, was bei einem Fehlgriff viel kaputt macht und lange zur Behebung braucht** (Reboot, Management-IP), im Gegensatz zu schnell behebbaren Fehlgriffen (Stream neu starten, Bitrate).
+- **Kritisch ist, was bei einem Fehlgriff viel kaputt macht und lange zur Behebung braucht** (Reboot, PTP-Domain: falsch gesetzt, verliert die ganze Anlage den Takt), im Gegensatz zu schnell behebbaren Fehlgriffen (Stream neu starten, Bitrate).
 - Der **Treiber** legt fest, was kritisch ist:
   - Kennzeichen an der Aktionsdefinition (pro Treiber und Befehl),
   - `element.critical_actions`: Befehle, die an diesem Element zusätzlich kritisch sind (z. B. ein einzelner Aufruf eines Sende-Ziels),
@@ -629,8 +630,8 @@ Die meisten Geräte haben keine eigenen Presets. Produktionen brauchen aber z. B
 ```
 Preset „Produktion XY – 25 Mbit“
   Stufe 1                  Gruppe „REMI Encoder“   stop
-  Stufe 2                  Gruppe „REMI Encoder“   set {"bitrate": 25, "codec": "h265"}
-                           L1 / D2                 set {"video2110.interface": "eth7"}
+  Stufe 2                  Gruppe „REMI Encoder“   set {"codec.bitrate_mbps": 25, "codec.format": "HEVC"}
+                           L1 / D2                 set {"videoxlink.video2110_interface": "eth7"}
   Stufe 3  delay 5000 ms   Gruppe „REMI Encoder“   start
 ```
 
@@ -642,12 +643,12 @@ Preset „Produktion XY – 25 Mbit“
 
 - **Jeder konfigurierte Aufruf ist ein Element** (`kind = trigger`) mit der einzigen Aktion `trigger`. Damit funktionieren Labels, Gruppen, Presets, Rechte und Audit ohne Sonderfall.
 - **Parameter gehören zum Aufruf**, nicht zum Element: `trigger {"state": "program"}`. Die Konfiguration enthält nur Vorlagen und Standardwerte (`default`).
-- **Das Parameter-Schema** (Typ, Grenzen, Standard) steht in `element.attributes.params`, im selben Format wie `settings`, zusätzlich mit `default`; die UI baut daraus das Formular, der Treiber prüft die Werte selbst.
+- **Das Parameter-Schema** (Typ, Grenzen, Standard) steht in der Spalte `element.params`, pro Aktion im selben Format wie `settings`, zusätzlich mit `default`; die UI baut daraus das Formular, der Treiber prüft die Werte selbst. `attributes` bleibt rein zur Anzeige.
 - **Keine Einstellungen, kein `set`.** Die Konfiguration ändert nur der User; der Treiber verändert sie nie.
-- **Fakten sind nur Beobachtungen über Aufrufe**, nie vermutete Zustände des Ziels: `last_ok`, `last_called_at`, `last_duration_ms` (Kern) und protokollspezifische Details wie `http.status` (Roh). Eine Regel `last_ok eq true` funktioniert damit für jedes Sende-Ziel.
+- **Fakten sind nur Beobachtungen über Aufrufe**, nie vermutete Zustände des Ziels: `call.ok`, `call.called_at`, `call.duration_ms` und protokollspezifische Details wie `http.status_code` (roh). Eine Regel `call.ok eq true` funktioniert damit für jedes Sende-Ziel.
 - **Ergebnis eines Laufs:** Ziel hat angenommen → `accepted`, abgelehnt → `rejected`, nicht erreicht → `failed`. Eine Prüfbedingung gibt es nicht, `accepted` ist der Endzustand.
 - **Kritische Aufrufe** kennzeichnet der User pro Aufruf in der Konfiguration; der Treiber meldet sie in `critical_actions`.
-- **Erreichbarkeit** optional über einen Health-Check der Quelle; er zählt als Lebenszeichen, und sein Intervall ist der erwartete Abstand der Quelle. Ein Sende-Ziel ohne Health-Check (Abstand `0`) hat keine Werte, die veralten können: Es wird nicht wegen Stille unerreichbar, sein Zugang ist aber ungeprüft. Grün wird ein Aufruf erst mit einer Regel wie `last_ok eq true`.
+- **Erreichbarkeit** optional über einen Health-Check der Quelle; er zählt als Lebenszeichen, und sein Intervall ist der erwartete Abstand der Quelle. Ein Sende-Ziel ohne Health-Check (Abstand `0`) hat keine Werte, die veralten können: Es wird nicht wegen Stille unerreichbar, sein Zugang ist aber ungeprüft. Grün wird ein Aufruf erst mit einer Regel wie `call.ok eq true`.
 - **Nur Sende-Aufrufe.** Monika liest keinen Zustand vom Zielsystem. Wer den echten Zustand braucht, braucht einen Treiber, der ihn liest.
 - Geheimnisse nur über den Secret-Store (`secret_id` der Quelle).
 
@@ -675,10 +676,10 @@ Konfiguration pro Aufruf:
 | `id` | = `external_id`, vom User vergeben und stabil (kein Array-Index) |
 | `body`, `path` | Vorlagen |
 | Platzhalter | ohne Anführungszeichen; eingesetzt als JSON-Wert im Body bzw. URL-encodiert in Pfad und Query |
-| `params` | Parameter-Schema mit Standardwerten; landet in `element.attributes` |
+| `params` | Parameter-Schema mit Standardwerten; landet in `element.params` unter `trigger` |
 | `trigger {…}` | Werte nur für diesen Aufruf, gegen das Schema geprüft; fehlende Werte aus `default` |
 | Ergebnis | 2xx → `accepted` · 4xx/5xx → `rejected` (Status, Body in `response`) · Timeout/keine Verbindung → `failed` |
-| Fakten pro Aufruf | `last_ok`, `last_called_at`, `last_duration_ms`, `http.status` |
+| Fakten pro Aufruf | `call.ok`, `call.called_at`, `call.duration_ms`, `http.status_code` |
 | Health-Check | optional pro Quelle (`path`, `interval_s`); `interval_s` ist der erwartete Abstand der Lebenszeichen, ohne Health-Check `0` |
 
 Später möglich: weitere Sende-Treiber nach demselben Muster (`osc`, `tcp`).
@@ -725,7 +726,7 @@ Später möglich: weitere Sende-Treiber nach demselben Muster (`osc`, `tcp`).
 | Stream stoppen | `operate` |
 | Reboot | `operate` + `critical` |
 | Bitrate ändern | `configure` |
-| Management-IP ändern | `configure` + `critical` |
+| PTP-Domain ändern | `configure` + `critical` |
 
 ### Maschinen
 
@@ -746,6 +747,9 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 - Ereignisse: `finding.raised`, `finding.cleared` (Problem behoben), `finding.withdrawn` (Befund zurückgezogen, Grund in `cleared_reason`), `finding.acked`, `action.finished`. Empfänger, die offene Alarme verfolgen, abonnieren `cleared` und `withdrawn`, damit sich jeder Alarm schließt.
 - Filter: Ereignistyp, Mindest-Schweregrad, Geltungsbereich (Auflösung wie in Abschnitt 8).
 - Neuzuordnungen von Ursache und Symptom werden nicht weitergeleitet; `finding.raised` trägt die Zuordnung beim Entstehen.
+- **Ein Format für beide Arten:** ein JSON-Objekt mit `event`, `at`, `finding` (bzw. `run` bei `action.finished`, zusätzlich `acked_by` bei `finding.acked`) und `element` mit `path` und `url` (aus `MONIKA_PUBLIC_URL`, direkt in die UI). Empfänger erkennen Dubletten aus Wiederholungen an `event` und der ID von Befund bzw. Lauf.
+- **Syslog:** RFC 5424, `APP-NAME` `monika`, `MSGID` = Ereignistyp, das JSON in `MSG` (Loki liest es mit `| json`), keine Structured Data; `udp`, `tcp` (Längenangabe nach RFC 6587) oder `tls`. Schwere: `finding.raised` nach `severity` (`error` 3, `warning` 4, `info` 6), `cleared`/`withdrawn` 5, `acked` 6, `action.finished` 4 bei `failed`/`rejected`, sonst 6.
+- **Webhook:** ohne Vorlage ist der Body das JSON; mit Vorlage Platzhalter wie bei Sende-Zielen (`{{element.path}}`, `{{finding.severity}}`). Werte aus dem Secret des Ziels (`{{secret.<schlüssel>}}`) nur in `url` und `headers`, nie im Body.
 - **Best effort:** wenige Wiederholungen im Speicher, danach `last_error`. Kein Routing, keine Eskalation, keine Outbox.
 
 ---
@@ -765,11 +769,31 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 
 ### InfluxDB
 
-- Der Core schreibt die aktuellen Werte aller Elemente **im festen Takt**, unabhängig davon, wann der Treiber sie gemeldet hat. So entstehen auch bei Treibern, die nur Änderungen melden, keine Lücken in Grafana.
+Vertrag: [`contracts/influx.md`](contracts/influx.md).
+
+- Monika schreibt die aktuellen Werte aller Elemente **im festen Takt** (Standard 1 s), unabhängig davon, wann der Treiber sie gemeldet hat. So entstehen auch bei Treibern, die nur Änderungen melden, keine Lücken.
+- **Nur Line Protocol über HTTP**, gzip-komprimiert und in Batches; damit ist die Version von InfluxDB egal.
+- **Measurement und Feld sind der Fakt-Schlüssel** (`ptp.offset_ns` → Measurement `ptp`, Feld `offset_ns`), ein Punkt pro Element, Measurement und Takt; Zähler roh, Raten nur ohne Zähler (Abschnitt 4, `contracts/vocabulary.md`).
 - Elemente, deren Quelle nicht Live ist, bekommen keine Fakten, nur ihre Health. Elemente ohne Health (nicht überwacht, verschwunden, ungeprüft) bekommen keine Health.
-- Version von InfluxDB, Measurement-Schema, Takt und Volumen legt ein eigener Vertrag für den Influx-Schreiber fest, bevor er gebaut wird (Abschnitt 17).
-- Tags: `element_id`, `device_id`, `kind`, `transport`, `driver`.
-- **Nie Labels als Tags**: Labels ändern sich, eine Umbenennung würde Zeitreihen zerreißen. Grafana löst Namen über PostgreSQL auf.
+- Tags: `element_id`, `device_id`, `source_id`, `driver`, `kind`, `transport`. Messpunkte und Pfade sind Elemente, keine Tags.
+- **Nie Labels als Tags**: Labels ändern sich, eine Umbenennung würde Zeitreihen zerreißen. Namen lösen externe Werkzeuge über das Schema `reporting` auf.
+- Ist InfluxDB nicht erreichbar, puffert Monika 1 min im Speicher und verwirft danach die ältesten Takte. Das Monitoring läuft weiter.
+- Die Aufbewahrung stellt der Betreiber in InfluxDB ein, nicht Monika.
+
+### Schnittstelle für externe Werkzeuge
+
+Grafana, Reporting und Skripte lesen PostgreSQL nur über das Schema **`reporting`**: lesende Views `reporting.element` (`id`, `kind`, `device_id`, `source_id`, `path`, `label`) und `reporting.finding` (Befunde mit Pfad), zugänglich über die Rolle `monika_reporting`. Intern darf sich das Schema ändern, solange die Views gleich bleiben.
+
+### Aufbewahrung
+
+Ein Dienst löscht einmal pro Nacht in Batches, was älter ist als eingestellt (`0` = nie):
+
+| Daten | Standard | Regel |
+|---|---|---|
+| Befunde | 180 Tage | nur beendete (`cleared_at`); aktive nie |
+| Läufe | 180 Tage | nur abgeschlossene Bäume, über die Wurzel; laufende nie |
+| Audit | 730 Tage | |
+| Sitzungen, Wiederherstellungscodes | 30 Tage | abgelaufene und widerrufene Sitzungen, benutzte Codes |
 
 ### PostgreSQL-Konventionen
 
@@ -798,15 +822,25 @@ Muster wie bei Grafana (`secret_key`) oder n8n (`N8N_ENCRYPTION_KEY`): Zugangsda
 
 ### Bootstrap aus der Umgebung
 
-Beim Start liest Monika aus Umgebungsvariablen bzw. einer `.env`-Datei (Variablen haben Vorrang; `.env` gehört nicht ins Git und hat Rechte `600`):
+Beim Start liest Monika aus Umgebungsvariablen bzw. einer `.env`-Datei (`./.env` oder `MONIKA_ENV_FILE`; Variablen haben Vorrang; `.env` gehört nicht ins Git und hat Rechte `600`). Unbekannte `MONIKA_*`-Variablen und ungültige Werte brechen den Start ab. Vertrag: [`contracts/bootstrap.md`](contracts/bootstrap.md).
 
-| Variable | Zweck |
-|---|---|
-| `MONIKA_MASTER_KEY` | Schlüssel des Secret-Stores |
-| `MONIKA_MASTER_KEY_PREVIOUS` | nur während einer Rotation |
-| `MONIKA_DATABASE_URL` | PostgreSQL-Verbindung |
-| `MONIKA_INFLUX_URL`, `MONIKA_INFLUX_TOKEN` | InfluxDB |
-| `MONIKA_ADMIN_USER`, `MONIKA_ADMIN_PASSWORD` | initialer Admin; wird nur angelegt, wenn noch kein Benutzer existiert |
+| Variable | Standard | Zweck |
+|---|---|---|
+| `MONIKA_MASTER_KEY` | **Pflicht** | Schlüssel des Secret-Stores |
+| `MONIKA_MASTER_KEY_PREVIOUS` | – | nur während einer Rotation |
+| `MONIKA_DATABASE_URL` | **Pflicht** | PostgreSQL-Verbindung |
+| `MONIKA_PUBLIC_URL` | **Pflicht** | öffentliche Adresse, z. B. `https://monika.example`: `Origin`-Prüfung, `Secure`-Cookie bei `https`, Links in Weiterleitungen |
+| `MONIKA_LISTEN` | `:8080` | Adresse des HTTP-Servers |
+| `MONIKA_TRUSTED_PROXIES` | – | Netze (CIDR), deren `X-Forwarded-For` gilt |
+| `MONIKA_SESSION_IDLE`, `MONIKA_SESSION_MAX` | `12h`, `168h` | Lebensdauer von Sitzungen |
+| `MONIKA_SCHEDULER_CONCURRENCY` | `32` | gleichzeitige Abfragen aller Treiber |
+| `MONIKA_LOG_LEVEL`, `MONIKA_LOG_FORMAT` | `info`, `json` | Logging (`text` für die Entwicklung) |
+| `MONIKA_INFLUX_URL`, `MONIKA_INFLUX_TOKEN`, `MONIKA_INFLUX_BUCKET`, `MONIKA_INFLUX_ORG` | – | InfluxDB; ohne URL schreibt Monika keine Zeitreihen |
+| `MONIKA_INFLUX_INTERVAL` | `1s` | Takt der Zeitreihen |
+| `MONIKA_RETENTION_FINDINGS`, `MONIKA_RETENTION_RUNS`, `MONIKA_RETENTION_AUDIT` | `180d`, `180d`, `730d` | Aufbewahrung |
+| `MONIKA_ADMIN_USER`, `MONIKA_ADMIN_PASSWORD` | – | initialer Admin; wird nur angelegt, wenn noch kein Benutzer existiert |
+
+**TLS** übernimmt ein Reverse-Proxy (Caddy, Traefik, nginx); Monika spricht nur HTTP. Ist `MONIKA_PUBLIC_URL` nicht `https`, warnt sie beim Start.
 
 Alles Weitere (Zugangsdaten der Geräte, Tokens für Sende-Ziele und Webhooks, später das OIDC-Client-Secret) liegt im Secret-Store.
 
@@ -882,6 +916,8 @@ erDiagram
   secret |o--o{ forward_target : "secret_id"
 ```
 
+Zusätzlich das Schema `reporting` mit lesenden Views (Abschnitt 14), handgeschrieben in `migrations/`, weil DBML keine Views kennt.
+
 ### Constraints
 
 Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `monika.dbml` und werden mit `make db-generate` in die Init-Migration übernommen. Ausnahmen sind Indizes, die DBML nicht ausdrücken kann (Teilindex mit `WHERE`, `NULLS NOT DISTINCT`); sie stehen handgeschrieben in `migrations/`.
@@ -910,6 +946,8 @@ Diese Regeln stehen als `checks`, Ausdrucksindizes und `Ref`-Blöcke direkt in `
 | `element_link.from_id`, `to_id`, `source_id`; `element_state.element_id` | `CASCADE` |
 | `rule.scope_element_id`, `forward_target.scope_element_id` | `CASCADE` (die Anwendung schreibt sie vorher ins Audit) |
 | `finding.rule_id` | `SET NULL` (Historie bleibt) |
+| `finding.caused_by_id` | `SET NULL` (eine durch Aufbewahrung gelöschte Ursache blockiert kein jüngeres Symptom) |
+| `action_run.parent_id` | `CASCADE` (Aufbewahrung löscht ganze Bäume über die Wurzel) |
 | `preset_step.preset_id` | `CASCADE` |
 | `preset_step.element_id` | `RESTRICT` (Sicherheitsnetz; das Löschen von Geräten und Gruppen prüft Presets vorher) |
 | `action_run.preset_id`, `preset_step_id` | `SET NULL` |
@@ -927,7 +965,7 @@ Quelle der Daten: `goxlinkclient` (JSON-RPC des Web-Frontends; `System`-Snapshot
 
 ```
 X8A1111                   device                (Name = Label des Users)
-└─ XLink-API              access                VideoXLink X8 R2 · FW 1.8.4 · xlink:X8A1111 · vxl.cpu_temp, NeedsReboot · reboot
+└─ XLink-API              access                VideoXLink X8 R2 · FW 1.8.4 · xlink:X8A1111 · system.temperature_c, videoxlink.needs_reboot · reboot
    ├─ SDI 1–8             port · sdi · bidir
    ├─ eth0–eth7           network_interface        (eth6/7 2110-fähig)
    ├─ PTP                 clock
@@ -945,14 +983,14 @@ X8A1111                   device                (Name = Label des Users)
 
 | Thema | Umsetzung |
 |---|---|
-| Fakten | `running`, `signal_present`, `format.*`, `bitrate` an den Units; Werte für das ganze Gerät (`vxl.cpu_temp`, `vxl.licenses_used`, `NeedsReboot`) am Zugangs-Element |
+| Fakten | `state.running`, `state.signal_present`, `video.*`, `codec.bitrate_mbps` an den Units, `state.connected`, `stream.rtt_ms` am Peer; Werte für das ganze Gerät (`system.temperature_c`, `system.licenses_used`, `videoxlink.needs_reboot`) am Zugangs-Element |
 | Identität | Modell und Firmware aus Sicht der XLink-Quelle (`device_source`); `global_ref` des Geräts am Zugang (`xlink:<UnitID>`) |
 | Gerätealarme | SRT-`Error` |
-| Abgeleitete Alarme | über Regeln (PTP-Sync, Temperaturen, Lizenzen, `NeedsReboot`) |
-| Befehle | `start`, `stop`, `vxl.reset_stats`, `vxl.reset_video_buffer`, `vxl.flush_audio` |
+| Abgeleitete Alarme | über Regeln (PTP-Sync, Temperaturen, Lizenzen, `videoxlink.needs_reboot`) |
+| Befehle | `start`, `stop`, `videoxlink.reset_stats`, `videoxlink.reset_video_buffer`, `videoxlink.flush_audio` |
 | Einstellungen | Bitrate, Codec, 2110-Interface und -Adressen, … |
 | Ausgeschlossen | `DecoderSender` (ändert `feeds`) |
-| Kritisch (Beispiel) | Reboot, Änderungen an Management-Interfaces (außer der Adresse der eigenen Quelle, die nicht angeboten wird) |
+| Kritisch (Beispiel) | Reboot, Änderungen an PTP und Referenztakt; Management-Adresse und Zugangsdaten werden nie angeboten |
 | Fallstrick | Start vor Verbindungsaufbau oder ohne Decoder-Lizenz wird angenommen, wirkt aber nicht → `unconfirmed` |
 
 ---
@@ -963,12 +1001,9 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 
 | Thema | Stand |
 |---|---|
-| Betrieb / Hochverfügbarkeit | Zustand liegt im Speicher des Core und baut sich aus den Treibern neu auf. Aktiv/passiv über ein Lock in PostgreSQL (`pg_try_advisory_lock`) ist ohne Umbau möglich; offen ist das Verhalten von Läufen bei einer Übernahme |
-| Aufbewahrung | Retention für `finding`, `action_run`, `audit_log` und InfluxDB |
-| InfluxDB-Details | Version (v2 oder v3), Measurement-Schema, Takt und Volumen; eigener Vertrag vor dem Influx-Schreiber |
-| Frontend | Technologie (Live-Push ist entschieden: SSE, `contracts/api.md`) |
-| Adresse der Quelle ändern | gekoppelter Ablauf: Einstellung wie `eth0.ip` setzen, danach `address` der Quelle im Namen desselben Users ändern und neu verbinden; Rechte zusätzlich `source_edit` |
-| Zugangsdaten am Gerät ändern | gekoppelter Ablauf: am Gerät setzen und das Secret der Quelle ersetzen, ohne dass der Wert in einem Lauf steht |
+| Hochverfügbarkeit | **nicht Teil von Version 1.** Version 1 hält beim Start ein Advisory Lock in PostgreSQL und bricht ab, wenn eine zweite Instanz läuft. Aktiv/passiv über dasselbe Lock ist später ohne Umbau möglich; offen ist dann das Verhalten von Läufen bei einer Übernahme |
+| Frontend | kommt nach dem Backend: Technologie, Seiten, Bedienkonzept (Live-Push ist entschieden: SSE, `contracts/api.md`) |
+| OIDC | vorbereitet (`user_identity`, `role.external_ref`), kommt später |
 | Spätere Erweiterungen | `osc`-/`tcp`-Treiber; Prüfbedingung, die auf ein anderes Element zeigt; Prüfung der `external_id` gegen ein Muster pro `kind` |
 
 ---
@@ -987,7 +1022,7 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 | **Fakt-Katalog** | Liste der Fakt-Schlüssel eines Treibers mit festem Typ und Einheit |
 | **Sende-Ziel** | System, an das Monika sendet, dessen Zustand sie aber nicht liest (z. B. HTTP-Endpunkt) |
 | **Treiber** | Plugin für einen Hersteller/Gerätetyp; meldet Inventar und Fakten, führt Aktionen aus |
-| **Fakt** | ein aktueller Wert eines Elements, z. B. `running: true` |
+| **Fakt** | ein aktueller Wert eines Elements, Schlüssel `<measurement>.<feld>`, z. B. `state.running: true` |
 | **Regel** | Sollzustand über einen Fakt, vom User definiert |
 | **Befund** | aktive oder vergangene Abweichung an einem Element (aus Regel, Gerät oder System); endet als behoben oder zurückgezogen |
 | **Ursache / Symptom** | Befund ohne bzw. mit `caused_by_id` |

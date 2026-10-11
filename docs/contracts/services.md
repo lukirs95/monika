@@ -174,7 +174,31 @@ classDiagram
 ```
 
 - Die Weiterleitung besitzt `forward.Store`; die API ändert Ziele über sie, nie direkt. Nach jeder Änderung arbeitet sie mit der neuen Liste weiter.
+- **Format:** ein JSON-Objekt pro Ereignis (`event`, `at`, `finding` bzw. `run`, `element` mit `path` und `url`); Syslog nach RFC 5424 mit dem JSON in `MSG`, Webhook mit dem JSON als Body oder mit Vorlage (`docs/ARCHITECTURE.md` Abschnitt 13). Beim Anlegen prüft sie, dass `{{secret.…}}` nur in `url` und `headers` steht.
 - `SetTargetResults` schreibt `last_sent_at` und `last_error` gesammelt im Takt, nicht pro Ereignis.
+
+## Aufbewahrung (`internal/retention`)
+
+```mermaid
+classDiagram
+    class Cleaner {
+        <<retention>>
+        +Run(ctx) error
+    }
+    class Store {
+        <<interface, retention.Store>>
+        +PurgeFindings(ctx, endedBefore time.Time, limit int) (int, error)
+        +PurgeRuns(ctx, finishedBefore time.Time, limit int) (int, error)
+        +PurgeAudit(ctx, before time.Time, limit int) (int, error)
+        +PurgeSessions(ctx, before time.Time) (int, error)
+    }
+    Cleaner ..> Store
+```
+
+- Läuft einmal pro Nacht (und einmal kurz nach dem Start) und löscht in Batches (`limit`), bis nichts mehr übrig ist; zwischen den Batches gibt er der Datenbank Luft.
+- Löscht nur Verlauf: beendete Befunde, abgeschlossene Lauf-Bäume über ihre Wurzel, Audit, abgelaufene Sitzungen und benutzte Wiederherstellungscodes. Aktive Befunde und laufende Läufe nie; sie liegen auch im Speicher des Core, der davon nichts merkt.
+- Grenzen aus `MONIKA_RETENTION_*` (`0` = nie). Die Zahl der gelöschten Zeilen wird geloggt, nicht ins Audit geschrieben.
+- `retention.Store` ist die einzige Ausnahme von „ein Fachpaket pro Tabelle“: Aufräumen ist eine eigene fachliche Operation über mehrere Verlaufstabellen, und sie berührt keinen Zustand im Speicher.
 
 ## Zusammenspiel mit der API
 
@@ -225,3 +249,4 @@ Lesen: aktueller Stand aus der `View` bzw. vom Fachpaket; Verlauf (Audit, vergan
 | D4 | `Cancel` bei gesendeten Läufen | nur `pending` wird `cancelled`; Gesendetes läuft zu Ende |
 | D5 | Secret ersetzen | als Core-Befehl `ReplaceSecret`: Die Schleife schreibt über `secret.Service` und startet die betroffenen Quellen neu; Quellen startet nur die Schleife |
 | D6 | Preset-Ziele | beim Start eingefroren (`Request.Targets`); die Vorabprüfung gilt genau diesen |
+| D7 | Aufbewahrung | eigener Dienst `retention.Cleaner` mit eigenem Store; löscht nachts in Batches nur Verlauf |

@@ -1,6 +1,6 @@
 # Vertrag: Treiber-SDK
 
-**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10, Vokabular und Testbaukasten am 2026-10-11. **Vokabular:** [`vocabulary.md`](vocabulary.md). **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
 
 Das SDK ist die einzige Schnittstelle zwischen Core und Treibern. Treiber importieren nur `sdk/` und ihre Gerätelibrary, nie `internal/`. Alles, was ein Treiber vom Core braucht, kommt über die Typen und Interfaces dieses Vertrags.
 
@@ -29,7 +29,7 @@ classDiagram
         <<struct>>
         +Key string
         +Type FactType
-        +Unit string
+        +Kind FactKind
         +Description string
     }
     class SourceConfig {
@@ -83,6 +83,7 @@ classDiagram
         +GlobalRef string
         +Position *int
         +Attributes json.RawMessage
+        +Params map~string, map~string, Param~~
         +Actions []string
         +CriticalActions []string
         +Settings map~string, Setting~
@@ -128,7 +129,7 @@ classDiagram
     class Counter {
         <<struct>>
         +Width int
-        +Rate(raw uint64, at time.Time) (float64, bool)
+        +Rate(raw int64, at time.Time) (float64, bool)
     }
     class Identity {
         <<struct>>
@@ -174,6 +175,7 @@ classDiagram
     Snapshot *-- Link
     Snapshot *-- Alarm
     Element *-- Setting
+    Element *-- Param
     Param --|> Setting
     ActionDef *-- Condition
     Link *-- Endpoint
@@ -181,14 +183,15 @@ classDiagram
 
 | Typ | Bedeutung |
 |---|---|
-| `sdk.Register(Driver)` | Registrierung in `init()`. Ein Programmierfehler (`panic`) sind: doppelte Namen, ein Name außer `[a-z0-9]+` (Treibername = Paketname), ein Fakt doppelt im Katalog oder aus dem Vokabular mit anderem Typ, eine Einstellung, deren `Type` nicht zum Typ ihres Fakts passt, eine `WriteOnly`-Einstellung mit Fakt im Katalog |
+| `sdk.Register(Driver)` | Registrierung in `init()`. Ein Programmierfehler (`panic`) sind: doppelte Namen; ein Name außer `[a-z0-9]+` (Treibername = Paketname) oder gleich einem Measurement des Vokabulars; ein roher Fakt ohne den Treibernamen als Präfix; ein Fakt doppelt im Katalog; ein Zähler, der nicht `Int` ist; eine Einstellung, deren `Type` nicht zum Typ ihres Fakts passt; eine `WriteOnly`-Einstellung mit Fakt im Katalog |
 | `Driver.Actions` | **Katalog**: wie jede Aktion funktioniert, die der Treiber irgendwo anbietet (Parameter, Prüfbedingung, Timeout, `critical`). *Welches* Element sie unterstützt, steht in `Element.Actions`; `reboot` kann z. B. am Zugangs-Element (Gerät) und an einzelnen Modulen stehen |
-| `Driver.Facts` | **Fakt-Katalog** der Rohwerte (mit Namespace, z. B. `vxl.cpu_temp`): Typ, Einheit, Beschreibung. Kern- und bekannte Fakten stehen mit Typ im Vokabular und werden nicht wiederholt. Der Regel-Editor bietet daraus Fakten und passende Operatoren an |
-| `FactType` | `Bool`, `Number` (`float64`) oder `String` |
+| `Driver.Facts` | **Fakt-Katalog** der Rohwerte (Präfix = Treibername, z. B. `videoxlink.needs_reboot`): Typ, Art, Beschreibung, Einheit im Namen wie im Vokabular. Kern- und bekannte Fakten (`<measurement>.<feld>`) stehen im Vokabular und werden nicht wiederholt. Der Regel-Editor bietet daraus Fakten und passende Operatoren an. Rohe Fakten gehen nie nach InfluxDB |
+| `FactType` | `Bool` (`bool`), `Int` (`int64`), `Float` (`float64`) oder `String` (`string`) |
+| `FactKind` | `Status`, `Gauge` oder `Counter` (`vocabulary.md`, Typen und Arten) |
 | `Source.Heartbeat()` | erwarteter Abstand der Lebenszeichen **dieser Quelle**, vom Core einmal nach `New` gelesen und für die Lebensdauer der Instanz fest. Die meisten Treiber geben eine Konstante zurück, der HTTP-Treiber das Intervall seines Health-Checks aus der Konfiguration. Ohne Lebenszeichen für das **Dreifache** gilt die Quelle als nicht erreichbar. `0` = keine Überwachung der Lebenszeichen (Sende-Ziel ohne Health-Check) |
 | `SourceConfig.Logger` | vom Core pro Quelle erzeugt, mit den Attributen `driver`, `source_id` und `device_id` (siehe Logging) |
 | `SourceConfig.Secret` | entschlüsselter Klartext des Secrets der Quelle (JSON, Format legt der Treiber fest); leer ohne Secret. Nie loggen |
-| `Facts` | `map[string]any`; Werte nur `bool`, `float64` oder `string`, keine Listen oder Objekte. **Zahlen sind immer `float64`**, auch Ganzzahlen (Treiber wandeln um); exakt bis 2⁵³. Schlüssel aus dem Vokabular oder dem Fakt-Katalog, Wert vom deklarierten Typ. Andere Schlüssel und Werte verwirft der Core, mit `Warn`-Log einmal pro Quelle und Schlüssel |
+| `Facts` | `map[string]any`; Werte nur `bool`, `int64`, `float64` oder `string`, keine Listen oder Objekte. Schlüssel `<measurement>.<feld>` aus dem Vokabular oder `<treiber>.<name>` aus dem Fakt-Katalog, Wert **genau** vom deklarierten Go-Typ (ein `int`-Feld als `int64`, ein `float`-Feld als `float64`). Andere Schlüssel und Werte verwirft der Core, mit `Warn`-Log einmal pro Quelle und Schlüssel. Zu einem Zähler meldet der Treiber auch `<feld>_per_s` (`float64`); liefert das Gerät nur die Rate, nur diese |
 | `Snapshot.GlobalRef` | globale ID des Geräts aus Sicht dieser Quelle, im Namensraum des Treibers (`xlink:X8A9001`); der Core setzt sie am Zugangs-Element. Leer, wenn die Quelle keine kennt |
 | `Snapshot.Facts`, `.Alarms` | Schlüssel ist die `external_id` (`""` = Zugangs-Element) |
 | `Update.Alarms` | pro Element die **vollständige** Liste der aktuellen Alarme; sie ersetzt die vorige. Ein Element ohne Eintrag bleibt unverändert |
@@ -197,14 +200,15 @@ classDiagram
 | `Endpoint` | entweder `ExternalID` (Element dieser Quelle) oder `GlobalRef` (Element einer anderen Quelle, ggf. noch unbekannt). `represents` zeigt immer per `GlobalRef` auf das Original: Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts |
 | `Result.Status` | `Accepted` oder `Rejected`; ein `error` aus `Execute` bedeutet `failed` (nicht erreicht, Transportfehler) |
 | `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical`. `WriteOnly`: Das Gerät meldet den Wert nicht zurück; es gibt keinen Fakt dazu und keine Prüfung, `accepted` ist der Endzustand |
-| `Element.Attributes` | statische Attribute, nur zur Anzeige. Reservierter Schlüssel `params` bei Sende-Zielen (`kind = trigger`): Parameter-Schema des Aufrufs als Map auf `Param`; die UI baut daraus das Formular, der Treiber prüft die Werte bei `Execute` selbst |
-| `Param` | wie `Setting`, zusätzlich `Default` (`bool`, `float64` oder `string`) |
+| `Element.Attributes` | statische Attribute, nur zur Anzeige |
+| `Element.Params` | Parameter-Schemas von Aktionen, die an diesem Element ein eigenes Schema haben: Aktion → Parameter → `Param` (bei Sende-Zielen `trigger`). Die UI baut daraus das Formular, der Treiber prüft die Werte bei `Execute` selbst. Gespeichert in `element.params` |
+| `Param` | wie `Setting`, zusätzlich `Default` (`bool`, `int64`, `float64` oder `string`) |
 | `Condition.Value` | JSON-Wert als Text, darf Platzhalter enthalten |
-| `ActionDef.Verify` | Prüfbedingung mit Platzhaltern aus den Parametern (z. B. `bitrate eq {{bitrate}}`); bei `set` erzeugt der Core sie selbst aus den gesetzten Werten |
+| `ActionDef.Verify` | Prüfbedingung mit Platzhaltern aus den Parametern (z. B. `codec.bitrate_mbps eq {{codec.bitrate_mbps}}`); bei `set` erzeugt der Core sie selbst aus den gesetzten Werten |
 
-**Vokabular** (`sdk/vocab`): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten **mit Typ und Einheit**, Kern-Aktionen und die Namensräume von `global_ref` (`xlink`, `nmos` …) mit dem Treiber, dem sie gehören. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`.
+**Vokabular** (`sdk/vocab`, vollständig in [`vocabulary.md`](vocabulary.md)): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten **mit Typ, Einheit und Measurement**, die Measurements, Kern- und bekannte Aktionen und die Namensräume von `global_ref` (`xlink`, `nmos` …) mit dem Treiber, dem sie gehören. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`; Measurements `health`, `rollup`.
 
-**Verbote für Einstellungen:** Keine Einstellung, die die Adresse der eigenen Quelle ändert (z. B. die Management-IP, über die verbunden ist), und nie geheime Werte (Passwörter, Schlüssel): Parameter eines Laufs stehen im Klartext in `action_run.params`.
+**Verbote für Einstellungen:** **Nie** eine Einstellung, die die Management-Adresse ändert, und nie geheime Werte (Passwörter, Schlüssel): Nach dem Setzen der Adresse wäre die Quelle unerreichbar, und Parameter eines Laufs stehen im Klartext in `action_run.params`. Monika bietet dafür auch später keinen Weg; ein Treiber, der es trotzdem anbietet, verstößt gegen diesen Vertrag.
 
 ## Pflichten im Ablauf
 
@@ -363,11 +367,36 @@ sequenceDiagram
 
 - Ein `Counter` pro Zähler und Element; bei angegebener `Width` (32, 64) rechnet er Überläufe richtig, sonst gilt jeder kleinere Wert als Reset.
 - **`at` ist der Messzeitpunkt** und kommt vom Treiber: der Zeitstempel des Geräts, wenn es einen liefert, sonst `time.Now()` zum Zeitpunkt der Abfrage. So bleibt die Rate richtig, auch wenn Werte verzögert ankommen.
-- Raten gibt es nur für Zähler. `Rate` liefert `float64`; den Rohwert meldet der Treiber ebenfalls als `float64`. `bool`- und `string`-Fakten meldet er direkt.
-- **Warum intern `uint64`:** Zähler sind Ganzzahlen ohne Vorzeichen. Differenz und Überlauf (modulo 2³² bzw. 2⁶⁴) sind nur ganzzahlig exakt; `float64` rundet Ganzzahlen ab 2⁵³. Gewandelt wird erst die fertige Rate.
-- **Grenze beim Rohwert:** Als Fakt ist der Rohwert `float64` (S6) und ab 2⁵³ gerundet, z. B. ein 64-Bit-Bytezähler einer 100-G-Schnittstelle nach etwa 8 Tagen Dauerlast. Das betrifft nur die Anzeige; die Rate bleibt exakt. Regeln gehören auf die Rate, nicht auf große Rohzähler.
+- Raten gibt es nur für Zähler. `Rate` liefert `float64`; den Rohwert meldet der Treiber als `int64`, exakt (Differenz und Überlauf modulo 2³² bzw. 2⁶⁴ rechnet der `Counter` intern ganzzahlig ohne Vorzeichen). `bool`- und `string`-Fakten meldet er direkt.
+- Der Treiber meldet den Rohwert (`sdi.crc_errors`) und, sobald `ok`, die Rate (`sdi.crc_errors_per_s`). Liefert das Gerät nur eine Rate, meldet der Treiber nur sie und braucht keinen `Counter`.
 - Zähler, die ein Gerät als Dezimalzahl liefert, deckt der `Counter` nicht ab; ein Helfer dafür kommt, wenn ein Treiber ihn braucht.
-- Der Treiber meldet den Rohwert (`crc_errors`) und, sobald `ok`, die Rate (`crc_errors.rate`).
+
+## Testbaukasten (`sdk/sdktest`)
+
+Wer einen Treiber schreibt, kennt Monika oft nicht. Die Regeln dieses Vertrags gibt es deshalb als Test, nicht nur als Text.
+
+```mermaid
+classDiagram
+    class Reporter {
+        <<sdktest>>
+        +Calls() []Call
+        +Snapshots() []sdk.Snapshot
+        +Updates() []sdk.Update
+        +WaitFor(ctx, pred func(Call) bool) error
+    }
+    class Conformance {
+        <<sdktest>>
+        +Run(t *testing.T, d sdk.Driver, cfg sdk.SourceConfig)
+    }
+    Reporter ..|> sdk_Reporter
+    Conformance ..> Reporter
+```
+
+| Baustein | Wirkung |
+|---|---|
+| `sdktest.Reporter` | zeichnet alle Meldungen einer `Source` auf; Tests prüfen damit, was der Treiber gemeldet hat |
+| `sdktest.Conformance(t, driver, cfg)` | prüft die Regeln automatisch: Katalog gültig (wie `Register`); nach `Connected` zuerst ein vollständiger `Snapshot`; nur deklarierte Fakten mit genau dem richtigen Go-Typ; zu jedem Zähler auch die Rate; keine reservierten `kind`s und Fakten; `external_id`s stabil über zwei `Snapshot`s; `Heartbeat()` wird eingehalten; `Run` kehrt nach Abbruch des `ctx` binnen 10 s zurück; `Execute` verträgt parallele Aufrufe |
+| Attrappe des Geräts | jeder Treiber testet gegen eine Attrappe seines Geräts (z. B. `httptest.Server`), nie gegen echte Hardware in `make test`; die Attrappe liefert `cfg` für `Conformance` |
 
 ## Logging
 
@@ -396,7 +425,7 @@ Eine Isolation pro Library gibt es in einem Prozess nicht (keine Goroutine-lokal
 | S3 | Wo steht der erwartete Abstand der Lebenszeichen? | pro Quelle (`Source.Heartbeat()`), vom Treiber bestimmt, ggf. aus seiner Konfiguration; keine eigene Einstellung des Users; nicht erreichbar nach dem Dreifachen, `0` = keine Überwachung |
 | S4 | Wie kommen Secret- und Konfigurationsänderungen an? | Neustart der Quelle mit neuer `SourceConfig` |
 | S5 | `Execute` an der `Source` oder eigenes Interface? | an der `Source` |
-| S6 | Typ der Fakt-Werte | `bool`, `float64` oder `string`; Zahlen immer `float64`, damit z. B. Temperaturen nicht gerundet werden und Vergleiche eindeutig sind; andere verwirft der Core |
+| S6 | Typ der Fakt-Werte | `bool`, `int64`, `float64` oder `string`, genau wie im Vokabular bzw. Katalog deklariert; Regeln vergleichen Zahlen über beide Typen hinweg; andere Werte verwirft der Core |
 | S7 | Wer verbindet neu? | der Treiber bzw. seine Gerätelibrary |
 | S8 | Hängender Treiber | 10 s nach dem Stopp `Stuck`; keine zweite Instanz, solange die alte läuft |
 | S9 | Sammelaktion auf ein Gerät | `device_level` wählt Zugangs-Elemente (Treiber Pflicht) oder übrige Elemente; `driver` ist ein Filter |
@@ -405,3 +434,7 @@ Eine Isolation pro Library gibt es in einem Prozess nicht (keine Goroutine-lokal
 | S12 | Eltern ohne `ParentID` | das Zugangs-Element der Quelle (echte Wurzel) |
 | S13 | Identität des Geräts für Links | `Snapshot.GlobalRef` am Zugangs-Element; `global_ref` immer mit Namensraum |
 | S14 | Wann wird bewertet? | nur, wenn die Quelle `Live` ist; sonst sind ihre Elemente `unknown` |
+| S15 | Präfix roher Fakten und Aktionen | der Treibername (`videoxlink.cpu_temp`); kein zweites Kürzel |
+| S16 | Zeitreihen | Fakt-Schlüssel `<measurement>.<feld>` ist zugleich Measurement und Feld in InfluxDB; rohe Fakten nie; Messpunkte als Elemente |
+| S17 | Parameter-Schemas pro Element | eigene Spalte `element.params` (`Element.Params`), nicht in `attributes` |
+| S18 | Tests | `sdk/sdktest` mit aufzeichnendem `Reporter` und `Conformance`; jeder Treiber gegen eine Attrappe seines Geräts |

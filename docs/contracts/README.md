@@ -6,9 +6,12 @@ Diagramme in Mermaid: `classDiagram` für Interfaces und Typen, `sequenceDiagram
 
 | Vertrag | Inhalt | Status |
 |---|---|---|
-| [`sdk.md`](sdk.md) | Treiber-SDK: Registrierung, `Source`, `Reporter`, Scheduler, Ausführung, Zähler-Helfer, Logging | abgestimmt 2026-10-09 |
-| [`core.md`](core.md) | Core-Komponenten: eine Schleife, `View`, Ereignisse, Befehle, Inventar → Fakten → Bewertung | abgestimmt 2026-10-09 |
-| [`flows.md`](flows.md) | Abläufe: Start, Herunterfahren, Weiterleitung, Aktion, Preset-Lauf; Supervisor | abgestimmt 2026-10-09 |
-| [`services.md`](services.md) | Dienste: Supervisor, Executor, Preset-Runner, Weiterleitung; Zusammenspiel mit der API | abgestimmt 2026-10-09 |
-| [`auth.md`](auth.md) | Anmeldung (Passwort, TOTP, Sitzungen, Tokens, Kiosk) und Rechte (`Allowed`) | abgestimmt 2026-10-09 |
-| [`api.md`](api.md), [`api.yaml`](api.yaml) | HTTP-API: Konventionen, Abo-Modell; Endpunkte als OpenAPI 3.0.3 (`make api-check`) | abgestimmt 2026-10-09 |
+| [`vocabulary.md`](vocabulary.md) | Vokabular: Arten, Transporte, Fakten mit Typ und Einheit, Measurements, Aktionen, Namensräume, reservierte Namen | abgestimmt 2026-10-11 |
+| [`sdk.md`](sdk.md) | Treiber-SDK: Registrierung, Fakt-Katalog, `Source`, `Reporter`, Scheduler, Ausführung, Zähler-Helfer, Testbaukasten, Logging | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
+| [`core.md`](core.md) | Core-Komponenten: eine Schleife, `View`, Ereignisse, Befehle, Inventar → Fakten → Bewertung, Ursache/Symptom | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
+| [`flows.md`](flows.md) | Abläufe: Start, Herunterfahren, Weiterleitung, Aktion, Preset-Lauf | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
+| [`services.md`](services.md) | Dienste: Supervisor, Executor, Preset-Runner, Weiterleitung, Aufbewahrung; Zusammenspiel mit der API | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
+| [`influx.md`](influx.md) | Influx-Schreiber: Schema, Takt, Puffer | abgestimmt 2026-10-11 |
+| [`bootstrap.md`](bootstrap.md) | Bootstrap: Konfiguration, Verdrahtung, Lebenszyklus der Dienste | abgestimmt 2026-10-11 |
+| [`auth.md`](auth.md) | Anmeldung (Passwort, TOTP, Sitzungen, Tokens, Kiosk) und Rechte (`Allowed`) | abgestimmt 2026-10-09, überarbeitet 2026-10-10 |
+| [`api.md`](api.md), [`api.yaml`](api.yaml) | HTTP-API: Konventionen, Verteiler und Abo-Modell; Endpunkte als OpenAPI 3.0.3 (`make api-check`) | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
