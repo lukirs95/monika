@@ -84,7 +84,12 @@ classDiagram
 - **Reihenfolge pro Start:** erst `Reporter(sourceID)` holen, dann `Post(SourceStarted)`, dann `Run` starten. Nachrichten zu einer Quelle stellt der Core in das Postfach ihrer aktuellen Instanz, damit sie in Reihenfolge mit den Meldungen des Treibers verarbeitet werden (sonst könnte ein spätes `SourceStarted` ein schon gemeldetes `Connected` zurücksetzen).
 - `Start` holt den Klartext des Secrets (`secret.Service` erfüllt `SecretValues`), erzeugt `SourceConfig` mit Logger (`driver`, `source_id`, `device_id`) und Scheduler, liest `Source.Heartbeat()` und startet `Run` hinter einer `recover`-Grenze.
 - Er meldet der Schleife per `Post` `SourceStarted{sourceID, heartbeat}`, `SourceStopped{sourceID}`, `SourceFailed{sourceID, err, panic}` (Fehler, Panic, führt zu `Backoff`) und `SourceStuck{sourceID}` (`sdk.md`, Stoppen) und startet nach `Backoff` neu, nie zwei Instanzen derselben Quelle.
-- `Execute` ruft `Source.Execute` hinter einer `recover`-Grenze; läuft die Quelle nicht: `ErrSourceNotRunning` (der Lauf endet als `failed`).
+- `Execute` ruft `Source.Execute` hinter einer `recover`-Grenze; läuft die Quelle nicht: `ErrSourceNotRunning` (der Lauf endet als `failed`). Eine **Panic in `Execute`** liefert einen Fehler (der Lauf endet als `failed`); der Supervisor stoppt die Instanz, meldet `SourceFailed{panic}` und startet nach der Wartezeit neu, denn der Zustand des Treibers ist unklar.
+- **Wartezeit im `Backoff`:** 1 s, jeweils verdoppelt bis höchstens 1 min; lief die Instanz 1 min ohne Fehler, beginnt sie wieder bei 1 s.
+- **`Run` endet mit `nil`, ohne gestoppt zu sein:** ein Fehler des Treibers; der Supervisor meldet `SourceFailed` („Run returned without being stopped“) und startet nach der Wartezeit neu.
+- **Aufbau:** eine Goroutine pro Quelle verarbeitet deren Aufträge in Reihenfolge (Start, Stopp, Ende von `Run`, Ablauf von Wartezeit und 10-s-Frist); Secret holen und `New` blockieren so keine andere Quelle. `Start` und `Stop` blockieren nie. `Start` auf eine laufende Quelle ist ein Neustart; ist die alte Instanz `Stuck`, wartet der Start, bis sie zurückkehrt.
+- **Herunterfahren (Phase 3):** Endet der `ctx` von `Run`, stoppt der Supervisor alle Quellen parallel, wartet höchstens 10 s, meldet die übrigen als `Stuck` und kehrt zurück.
+- **Scheduler:** gehört zum Supervisor; jede Quelle bekommt in `SourceConfig.Scheduler` ein eigenes Handle (`sdk.md`, Scheduler). Eine Panic in einer Aufgabe behandelt der Supervisor wie eine Panic in `Run`.
 
 ## Executor (`internal/action/executor`)
 

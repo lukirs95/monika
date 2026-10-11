@@ -347,12 +347,12 @@ sequenceDiagram
 
 | Mechanismus | Wirkung |
 |---|---|
-| **Phasenversatz** | Jede Aufgabe bekommt einen festen Versatz innerhalb ihres Intervalls, abgeleitet aus der ID der Quelle; viele Quellen verteilen sich gleichmäßig statt gleichzeitig zu senden |
+| **Phasenversatz** | Jede Aufgabe bekommt einen festen Versatz innerhalb ihres Intervalls, abgeleitet aus der ID der Quelle und der laufenden Nummer der Aufgabe, ausgerichtet an der Uhr (z. B. immer bei x,7 s in jedem 2-s-Raster); viele Quellen verteilen sich gleichmäßig statt gleichzeitig zu senden |
 | **Globale Obergrenze** | höchstens N Aufrufe gleichzeitig über alle Treiber (`MONIKA_SCHEDULER_CONCURRENCY`, Standard 32); weitere warten |
-| **Keine Überlappung** | Läuft der vorige Aufruf einer Aufgabe noch, wird der nächste Takt ausgelassen, nicht gestapelt |
+| **Keine Überlappung** | Läuft der vorige Aufruf einer Aufgabe noch (auch während er auf die Obergrenze wartet), wird der nächste Takt ausgelassen, nicht gestapelt |
 | **Timeout pro Aufruf** | Standard = Intervall. Kehrt `fn` trotzdem nicht zurück, gilt die Aufgabe als hängend: Der Scheduler startet für sie nichts mehr und meldet das. Die Zahl der Goroutinen wächst so nie unbegrenzt |
 
-Ein Fehler aus `fn` wird geloggt; die Aufgabe läuft weiter. Ob die Quelle erreichbar ist, entscheiden allein die Lebenszeichen.
+Ein Fehler aus `fn` wird geloggt; die Aufgabe läuft weiter. Ob die Quelle erreichbar ist, entscheiden allein die Lebenszeichen. Eine Panic in `fn` fängt der Scheduler; der Supervisor behandelt sie wie eine Panic in `Run` (`Backoff`, Neustart).
 
 ## Zähler-Helfer
 
