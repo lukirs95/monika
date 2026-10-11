@@ -84,28 +84,30 @@ sequenceDiagram
     autonumber
     participant M as main
     participant G as errgroup
-    participant K as Komponenten
+    participant K as Dienste
 
-    M->>M: signal.NotifyContext(SIGINT, SIGTERM)
     M->>M: config.Load, Logger (slog.SetDefault)
     M->>K: erzeugen und verdrahten in der Reihenfolge aus flows.md (Start)
     alt Fehler beim Erzeugen oder Prüfen
         M->>M: Log, Exit-Code 1
     end
-    M->>G: Run jedes Dienstes (Core, Supervisor, Executor, Runner, Weiterleitung, Influx, Aufbewahrung, API)
-    alt ein Dienst kehrt mit Fehler zurück
-        G->>K: gemeinsamer ctx abgebrochen
-        K->>K: geordnet herunterfahren (Reihenfolge aus flows.md)
-        G-->>M: Fehler
+    M->>G: Run jedes Dienstes, jeder mit eigenem ctx
+    M->>M: warten auf SIGINT/SIGTERM oder den ersten Fehler aus der errgroup
+    M->>K: Phase 1 API Shutdown (5 s)
+    M->>K: Phase 2 Preset-Runner und Executor stoppen (5 s, F8)
+    M->>K: Phase 3 Supervisor stoppt alle Quellen (parallel, je 10 s)
+    M->>K: Phase 4 Core-Schleife beenden (Rest verarbeiten, letztes SaveHealth)
+    M->>K: Phase 5 Weiterleitung, Influx-Schreiber, Aufbewahrung flushen bzw. abbrechen (5 s)
+    M->>K: Phase 6 Einzelinstanz-Sperre freigeben, Datenbank schließen
+    alt Anlass war ein Dienstfehler
         M->>M: Exit-Code 1, die Umgebung startet neu
     else Signal
-        G->>K: ctx abgebrochen
-        K->>K: geordnet herunterfahren
-        G-->>M: nil
         M->>M: Exit-Code 0
     end
 ```
 
+- **Phasen statt gemeinsamer Abbruch:** Das Signal bzw. ein Dienstfehler bricht nicht die Dienste ab, sondern stößt in `main` das Herunterfahren an. `main` beendet die Dienste Phase für Phase, indem es den `ctx` des jeweiligen Dienstes abbricht bzw. seine Stop-Methode ruft, und wartet auf jede Phase, bevor die nächste beginnt. So laufen keine Phasen gleichzeitig, und nachgelagerte Dienste (Weiterleitung, Influx) bekommen noch die letzten Ereignisse der vorgelagerten. Jede Phase hat eine Frist; danach geht `main` weiter und loggt, was nicht fertig wurde. Insgesamt dauert das höchstens rund 30 s; die Umgebung muss so lange warten (Docker: `stop_grace_period: 30s`, `docs/OPERATIONS.md`).
+- **Die `errgroup`** dient nur dazu, einen Dienst zu bemerken, der mit Fehler zurückkehrt; sie bricht keine anderen Dienste ab.
 - **Logger:** `slog` mit `MONIKA_LOG_FORMAT` (`json` oder `text`) und `MONIKA_LOG_LEVEL`; `slog.SetDefault`, damit auch `log`-Ausgaben fremder Libraries strukturiert landen (`sdk.md`, Logging). Beim Start eine Zeile mit Version und den wesentlichen, nicht geheimen Einstellungen.
 - **Initialer Admin:** wird nur angelegt, wenn es noch keinen Benutzer gibt; das Passwort muss A6 erfüllen (`auth.md`), sonst startet Monika nicht. TOTP richtet er bei der ersten Anmeldung ein (A1). Gibt es schon Benutzer und die Variablen sind gesetzt, warnt Monika, dass sie entfernt werden können.
 - **Kein Unterbefehl**, nur zwei Flags: `-version` und `-healthcheck` (fragt `GET /healthz` auf `MONIKA_LISTEN` ab und endet mit `0` oder `1`; für den Healthcheck im Container, der kein `curl` hat). Migrationen laufen beim Start; für die Entwicklung gibt es `make db-migrate`.
@@ -118,7 +120,7 @@ sequenceDiagram
 | K1 | Wie wird `.env` gelesen? | eigener kleiner Parser, strikte Teilmenge, keine Ersetzung |
 | K2 | Unbekannte `MONIKA_*`-Variablen | Abbruch beim Start |
 | K3 | Rechte der `.env` | Warnung, kein Abbruch |
-| K4 | Lebenszyklus der Dienste | `errgroup` mit gemeinsamem `ctx`; ein Fehler fährt alles geordnet herunter, Exit-Code 1, Neustart durch die Umgebung |
+| K4 | Lebenszyklus der Dienste | jeder Dienst mit eigenem `ctx`; Signal oder Dienstfehler (erkannt über die `errgroup`) stößt das Herunterfahren in sechs Phasen mit Fristen an (höchstens rund 30 s); bei Fehler Exit-Code 1 und Neustart durch die Umgebung |
 | K5 | Woher kommt die `.env`? | `./.env` oder `MONIKA_ENV_FILE`; fehlt sie, kein Fehler; Umgebung hat Vorrang |
 | K6 | TLS | nur über einen Reverse-Proxy; Warnung bei `MONIKA_PUBLIC_URL` ohne `https` |
 | K7 | Flags | `-version` und `-healthcheck`, sonst keine (`docs/OPERATIONS.md`) |

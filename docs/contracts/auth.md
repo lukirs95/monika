@@ -28,8 +28,8 @@ classDiagram
         +KioskLogin(ctx, bearer, meta) (Session, error)
         +Logout(ctx, sessionToken) error
         +Allowed(v *View, p Principal, perm Permission, element ID) bool
-        +EnrollTOTP(ctx, user ID) (Enrollment, error)
-        +ConfirmTOTP(ctx, user ID, code) (recoveryCodes []string, error)
+        +EnrollTOTP(ctx, challenge) (Enrollment, error)
+        +ConfirmTOTP(ctx, challenge, code, meta) (Session, recoveryCodes []string, error)
         +CreateUser(ctx, actor, u NewUser) error
         +UpdateUser(ctx, actor, u User) error
         +SetPassword(ctx, actor, user ID, password) error
@@ -135,19 +135,29 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant U as Browser
+    participant A as API
     participant Au as auth.Service
     participant Sec as secret (Master-Key)
     participant S as auth.Store
 
-    U->>Au: EnrollTOTP(user)
-    Au->>Au: 20 zufällige Bytes
+    Note over U,A: Login lieferte LoginStep{Challenge, NeedsEnrollment}
+    U->>A: POST /auth/totp/enroll {challenge}
+    A->>Au: EnrollTOTP(challenge)
+    Au->>Au: Challenge gültig, 20 zufällige Bytes
     Au->>Sec: verschlüsseln (Master-Key, Associated Data = User-ID)
     Au->>S: SaveTOTP (unbestätigt)
     Au-->>U: otpauth://-URL (QR-Code) und Geheimnis zum Abtippen
-    U->>Au: ConfirmTOTP(user, code aus der App)
-    Au->>S: ConfirmTOTP, 10 Wiederherstellungscodes (als Hash)
-    Au-->>U: Wiederherstellungscodes (nur einmal sichtbar)
+    U->>A: POST /auth/totp/confirm {challenge, code aus der App}
+    A->>Au: ConfirmTOTP(challenge, code, meta)
+    Au->>S: ConfirmTOTP mit Zeitschritt des Codes (last_step), 10 Wiederherstellungscodes (als Hash)
+    Au->>S: CreateSession, Audit login
+    Au-->>A: Session, Wiederherstellungscodes
+    A-->>U: Set-Cookie und Wiederherstellungscodes (nur einmal sichtbar)
 ```
+
+- Einrichten läuft über die Challenge aus `Login`, nicht über eine Sitzung: Wer TOTP noch nicht eingerichtet hat, hat noch keine. Die Bestätigung schließt die Anmeldung ab.
+- Der Zeitschritt des bestätigenden Codes wird als `last_step` gespeichert; derselbe Code gilt danach nicht noch einmal.
+- Nach einem Zurücksetzen durch einen Admin (`ResetTOTP`) liefert die nächste Anmeldung `NeedsEnrollment`, der Weg ist derselbe.
 
 ## Anfragen
 

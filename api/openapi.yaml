@@ -207,8 +207,10 @@ paths:
         Erstes Ereignis ist `hello` mit der `stream_id`. Jedes Ereignis trägt als SSE-`id` die
         Version der View, zu der es den Stand seines Objekts beschreibt; nach einem Abbruch sendet
         der Browser sie als `Last-Event-ID`. Liegt sie im Ringpuffer (letzte 100 Ereignisse ohne
-        `facts_changed`), folgen die späteren Ereignisse daraus; sonst folgt `resync`, und der Client
-        lädt `/state` neu. Danach meldet der Client seine Watches neu an. `facts_changed` kommt nur
+        `facts_changed`), folgen alle Ereignisse ab einschließlich dieser Version daraus (Ereignisse
+        sind idempotent); sonst folgt `resync`, und der Client lädt `/state` neu. Danach meldet der
+        Client seine Watches neu an. Beim ersten Laden öffnet der Client zuerst den Strom und lädt
+        danach `/state`; Ereignisse mit `version` ≤ der Version des Stands verwirft er. `facts_changed` kommt nur
         für beobachtete Elemente (siehe `/events/{stream_id}/watch`). Bei Rückstau fasst der Server
         Ereignisse nach Objekt zusammen; es gilt der neueste Stand (`docs/contracts/api.md`).
 
@@ -1707,9 +1709,15 @@ components:
             preset_step_id: { type: string, format: uuid, nullable: true }
             params: { type: object, additionalProperties: true, nullable: true }
             verify:
-              type: array
+              type: object
               nullable: true
-              items: { $ref: '#/components/schemas/Condition' }
+              description: eingefrorene Prüfbedingung des Laufs, wie in action_run.verify gespeichert
+              required: [timeout_ms, conditions]
+              properties:
+                timeout_ms: { type: integer }
+                conditions:
+                  type: array
+                  items: { $ref: '#/components/schemas/Condition' }
             response: { type: object, additionalProperties: true, nullable: true }
             sent_at: { type: string, format: date-time, nullable: true }
             responded_at: { type: string, format: date-time, nullable: true }
@@ -2032,13 +2040,17 @@ components:
 
     State:
       type: object
-      description: Sichtbares nach `view`; Vorfahren sichtbarer Elemente als Gerüst (`skeleton = true`, ohne Health, Befunde, Fakten); Links nur, wenn beide Enden sichtbar sind
-      required: [version, elements, links, health, findings, runs, sources]
+      description: Sichtbares nach `view`; Vorfahren sichtbarer Elemente getrennt als Gerüst in `skeleton` (ohne Health, Befunde, Fakten); Links nur, wenn beide Enden sichtbar sind
+      required: [version, elements, skeleton, links, health, findings, runs, sources]
       properties:
         version: { type: integer, format: int64 }
         elements:
           type: array
           items: { $ref: '#/components/schemas/Element' }
+        skeleton:
+          type: array
+          description: Vorfahren sichtbarer Elemente ohne eigenes view-Recht, nur mit Name und Struktur
+          items: { $ref: '#/components/schemas/SkeletonElement' }
         links:
           type: array
           items: { $ref: '#/components/schemas/Link' }
@@ -2062,7 +2074,6 @@ components:
       required: [id, kind, present, monitored, actions, critical_actions]
       properties:
         id: { type: string, format: uuid }
-        skeleton: { type: boolean, description: 'nur Gerüst: Vorfahre eines sichtbaren Elements, ohne eigenes view-Recht; nur id, kind, name, label, parent_id, device_id sind gefüllt' }
         kind: { type: string, description: 'device, group, access, module, port, …' }
         parent_id: { type: string, format: uuid, nullable: true }
         device_id: { type: string, format: uuid, nullable: true }
@@ -2103,6 +2114,17 @@ components:
         monitored: { type: boolean }
         first_seen_at: { type: string, format: date-time, nullable: true }
         last_seen_at: { type: string, format: date-time, nullable: true }
+    SkeletonElement:
+      type: object
+      description: Gerüst eines Vorfahren (api.md, Sichtbarkeit); keine Einzelabfrage, keine Aktionen
+      required: [id, kind]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        name: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        parent_id: { type: string, format: uuid, nullable: true }
+        device_id: { type: string, format: uuid, nullable: true }
     Setting:
       type: object
       required: [type]
@@ -2254,11 +2276,15 @@ components:
         version: { type: integer, format: int64 }
     EventElementsChanged:
       type: object
-      required: [elements, removed_elements, removed_links, links]
+      required: [elements, skeleton, removed_elements, removed_links, links]
       properties:
         elements:
           type: array
           items: { $ref: '#/components/schemas/Element' }
+        skeleton:
+          type: array
+          description: neue oder geänderte Gerüst-Elemente
+          items: { $ref: '#/components/schemas/SkeletonElement' }
         removed_elements:
           type: array
           description: gelöschte Elemente (Gerät, Quelle oder Gruppe gelöscht)

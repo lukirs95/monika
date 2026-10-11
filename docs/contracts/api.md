@@ -29,7 +29,7 @@ Sichtbar ist, was im Geltungsbereich eines `view`-Rechts liegt (`View.InScope`).
 
 | Fall | Regel |
 |---|---|
-| **Vorfahren** sichtbarer Elemente (z. B. Gerät und Zugang eines sichtbaren Encoders) | als **Gerüst** sichtbar: nur `id`, `kind`, `name`, `label`, `parent_id`, `device_id`, Feld `skeleton = true`; keine Fakten, Health, Befunde, Aktionen, Einstellungen, Quellen |
+| **Vorfahren** sichtbarer Elemente (z. B. Gerät und Zugang eines sichtbaren Encoders) | als **Gerüst** sichtbar, im eigenen Feld `skeleton` von `/state` und `elements_changed` (Schema `SkeletonElement`): nur `id`, `kind`, `name`, `label`, `parent_id`, `device_id`; keine Fakten, Health, Befunde, Aktionen, Einstellungen, Quellen |
 | **Links** | nur, wenn beide Enden sichtbar sind (nicht als Gerüst); sonst fehlen sie |
 | **Ursache außerhalb der Sicht** | ein sichtbarer Befund behält `caused_by_id`; der Befund dahinter erscheint nicht, die UI zeigt „Ursache nicht sichtbar“ |
 | **Verlauf gelöschter Elemente** | nur mit `view` global (siehe Filter im Verlauf) |
@@ -44,16 +44,19 @@ Ein Gerüst-Element ist kein sichtbares Objekt im Sinne von R7: Einzelabfragen d
 | Befunde | `GET /findings/history` | `element` (+ `recursive=true`: Geltungsbereich wie `View.InScope`), `code`, `severity`, `origin`, `rule`, `state` (`active`, `cleared`, `withdrawn`) |
 | Läufe | `GET /runs/history` | `element` (+ `recursive`), `status`, `action`, `preset`, `requested_by` |
 
-Einträge zu gelöschten Elementen bleiben im Verlauf; sie tragen `element_path` (Name beim Entstehen) und `element_deleted = true`. Weil sich ihr Geltungsbereich nicht mehr auflösen lässt, sieht sie nur, wer `view` global hat. Mit `recursive` findet der Filter nur Elemente, die noch existieren.
 | Audit | `GET /audit` | `object_type`, `object_id`, `actor` (`monika` für Einträge ohne Akteur), `verb` |
+
+Einträge zu gelöschten Elementen bleiben im Verlauf; sie tragen `element_path` (Name beim Entstehen) und `element_deleted = true`. Weil sich ihr Geltungsbereich nicht mehr auflösen lässt, sieht sie nur, wer `view` global hat. Mit `recursive` findet der Filter nur Elemente, die noch existieren.
 
 ## Stand, Ereignisse und Abos
 
 - `GET /state` liefert, was der Benutzer sehen darf: Inventar und Links, Health und Rollups, aktive Befunde, laufende Läufe, Zustand der Quellen, jeweils mit der `version` der `View`. **Keine Fakten.**
 - `GET /elements/{id}/facts` liefert die Fakten eines Elements mit `version`.
 - `GET /events` ist der Ereignisstrom (SSE). Jedes Ereignis trägt als `id` die `Version`, zu der es den Stand seines Objekts beschreibt; nach einem Abbruch schickt der Browser sie als `Last-Event-ID`. Ist sie zu alt, kommt `resync`, und der Browser lädt `/state` neu.
+- **Erst Strom, dann Stand.** Der Browser öffnet zuerst `/events` und bekommt `hello{stream_id, version}`, lädt danach `/state` und wendet von den inzwischen empfangenen Ereignissen nur die mit `version` > Version des Stands an. So geht zwischen Stand und Strom nichts verloren; es ist dieselbe Regel wie für alle Abonnenten des Core (erst anmelden, dann die `View` lesen). Ebenso bei `watch`: Ereignisse mit `version` ≤ der Version der Antwort werden verworfen.
+- **Ereignisse sind idempotent.** Jedes Ereignis beschreibt den Stand eines Objekts zu einer Version, nicht eine Änderung daran; zweimal angewendet ergibt dasselbe. Eine Verarbeitung im Core kann mehrere Ereignisse mit derselben Version erzeugen; deshalb liefert die Wiederaufnahme alle Ereignisse **ab einschließlich** der Version aus `Last-Event-ID`.
 - **Fakten nur per Abo:** `FactsChanged` kommt nur für beobachtete Elemente. Beobachtet werden Geltungsbereiche (Element, Gerät, Gruppe; aufgelöst wie `View.InScope`), gebunden an den Strom, nicht an die Sitzung.
-- `GET /healthz` antwortet ohne Anmeldung `200` bzw. `503`, wenn die Datenbank nicht erreichbar ist (`View.DB`); für Docker-Healthcheck und externe Überwachung.
+- `GET /healthz` antwortet ohne Anmeldung `200` bzw. `503`, wenn die Datenbank nicht erreichbar ist; für Docker-Healthcheck und externe Überwachung. Die API liest nur `View.DB` (höchstens 5 s alt, `core.md`) und greift selbst nicht auf die Datenbank zu.
 
 ### Verteiler
 
@@ -70,7 +73,7 @@ Die API hält **ein** Abo am Core und verteilt an alle Browser-Ströme; das entl
 | `source_status_changed` | Quelle |
 
 - Ein langsamer Browser bekommt so weniger, aber immer den aktuellen Stand; was offen ist, ist durch die sichtbaren Objekte begrenzt. Getrennt wird nur, wenn ein Schreiben länger als 30 s hängt (tote Verbindung).
-- **Ringpuffer für Netzaussetzer:** die letzten 100 Ereignisse **ohne** `facts_changed` (der Puffer gilt für alle Ströme; Fakten kommen nach dem Neuverbinden ohnehin über `watch`). Liegt `Last-Event-ID` im Puffer, bekommt der neue Strom die späteren Ereignisse daraus, zusammengefasst nach Schlüssel und gefiltert nach den Rechten des Benutzers. Sonst `resync`.
+- **Ringpuffer für Netzaussetzer:** die letzten 100 Ereignisse **ohne** `facts_changed` (der Puffer gilt für alle Ströme; Fakten kommen nach dem Neuverbinden ohnehin über `watch`). Liegt `Last-Event-ID` im Puffer, bekommt der neue Strom alle Ereignisse ab einschließlich dieser Version daraus, zusammengefasst nach Schlüssel und gefiltert nach den Rechten des Benutzers. Sonst `resync`.
 - Wie oft neu gezeichnet wird, regelt die UI selbst (ein Neuzeichnen pro Frame).
 
 ```mermaid
@@ -80,12 +83,13 @@ sequenceDiagram
     participant A as API
     participant C as Core
 
+    B->>A: GET /api/v1/events (EventSource)
+    A->>C: Subscribe (über den Verteiler)
+    A-->>B: event hello {stream_id, version 4711}
     B->>A: GET /api/v1/state
     A->>C: View()
-    A-->>B: Stand (version 4711), gefiltert nach Rechten
-    B->>A: GET /api/v1/events (EventSource)
-    A->>C: Subscribe
-    A-->>B: event hello {stream_id}
+    A-->>B: Stand (version 4712), gefiltert nach Rechten
+    B->>B: gepufferte Ereignisse mit version ≤ 4712 verwerfen
     B->>A: POST /api/v1/events/{stream_id}/watch {add: [Gerät]}
     A-->>B: aktuelle Fakten der Elemente des Geräts (version 4712)
     loop Ereignisse
@@ -99,7 +103,7 @@ sequenceDiagram
     B->>A: GET /api/v1/events, Last-Event-ID 4713 (automatisch)
     A-->>B: event hello {neue stream_id}
     alt 4713 liegt im Ringpuffer
-        A-->>B: Ereignisse nach 4713 aus dem Puffer (ohne Fakten, zusammengefasst)
+        A-->>B: Ereignisse ab einschließlich 4713 aus dem Puffer (ohne Fakten, zusammengefasst)
     else zu alt
         A-->>B: event resync
         B->>A: GET /api/v1/state

@@ -114,7 +114,7 @@ classDiagram
         +Params json.RawMessage
         +Status Status
         +Critical bool
-        +Verify []Condition
+        +Verify *Verify
         +Response json.RawMessage
         +RequestedByID ID
         +RequestedAt, SentAt, RespondedAt, FinishedAt time.Time
@@ -129,6 +129,12 @@ classDiagram
         <<interface, beim Executor>>
         +Action(driver, name string) (sdk.ActionDef, bool)
     }
+    class Verify {
+        <<struct>>
+        +Timeout time.Duration
+        +Conditions []Condition
+    }
+    Run *-- Verify
     Request ..> Run : Submit legt an
 ```
 

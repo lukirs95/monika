@@ -119,8 +119,8 @@ Project monika {
     Vorlagen und Standardwerte. Parameter-Schema in element.params, der
     Treiber prüft. Kein set, keine settings; der Treiber ändert seine
     Konfiguration nie.
-  - Fakten nur über Aufrufe: last_ok, last_called_at, last_duration,
-    protokollspezifisch z.B. http.status.
+  - Fakten nur über Aufrufe: call.ok, call.called_at, call.duration_ms,
+    protokollspezifisch z.B. http.status_code (roh).
   - Ergebnis: angenommen → accepted (Endzustand), abgelehnt → rejected,
     nicht erreicht → failed.
   - Kritische Aufrufe pro Aufruf in der Konfiguration → element.critical_actions.

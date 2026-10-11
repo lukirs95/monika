@@ -1,6 +1,6 @@
 # Vertrag: Core-Komponenten
 
-**Status:** abgestimmt am 2026-10-09, überarbeitet am 2026-10-10 (Architektur-Audit) und 2026-10-11 (Vokabular, Kennzahlen). **Pakete:** `internal/core` mit `inventory/`, `state/`, `evaluation/`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 3 (Datenfluss), 5, 6, 8 und 14; Treiberseite: [`sdk.md`](sdk.md).
+**Status:** abgestimmt am 2026-10-09, überarbeitet am 2026-10-10 (Architektur-Audit) und 2026-10-11 (Vokabular, Kennzahlen, Datenbank-Wächter). **Pakete:** `internal/core` mit `inventory/`, `state/`, `evaluation/`. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 3 (Datenfluss), 5, 6, 8 und 14; Treiberseite: [`sdk.md`](sdk.md).
 
 Der Core hält Inventar, Fakten, Regeln, aktive Befunde und Health im Speicher und bewertet dort. Er ist der einzige, der über die Store-Interfaces schreibt (siehe `CLAUDE.md`).
 
@@ -60,6 +60,7 @@ classDiagram
         SourceFailed, SourceStuck
         RunChanged
         InfluxStatus
+        DBPing
     }
     class Event {
         <<interface>>
@@ -153,13 +154,13 @@ classDiagram
 |---|---|
 | `Core.Reporter(sourceID)` | die Umsetzung von `sdk.Reporter` für eine Quelle: verpackt jede Meldung als Nachricht an die Schleife |
 | `Core.Do(ctx, cmd)` | Befehl der API; wartet, bis die Schleife ihn verarbeitet hat, und liefert den Fehler. Die Rechteprüfung liegt **vor** `Do`, in der API |
-| `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}`; Influx-Schreiber: `InfluxStatus` |
+| `Core.Post(m)` | Nachricht eines Dienstes ohne Warten auf die Verarbeitung; blockiert höchstens kurz beim Einreihen. Supervisor: `SourceStarted`, `SourceStopped`, `SourceFailed{err, panic}`, `SourceStuck`; Executor: `RunChanged{run}`; Influx-Schreiber: `InfluxStatus`; Datenbank-Wächter: `DBPing{ok, err}` |
 | `View.Links` | alle Links mit Index pro Element (ausgehend und eingehend, nach Typ); für `GET /state`, Ursache/Symptom und die Anzeige von Verbindungen über `represents` |
 | `View.Rules`, `View.Runs` | alle Regeln; laufende Läufe (ein Lauf fällt mit seinem Endzustand heraus) |
 | `View.InScope(scope, element)` | **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
 | `View.EffectiveRules(element)` | pro Fakt und Richtung die geltenden und die überschriebenen Regeln (für die UI) |
 | `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
-| `View.DB` | ob die letzten Schreibvorgänge gelangen; die API meldet sonst `503` an `GET /healthz`, die UI zeigt ein Banner |
+| `View.DB` | Datenbank erreichbar: letzter Ping **und** letzte Schreibvorgänge erfolgreich, höchstens 5 s alt. Ein kleiner Wächter (eigene Goroutine des Core) pingt alle 5 s mit 2 s Timeout und meldet `DBPing`. Ist er falsch, meldet die API `503` an `GET /healthz` und die UI zeigt ein Banner; `/healthz` liest nur diesen Wert |
 | `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
@@ -366,5 +367,5 @@ Die Zuordnung ist eine Ableitung über den Link-Graphen der `View`, kein Zustand
 | C7 | Größe der `View` | strukturell geteilt: unveränderte Teile werden übernommen, nicht kopiert |
 | C8 | Ursache und Symptom | bei jeder Befund- und Link-Änderung neu abgeleitet; `caused_by_id` zeigt auf die Wurzel und wird persistiert |
 | C9 | Gescheiterter `Snapshot` | gemerkt und mit steigender Wartezeit wiederholt, ohne das Gerät; `source.discovery_failed` am Zugang |
-| C10 | Datenbank nicht erreichbar | Monika läuft weiter, Zustandswechsel warten; sichtbar über `View.DB`, Banner und `GET /healthz` |
+| C10 | Datenbank nicht erreichbar | Monika läuft weiter, Zustandswechsel warten; ein Wächter pingt alle 5 s, `View.DB` ist höchstens 5 s alt; sichtbar über Banner und `GET /healthz` |
 | C11 | Nachrichten der Dienste | `Post` ohne Warten; `Do` nur für Befehle mit Fehlerrückgabe |

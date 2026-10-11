@@ -15,7 +15,7 @@ Wie Monika ausgeliefert, betrieben, gesichert und aktualisiert wird. Konfigurati
 
 | Dienst | Image | Aufgabe |
 |---|---|---|
-| `monika` | Monika | Monitor und Konfigurator; Healthcheck `monika -healthcheck` |
+| `monika` | Monika | Monitor und Konfigurator; Healthcheck `monika -healthcheck`; `stop_grace_period: 30s`, damit das Herunterfahren in Phasen fertig wird (Docker beendet sonst nach 10 s mit `SIGKILL`) |
 | `postgres` | `postgres:18-alpine` | Hauptdatenbank, Volume für die Daten |
 | `influxdb` | `influxdb:2` | Zeitreihen; Bucket und Token beim ersten Start per `DOCKER_INFLUXDB_INIT_*`, Aufbewahrung des Buckets z. B. 30 Tage |
 | `caddy` | `caddy:2` | Reverse-Proxy mit automatischem TLS, leitet an `monika:8080` weiter, setzt `X-Forwarded-For` |

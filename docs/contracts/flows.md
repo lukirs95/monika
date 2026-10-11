@@ -75,16 +75,18 @@ sequenceDiagram
     participant X as Weiterleitung, Influx, Aufbewahrung
     participant DB as PostgreSQL
 
-    M->>M: SIGTERM / SIGINT
-    M->>A: Shutdown (keine neuen Anfragen, laufende beenden, Frist)
-    M->>P: Stopp: keine neuen Läufe und Stufen, offene Läufe abschließen (höchstens 5 s)
-    M->>Sup: alle Quellen stoppen (ctx), höchstens 10 s je Quelle
-    M->>C: Schleife beenden: Rest verarbeiten, letztes SaveHealth
-    M->>X: Rest senden bzw. schreiben (kurze Frist), Aufbewahrung bricht den laufenden Batch ab
-    M->>DB: Einzelinstanz-Sperre freigeben, Pool schließen
+    M->>M: SIGTERM / SIGINT oder Dienstfehler
+    M->>A: Phase 1: Shutdown (keine neuen Anfragen, laufende beenden), 5 s
+    M->>P: Phase 2: keine neuen Läufe und Stufen, offene Läufe abschließen (F8), 5 s
+    M->>Sup: Phase 3: alle Quellen stoppen (ctx), parallel, höchstens 10 s je Quelle
+    M->>C: Phase 4: Schleife beenden, Rest verarbeiten, letztes SaveHealth
+    M->>X: Phase 5: Rest senden bzw. schreiben, Aufbewahrung bricht den laufenden Batch ab, 5 s
+    M->>DB: Phase 6: Einzelinstanz-Sperre freigeben, Pool schließen
 ```
 
-**Offene Läufe beim Stopp** enden wie nach einem Neustart (F2), nur mit Grund „Monika gestoppt“; `cancelled` bleibt dem Abbrechen durch User oder Preset vorbehalten:
+Jede Phase beginnt erst, wenn die vorige fertig ist oder ihre Frist abgelaufen ist (`bootstrap.md`, K4); insgesamt höchstens rund 30 s.
+
+**Offene Läufe beim geordneten Stopp (F8)** enden mit Grund „Monika gestoppt“. Anders als beim harten Abbruch (F2, nachträglich beim nächsten Start) wartet `sent` noch auf die Antwort; `cancelled` bleibt dem Abbrechen durch User oder Preset vorbehalten:
 
 | Status beim Stopp | Ende |
 |---|---|
@@ -187,7 +189,7 @@ stateDiagram-v2
 - **Ziel:** Ein Element, das die Aktion selbst unterstützt, bekommt sie selbst. Geräte und Gruppen verteilen: `device_level = true` an die Zugangs-Elemente (Treiber Pflicht), sonst an alle übrigen Elemente; `driver` filtert nach Quelle. Bei `set` bekommt nur ein Element einen Kind-Lauf, das **alle** gesetzten Schlüssel hat; übersprungene Mitglieder nennt die Zusammenfassung im übergeordneten Lauf.
 - **`WriteOnly`-Einstellungen** erzeugen keine Prüfbedingung; der Lauf endet mit `accepted`.
 - **Kritisch:** `action_run.critical` friert ein, ob die Aktion (Definition oder `critical_actions`) oder ein gesetzter Schlüssel kritisch war.
-- **Unterbrochen durch Neustart:** Nach einem Neustart wird nichts erneut an Geräte gesendet. Monika schließt offene Läufe nur ab: `pending` und `sent` als `failed`, `accepted` als `unconfirmed`, jeweils mit Grund „Monika neu gestartet“. Wer die Aktion wiederholen will, löst sie neu aus. Beim geordneten Stopp gilt dasselbe (siehe Herunterfahren).
+- **Unterbrochen durch einen harten Abbruch (F2):** Ist Monika abgestürzt oder hart beendet worden, findet der nächste Start offene Läufe vor. Es wird nichts erneut an Geräte gesendet; Monika schließt sie nur ab: `pending` und `sent` als `failed`, `accepted` als `unconfirmed`, jeweils mit Grund „Monika neu gestartet“. Wer die Aktion wiederholen will, löst sie neu aus. Beim **geordneten** Stopp gilt stattdessen F8 (siehe Herunterfahren): Dort wartet `sent` noch bis zu 5 s auf die Antwort.
 - **Abbrechen** (`POST /runs/{id}/cancel`): Die API leitet nach Art des Laufs weiter:
 
 | Lauf | Weg | Wirkung |
@@ -250,13 +252,13 @@ sequenceDiagram
 | # | Frage | Entscheidung |
 |---|---|---|
 | F1 | Datenbank beim Start nicht erreichbar | Abbruch; Neustart durch die Umgebung |
-| F2 | Läufe, die ein Neustart unterbrochen hat | nichts erneut senden; `pending`/`sent` → `failed`, `accepted` → `unconfirmed`, mit Grund |
+| F2 | Läufe, die ein harter Abbruch hinterlassen hat (beim nächsten Start) | nichts erneut senden; `pending`/`sent` → `failed`, `accepted` → `unconfirmed`, mit Grund „Monika neu gestartet“ |
 | F3 | Wer verwaltet die laufenden `Source`s? | eigener Dienst **Supervisor**; die Schleife beauftragt ihn per Nachricht, der Executor ruft über ihn `Execute` |
 | F4 | Wo werden Rechte geprüft? | in der API (und im Preset-Runner vorab) über `auth.Allowed` gegen die `View`; Core und Executor prüfen nicht erneut |
 | F5 | Wiederholungen der Weiterleitung | 3 Wiederholungen (1 s, 5 s, 30 s), Warteschlange pro Ziel, bei Überlauf die ältesten verwerfen |
 | F6 | Wie wartet der Executor auf die Prüfbedingung? | Ereignisse (`FactsChanged`) abonnieren; wer auf Änderungen reagiert, abonniert (`core.md`) |
 | F7 | Was bricht eine Preset-Stufe ab? | `failed` und `rejected`, nicht `unconfirmed`; Endzustände von Läufen sind endgültig |
-| F8 | Offene Läufe beim geordneten Stopp | wie F2, Grund „Monika gestoppt“; `sent` wartet höchstens 5 s auf die Antwort; `cancelled` nur bei echtem Abbrechen |
+| F8 | Offene Läufe beim geordneten Stopp | `pending` → `failed`, `sent` wartet höchstens 5 s auf die Antwort (dann echter Status oder `failed`), `accepted` → `unconfirmed`, Grund „Monika gestoppt“; `cancelled` nur bei echtem Abbrechen |
 | F9 | Wann werden Preset-Ziele aufgelöst? | beim Start, eingefroren; die Vorabprüfung gilt genau diesen Zielen |
 | F10 | Preset abbrechen | Wurzellauf über `Runner.Cancel`, alles andere über `Executor.Cancel`; ein abgebrochener übergeordneter Lauf endet als `cancelled` |
 | F11 | Zweite Instanz auf derselben Datenbank | Advisory Lock beim Start; belegt → Abbruch; Verbindung der Sperre verloren → Monika beendet sich |
