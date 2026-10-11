@@ -139,6 +139,11 @@ func (d Driver) CheckElement(e Element) error {
 	if !vocab.Direction(e.Direction) {
 		errs = append(errs, fmt.Errorf("unknown direction %q", e.Direction))
 	}
+	if e.GlobalRef != "" {
+		if err := d.CheckGlobalRef(e.GlobalRef); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for _, a := range e.Actions {
 		if !slices.ContainsFunc(d.Actions, func(def ActionDef) bool { return def.Name == a }) {
 			errs = append(errs, fmt.Errorf("action %q is not in the catalog", a))
@@ -174,6 +179,19 @@ func (d Driver) CheckElement(e Element) error {
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("element %q: %w", e.ExternalID, err)
+	}
+	return nil
+}
+
+// CheckGlobalRef prüft eine global_ref am eigenen Baum (Element.GlobalRef, Snapshot.GlobalRef):
+// Sie hat die Form <namensraum>:<id>, und der Namensraum gehört diesem Treiber.
+func (d Driver) CheckGlobalRef(ref string) error {
+	ns, id, ok := strings.Cut(ref, ":")
+	if !ok || ns == "" || id == "" {
+		return fmt.Errorf("global ref %q: want <namespace>:<id>", ref)
+	}
+	if owner, ok := vocab.NamespaceOwner(ns); !ok || owner != d.Name {
+		return fmt.Errorf("global ref %q: namespace %q does not belong to driver %q", ref, ns, d.Name)
 	}
 	return nil
 }

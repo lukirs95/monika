@@ -103,6 +103,8 @@ func TestCheckElement(t *testing.T) {
 		{"setting type mismatch", func(e *Element) { e.Settings["stream.dest_port"] = Setting{Type: SettingFloat} }, "does not match"},
 		{"setting without fact", func(e *Element) { e.Settings["stream.nope"] = Setting{Type: SettingInt} }, "no such fact"},
 		{"write-only with fact", func(e *Element) { e.Settings["stream.dest_port"] = Setting{Type: SettingInt, WriteOnly: true} }, "write-only"},
+		{"global ref without namespace", func(e *Element) { e.GlobalRef = "X8A9001" }, "want <namespace>:<id>"},
+		{"global ref in foreign namespace", func(e *Element) { e.GlobalRef = "xlink:X8A9001" }, "does not belong"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,6 +115,27 @@ func TestCheckElement(t *testing.T) {
 				t.Fatalf("CheckElement() = %v, want error containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestCheckGlobalRef(t *testing.T) {
+	d := Driver{Name: "videoxlink"}
+	tests := []struct {
+		ref string
+		ok  bool
+	}{
+		{"xlink:X8A9001", true},
+		{"xlink:X8A9001-E1", true},
+		{"nmos:1234", false},
+		{"unknown:1234", false},
+		{"xlink:", false},
+		{":X8A9001", false},
+		{"X8A9001", false},
+	}
+	for _, tt := range tests {
+		if err := d.CheckGlobalRef(tt.ref); (err == nil) != tt.ok {
+			t.Errorf("CheckGlobalRef(%q) = %v, want ok %v", tt.ref, err, tt.ok)
+		}
 	}
 }
 
@@ -127,6 +150,11 @@ func TestRegister(t *testing.T) {
 	d.Name = "registrytest"
 	d.Actions, d.Facts = nil, nil
 	d.New = func(SourceConfig) (Source, error) { return nopSource{}, nil }
+	t.Cleanup(func() {
+		registryMu.Lock()
+		defer registryMu.Unlock()
+		delete(registry, d.Name)
+	})
 	Register(d)
 	if got, ok := Lookup("registrytest"); !ok || got.Name != d.Name {
 		t.Fatalf("Lookup = %+v, %v", got, ok)
