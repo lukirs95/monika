@@ -70,20 +70,21 @@ const (
 	SettingIPv4   = "ipv4"
 )
 
-// Setting ist ein schreibbarer Fakt-Schlüssel mit Grenzen.
+// Setting ist ein schreibbarer Fakt-Schlüssel mit Grenzen. Die JSON-Form steht in
+// element.settings und in der API.
 type Setting struct {
-	Type      string
-	Min       *float64
-	Max       *float64
-	Values    []string // bei enum
-	Critical  bool
-	WriteOnly bool // das Gerät meldet den Wert nicht zurück: kein Fakt, keine Prüfung
+	Type      string   `json:"type"`
+	Min       *float64 `json:"min,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	Values    []string `json:"values,omitempty"` // bei enum
+	Critical  bool     `json:"critical,omitempty"`
+	WriteOnly bool     `json:"write_only,omitempty"` // das Gerät meldet den Wert nicht zurück: kein Fakt, keine Prüfung
 }
 
 // Param ist ein Parameter einer Aktion mit eigenem Schema (Sende-Ziele), mit Standardwert.
 type Param struct {
 	Setting
-	Default any // bool, int64, float64 oder string
+	Default any `json:"default,omitempty"` // bool, int64, float64 oder string
 }
 
 // FactTypeOf liefert den Typ des Fakts, den eine Einstellung dieses Typs setzt.

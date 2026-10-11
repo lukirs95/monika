@@ -94,6 +94,8 @@ classDiagram
         +Apply(ctx, cmd Command) (Diff, error)
         +Element(id) (Element, bool)
         +ByExternalID(sourceID, extID) (ID, bool)
+        +FactsByID(sourceID, facts map~string, sdk.Facts~) (map~ID, sdk.Facts~, unknown []string)
+        +Path(id) string
     }
     class Diff {
         <<struct>>
@@ -177,6 +179,8 @@ classDiagram
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
+| `Inventory.FactsByID` | übersetzt die Fakten einer Meldung von `external_id`s in Element-IDs; unbekannte `external_id`s kommen zurück, die Schleife loggt sie einmal pro Quelle |
+| `Inventory.Path` | `element_path` eines Elements für Befunde und Läufe (Label, sonst Name, vom Gerät bis zum Element, ohne Zugang, getrennt durch „ / “) |
 | `Diff` | was die Discovery bzw. ein Befehl am Inventar geändert hat; `Missing`/`Returned` sind Wechsel von `present` |
 | `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben, neu sind oder weggefallen sind |
 | `Facts` | copy-on-write: Die Fakten eines Elements werden nie verändert, sondern ersetzt; `Snapshot` kopiert nur die äußere Map, die `View` teilt den Rest (C7) |
