@@ -109,6 +109,13 @@ func (l *Liveness) Live(id uuid.UUID, now time.Time) bool {
 	return ok && s.isLive(now)
 }
 
+// HasSnapshot meldet, ob nach dem letzten Connected ein Snapshot übernommen wurde. Davor
+// verwirft die Schleife Updates.
+func (l *Liveness) HasSnapshot(id uuid.UUID) bool {
+	s, ok := l.sources[id]
+	return ok && s.live
+}
+
 // Status liefert die Lebendigkeit der Quelle zu now.
 func (l *Liveness) Status(id uuid.UUID, now time.Time) (Status, bool) {
 	s, ok := l.sources[id]
@@ -120,6 +127,12 @@ func (l *Liveness) Status(id uuid.UUID, now time.Time) (Status, bool) {
 		phase = PhaseUnreachable
 	}
 	return Status{Phase: phase, Heartbeat: s.heartbeat, LastSeen: s.lastSeen, Err: s.err}, true
+}
+
+// IsUnreachable meldet, ob für die Quelle zu now der Befund source.unreachable gilt.
+func (l *Liveness) IsUnreachable(id uuid.UUID, now time.Time) bool {
+	s, ok := l.sources[id]
+	return ok && s.unreachable(now)
 }
 
 // Unreachable liefert die Quellen, für die zu now der Befund source.unreachable gilt.

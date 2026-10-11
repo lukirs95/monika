@@ -253,7 +253,8 @@ sequenceDiagram
 - Ein `Update` für eine unbekannte `external_id` ist ein Fehler des Treibers: Der Core verwirft es, mit `Warn`-Log einmal pro Quelle und `external_id` bis zum nächsten `Snapshot`.
 - Ändert sich die **Struktur** (Element neu oder weg, Link neu oder weg, Aktionen, Einstellungen), meldet der Treiber erneut einen vollständigen `Snapshot`. Der Core vergleicht selbst; der Treiber muss keine Differenzen bilden.
 - Jeder Aufruf am `Reporter` zählt als Lebenszeichen. `Heartbeat()` braucht nur, wer längere Zeit nichts zu melden hat (Event-Streams).
-- Reporter-Aufrufe kommen aus einer Goroutine nacheinander; der `Reporter` blockiert nicht lange.
+- Reporter-Aufrufe kommen aus einer Goroutine nacheinander; der `Reporter` blockiert nie (Postfach pro Quelle, `core.md`).
+- Mit dem Melden gehen `Snapshot` und `Update` samt ihren Maps und Slices an den Core; der Treiber verändert sie danach nicht mehr, sondern baut für die nächste Meldung neue.
 
 ### Fehler, Panic und Neustart
 

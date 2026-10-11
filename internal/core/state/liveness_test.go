@@ -25,6 +25,9 @@ func expect(t *testing.T, l *Liveness, id uuid.UUID, checks ...check) {
 	for _, c := range checks {
 		st, _ := l.Status(id, at(c.at))
 		unreachable := slices.Contains(l.Unreachable(at(c.at)), id)
+		if l.IsUnreachable(id, at(c.at)) != unreachable {
+			t.Errorf("at %s: IsUnreachable differs from Unreachable", c.at)
+		}
 		if st.Phase != c.phase || l.Live(id, at(c.at)) != c.live || unreachable != c.unreachable {
 			t.Errorf("at %s: phase %s, live %v, unreachable %v; want %s, %v, %v",
 				c.at, st.Phase, l.Live(id, at(c.at)), unreachable, c.phase, c.live, c.unreachable)
@@ -41,8 +44,14 @@ func TestLivenessStart(t *testing.T) {
 
 	l.Connected(id, at(7*time.Second))
 	expect(t, l, id, check{7 * time.Second, PhaseConnecting, false, false})
+	if l.HasSnapshot(id) {
+		t.Error("snapshot before SnapshotApplied")
+	}
 	l.SnapshotApplied(id, at(7*time.Second))
 	expect(t, l, id, check{7 * time.Second, PhaseLive, true, false})
+	if !l.HasSnapshot(id) {
+		t.Error("no snapshot after SnapshotApplied")
+	}
 }
 
 func TestLivenessSilence(t *testing.T) {

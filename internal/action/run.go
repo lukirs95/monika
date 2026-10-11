@@ -24,6 +24,15 @@ const (
 	StatusCancelled   Status = "cancelled"
 )
 
+// Final meldet einen Endzustand; er ist endgültig.
+func (s Status) Final() bool {
+	switch s {
+	case StatusRejected, StatusFailed, StatusConfirmed, StatusUnconfirmed, StatusCancelled:
+		return true
+	}
+	return false
+}
+
 // Verify ist die Prüfbedingung eines Laufs: alle Conditions müssen innerhalb von Timeout gelten.
 type Verify struct {
 	Timeout    time.Duration
