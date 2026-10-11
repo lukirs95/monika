@@ -135,11 +135,12 @@ Meldet das Gerät eigene Alarme („PSU 2 failure“), gibt der Treiber sie pro 
 
 | Link | GW-4 |
 |---|---|
-| `feeds` | `in/2` → `sender/2` (das SDI-Signal speist den Sender) |
+| `feeds` | `in/2` → `sender/2`: beim GW-4 fest verdrahtet, jeder Eingang speist genau seinen Sender |
 | `uses` | `sender/2/path/a` → `nic/media-a`, `sender/2/path/b` → `nic/media-b` |
 | `represents` | – (nur, wenn der Treiber Stellvertreter fremder Elemente zeigt; Ziel immer per `global_ref`) |
 
-Links über Gerätegrenzen meldet die Seite, die sie konfiguriert, mit `Endpoint.GlobalRef` auf das fremde Element.
+- **`feeds` oder `uses`?** Fester Signalfluss ist `feeds`. Ließe der GW-4 per Einstellung wählen, welchen Eingang ein Sender nimmt, wäre es `uses` von `sender/2` auf den gewählten Eingang; `feeds` darf keine Aktion ändern (Kreuzschienen-Grenze).
+- Links über Gerätegrenzen meldet die Seite, die sie konfiguriert, mit `Endpoint.GlobalRef` auf das fremde Element.
 
 ## Schritt 9: Konfiguration und Secret
 

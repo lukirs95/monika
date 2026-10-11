@@ -64,7 +64,7 @@ Die erste Treiber-Generation:
 
 1. **Das Gerät ist immer die Wahrheit.** Monika speichert keine Soll-Konfiguration und gleicht nichts ab. Ob eine Aktion gewirkt hat, zeigt der beobachtete Gerätezustand.
 2. **Kein Kreuzschienen-Tool.** Signalbeziehungen (`feeds`) werden beobachtet, nie geschaltet.
-3. **Treiber melden Fakten, der Core bewertet.** Kein Treiber entscheidet, was „OK“ ist (Ausnahme: Alarme, die das Gerät selbst meldet).
+3. **Treiber melden Fakten, der Core bewertet.** Kein Treiber entscheidet, was „OK“ ist (Ausnahme: was das Gerät selbst als Alarm oder Gut-/Schlecht-Zustand meldet, z. B. `system.psu_ok`).
 4. **Komposition statt Hierarchie.** Es gibt keine Gerätetypen wie „Gateway“ oder „Router“. Ein Gerät ist ein Baum aus generischen Elementen.
 5. **Jedes Element hat genau einen Besitzer** (eine Quelle oder den User). Dasselbe reale Ding darf aus mehreren Perspektiven auftauchen; die Perspektiven sind über `represents` verbunden.
 6. **Klare Besitzverhältnisse pro Spalte.** Treiber schreiben Treiber-Spalten, der User schreibt User-Spalten. Ein Re-Discovery überschreibt nie Labels, Notizen oder Gruppen.
@@ -88,7 +88,7 @@ Die erste Treiber-Generation:
 | IDs | **UUIDv7**, Typ `uuid` (nie `text`), im Normalfall in Go erzeugt (`uuid.NewV7()`) |
 | Anmeldung | lokal; **OIDC** ist vorbereitet und kommt später |
 | Geheimnisse | **verschlüsselter Secret-Store in PostgreSQL** (AES-256-GCM); Master-Key aus der Umgebung bzw. `.env` |
-| Bootstrap | Master-Key, DB-Verbindung, InfluxDB-Token, initialer Admin aus der Umgebung bzw. `.env` |
+| Bootstrap | Master-Key, DB-Verbindung, öffentliche URL, InfluxDB, Aufbewahrung, initialer Admin aus der Umgebung bzw. `.env` (Abschnitt 14) |
 | Hauptadressat | die **Monika-UI**; Push nach außen nur per Syslog und Webhook |
 
 ### Komponenten
@@ -101,7 +101,10 @@ flowchart LR
     AUTH["Auth und Rechte"]
     CORE["Core<br/>Inventar-Sync · Zustand im Speicher<br/>Bewertung · Ursache/Symptom"]
     EXEC["Aktions-Executor<br/>FIFO pro Element · Preset-Runner"]
+    SUP["Supervisor<br/>startet und stoppt Quellen"]
     FWD["Weiterleitung<br/>syslog · webhook"]
+    HIST["Influx-Schreiber<br/>fester Takt"]
+    RET["Aufbewahrung<br/>nachts"]
     subgraph DRV["Treiber (Plugins)"]
       direction TB
       VXL["videoxlink"]
@@ -116,14 +119,18 @@ flowchart LR
   API --> AUTH
   API --> CORE
   API --> EXEC
-  EXEC --> DRV
+  CORE --> SUP
+  EXEC --> SUP
+  SUP --> DRV
   DRV -- "Inventar, Fakten,<br/>Alarme, Links" --> CORE
   CORE --> FWD
+  CORE --> HIST
 
   CORE --> PG[("PostgreSQL")]
   EXEC --> PG
   AUTH --> PG
-  CORE -- "Messwerte" --> INF[("InfluxDB")]
+  HIST -- "Messwerte" --> INF[("InfluxDB")]
+  RET --> PG
 
   VXL <--> X8["VideoXLink X4/X8"]
   EMB <--> E2["emFUSION-2 / MuoN"]
@@ -185,7 +192,7 @@ Pro Hersteller bzw. Gerätetyp gibt es einen Treiber. Treiber laufen im Monika-P
 - Optional: Build-Tags pro Treiber für schlanke Builds.
 - **Treiber sind dünne Adapter.** Gerätelibraries (z. B. `goxlinkclient`) bleiben eigenständige Repositories ohne Abhängigkeit zu Monika; der Treiber übersetzt nur zwischen Library und Monika-Interfaces.
 - **Vertrag:** Typen, Interfaces und Abläufe des SDK stehen in [`contracts/sdk.md`](contracts/sdk.md), die Namen in [`contracts/vocabulary.md`](contracts/vocabulary.md); wie man einen Treiber schreibt, zeigt [`DRIVERS.md`](DRIVERS.md).
-- **Fehlerisolation:** Jede Treiber-Goroutine läuft hinter einer `recover()`-Grenze. Ein Panic wird zum Befund `source.unreachable` mit Fehlermeldung und Neustart der Quelle, nicht zum Absturz von Monika.
+- **Fehlerisolation:** Jede Treiber-Goroutine läuft hinter einer `recover()`-Grenze. Ein Panic beendet nur diese Quelle: Ihre Elemente werden `unknown`, der Supervisor startet sie nach einer Wartezeit neu, und hält der Ausfall an, entsteht `source.unreachable` mit Fehlermeldung (Abschnitt 8). Monika stürzt nicht ab.
 
 Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separate Prozesse per gRPC (widerspricht dem Monolithen; Isolation wird über `recover()` erreicht), WASM (für netzwerklastige Treiber nicht ausgereift).
 
@@ -196,7 +203,7 @@ Verworfen: Go `plugin` (`.so`; fragil bei Versionen und Abhängigkeiten), separa
 | **Discovery** | Meldet den Elementbaum des Geräts aus Sicht seiner Quelle: `kind`, `transport`, `direction`, `name`, `attributes`, Position. Dazu die Identität des Geräts, wie die Quelle sie sieht (Hersteller, Modell, Seriennummer, Firmware). |
 | **Identität** | Jedes Element hat eine **stabile `external_id`**, eindeutig innerhalb der Quelle (Slot-/Index-Pfad oder geräteeigene ID, nie eine laufende Nummer aus der Discovery-Reihenfolge). Wo vorhanden, zusätzlich eine global eindeutige `global_ref` mit Namensraum (`xlink:X8A9001-E1`, `nmos:<uuid>`); für das Gerät selbst die `global_ref` des Zugangs-Elements (`xlink:X8A9001`). Jeder Namensraum gehört einem Treiber; andere verwenden ihn nur als Ziel von Links. Das Zugangs-Element der Quelle (siehe Abschnitt 5) wird ohne `external_id` angesprochen. |
 | **Fakten** | Meldet Zustandswerte als flache Map mit Punkt-Schlüsseln aus dem Go-Vokabular, mit dem Typ aus dem Fakt-Katalog. Keine Bewertung. Ein Fakt wird gemeldet, solange das Element ihn grundsätzlich hat; „kein Signal“ ist `false`, nicht ein fehlender Fakt. Fakten, die das ganze Gerät betreffen, gehören an das Zugangs-Element. |
-| **Fakt-Katalog** | Deklariert jeden Rohwert mit Typ (`bool`, Zahl, `string`), Einheit und Beschreibung; Kern- und bekannte Fakten bringt das Vokabular mit. Nicht deklarierte Schlüssel und Werte mit falschem Typ verwirft der Core. |
+| **Fakt-Katalog** | Deklariert jeden Rohwert mit Typ (`bool`, `int`, `float`, `string`), Art (`status`, `gauge`, `counter`) und Beschreibung; die Einheit steht als Endung im Namen. Kern- und bekannte Fakten bringt das Vokabular mit. Nicht deklarierte Schlüssel und Werte mit falschem Typ verwirft der Core. |
 | **Vollständiger Stand** | Meldet beim Verbinden und bei jedem Wiederverbinden den **vollständigen** aktuellen Stand aller seiner Elemente, nicht nur Änderungen. |
 | **Lebenszeichen** | Gibt regelmäßig Lebenszeichen (jede erfolgreiche Abfrage, Keepalive eines Event-Streams) und nennt pro Quelle den erwarteten Abstand (bei Sende-Zielen ohne Health-Check `0`). Bleiben sie aus, gilt die Quelle als nicht erreichbar. |
 | **Alarme** | Reicht vom Gerät selbst gemeldete Alarme weiter. |
@@ -259,7 +266,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 
 - **`kind` beschreibt die Rolle, `transport` den Weg** (`sdi`, `madi`, `analog`, `aes3`, `st2110-20`, `st2110-30`, `st2110-40`, `aes67`, `xlink`, `srt`, `ndi`, …). Ein Gateway ist kein Typ, sondern ein Gerät mit `port`/`sdi` und `sender`/`st2110-20`.
 - **`direction`** (`in`, `out`, `bidir`) ist die *Fähigkeit* eines Anschlusses. Die *aktuelle* Richtung eines bidirektionalen Ports ist ein Fakt.
-- **Units sind keine Ports.** Ein Encoder hängt direkt unter dem Gerät und *nutzt* einen Port über einen `uses`-Link, der sich ändern darf.
+- **Units sind keine Ports.** Ein Encoder hängt unter dem Zugang seiner Quelle (nicht unter einem Port). Kann er seinen Eingang wählen, *nutzt* er den Port über einen `uses`-Link, der sich ändern darf; ist der Eingang fest verdrahtet, *speist* der Port ihn (`feeds`, Abschnitt 6).
 
 ### Gerät und Quellen
 
@@ -297,7 +304,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 
 | Wer | Spalten |
 |---|---|
-| Treiber | `kind`, `transport`, `direction`, `name`, `attributes`, `position`, `external_id`, `global_ref`, `actions`, `critical_actions`, `settings`; in `device_source`: `vendor`, `model`, `serial`, `firmware` |
+| Treiber | `kind`, `transport`, `direction`, `name`, `attributes`, `position`, `external_id`, `global_ref`, `actions`, `critical_actions`, `settings`, `params`; in `device_source`: `vendor`, `model`, `serial`, `firmware` |
 | Core | `present`, `first_seen_at`, `last_seen_at`, `device_id`, `source_id`, `parent_id` (aus der Discovery) |
 | User | `label`, `notes`, `monitored`; in `device_source`: `address`, `config`, `secret_id`, `enabled` |
 
@@ -315,7 +322,7 @@ Erzwungen durch `element_class_check`. Das Gerät gehört keiner Quelle, weil es
 - **Position und Label hängen an der Mitgliedschaft**, nicht am Element: Gerät B / Input 1 ist *in dieser Stagebox* Kanal 5.
 - `member`-Links dürfen keine Zyklen bilden (Prüfung in der Anwendung per rekursiver Abfrage). Prüfung und Insert laufen in einer Transaktion unter einem Advisory Lock (`pg_advisory_xact_lock`), damit zwei parallele Änderungen nicht gemeinsam einen Zyklus erzeugen.
 - Mitgliedschaften ändern erfordert `inventory_edit` an der Gruppe **und** am Element (Abschnitt 12).
-- Health einer Gruppe = schlimmster Zustand der Mitglieder, plus Rollup mit Zählern (Abschnitt 8). **Keine Redundanzlogik:** Jeder Ausfall ist ein Fehler, auch wenn die Produktion weiterläuft.
+- Health einer Gruppe = schlimmster Zustand der Elemente in ihrem Geltungsbereich, jedes genau einmal gezählt, plus Rollup mit Zählern (Abschnitt 8). **Keine Redundanzlogik:** Jeder Ausfall ist ein Fehler, auch wenn die Produktion weiterläuft.
 - Standorte und Produktionen werden als Gruppen modelliert.
 
 Beispiel: eine Stagebox mit 8 Eingängen aus zwei Geräten mit je 4 Eingängen.
@@ -337,8 +344,8 @@ Die physische Struktur steckt in `parent_id`. Alle anderen Beziehungen sind **Li
 
 | Typ | Bedeutung | Gemeldet von | Wirkung bei Problemen |
 |---|---|---|---|
-| `feeds` | Signalfluss: A speist B (SDI-In → Encoder, Remote-E1 → D1) | Treiber | Problem an A → B betroffen |
-| `uses` | Ressourcenbindung ohne Signalrichtung (Unit → Port, Stream → Interface, Decoder → Peer) | Treiber | Problem an B → A betroffen |
+| `feeds` | fester Signalfluss: A speist B (fest verdrahteter SDI-In → Sender, Remote-E1 → D1, D2 → SDI-Out) | Treiber | Problem an A → B betroffen |
+| `uses` | Bindung, die das Gerät per Einstellung wählen lässt, auch ein wählbarer Signaleingang (Encoder → gewählter SDI-Port, Stream → Interface, Decoder → Peer) | Treiber | Problem an B → A betroffen |
 | `member` | Gruppenmitgliedschaft (Gruppe → Mitglied) | User | keine; Gruppen aggregieren |
 | `represents` | Perspektive: A ist Stellvertreter von B (Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts) | Treiber | keine |
 
@@ -349,6 +356,7 @@ Regeln:
 - **Treiber-Links** werden bei Wegfall gelöscht (nicht weich markiert). Ihre Historie steht in `audit_log` (Einträge der Discovery mit `actor_id = NULL`).
 - `member`-Links haben keine Quelle, alle anderen genau eine (`element_link_owner_check`).
 - **Kreuzschienen-Grenze:** Aktionen dürfen `uses`-Links verändern, niemals `feeds`-Links.
+- **`feeds` oder `uses`?** Ist der Signalfluss fest (verdrahtet bzw. vom Gerät nicht wählbar), ist er `feeds`. Lässt das Gerät per Einstellung wählen, woher ein Element sein Signal nimmt, ist es `uses`; sonst wäre das Umschalten durch die Kreuzschienen-Grenze verboten. Für Ursache und Symptom und für die Anzeige ist beides gleich: Ein Problem am Port trifft den Encoder.
 
 ---
 
@@ -360,12 +368,13 @@ Bei XLink-Remote-Produktionen hängen entfernte Geräte an mehreren lokalen Ger�
 
 ```
 L1  X8A1001
-├─ Peer X8A9001          peer             Fakten: connected, rtt, p2p
-│  └─ X8A9001-E1         sender · xlink   Stellvertreter: läuft, Signal am Remote-Eingang
-├─ D1                    receiver · xlink   ◀──feeds── Peer X8A9001 / E1
-│                                           ──uses───▶ Peer X8A9001
-│                                           ──feeds──▶ SDI 5
-└─ Peer X8A9002 …
+└─ XLink-API                access
+   ├─ Peer X8A9001          peer             state.connected, stream.rtt_ms, videoxlink.p2p
+   │  └─ X8A9001-E1         sender · xlink   Stellvertreter: state.running, state.signal_present
+   ├─ D1                    receiver · xlink   ◀──feeds── Peer X8A9001 / E1
+   │                                           ──uses───▶ Peer X8A9001
+   │                                           ──feeds──▶ SDI 5
+   └─ Peer X8A9002 …
 ```
 
 - Unter dem Peer hängen **nur die Remote-Units, die mit diesem lokalen Gerät verbunden sind** (Hin- und Rückwege), keine Health-Daten des Remote-Geräts.
@@ -516,10 +525,10 @@ Ein frisch entdecktes Gerät ohne Regeln ist damit `ok` über seinen Zugang („
 
 `unknown` folgt aus der Lebendigkeit der Quelle, nicht aus der Schwere eines Befunds; `severity` bleibt `info`, `warning`, `error`.
 
-**Health von Gerät und Gruppe** fasst ihre Elemente bzw. Mitglieder zusammen, in der Rangfolge **`error` > `warning` > `unknown` > `ok`**:
+**Health von Gerät und Gruppe** fasst die **verschiedenen Elemente in ihrem Geltungsbereich** zusammen (`View.InScope`, ohne die Gerät- und Gruppen-Elemente selbst; jedes Element zählt genau einmal, auch wenn eine Gruppe ein Gerät und zusätzlich einen seiner Ports enthält), in der Rangfolge **`error` > `warning` > `unknown` > `ok`**:
 
 - Elemente ohne Health (nicht überwacht, verschwunden, ungeprüft) zählen nicht mit, außer ein verschwundenes Element hat einen aktiven Befund (z. B. aus `present eq true`).
-- Ein stillgelegtes Gerät hat selbst keine Health und zählt in seinen Gruppen nicht mit.
+- Ein stillgelegtes Gerät hat selbst keine Health; seine Elemente sind nicht überwacht und zählen auch in Gruppen nicht mit.
 - Ist die Menge leer (Gerät ohne Quelle, leere Gruppe, alles stillgelegt oder ungeprüft), hat Gerät bzw. Gruppe **keine Health**. `unknown` entsteht nur aus einer Quelle, die liefern soll und nicht liefert.
 - **Rollup** mit Zählern: `{"ok": 12, "warning": 1, "error": 0, "unknown": 3, "unchecked": 40, "unmonitored": 2, "missing": 1}`. `unchecked`, `unmonitored` und `missing` sind informativ und fließen nicht in die Health ein.
 
@@ -577,7 +586,7 @@ Die Prüfbedingung kommt aus der Aktionsdefinition (z. B. `start` → `state.run
 
 ### Sammelaktionen
 
-Ein Element, das die Aktion selbst unterstützt, bekommt sie selbst. Geräte und Gruppen unterstützen keine Aktionen; eine Aktion auf sie wird auf alle Elemente ihres Geltungsbereichs (Abschnitt 8) verteilt, die sie unterstützen. Bei `set` muss ein Element **alle** gesetzten Schlüssel haben, sonst wird es übersprungen; es gibt keine halb gesetzten Elemente. Es entsteht ein übergeordneter Lauf mit einem Kind-Lauf pro Element; der übergeordnete Lauf fasst zusammen („7 von 8 bestätigt, 1 übersprungen: fehlender Schlüssel `codec`“).
+Ein Element, das die Aktion selbst unterstützt, bekommt sie selbst. Geräte und Gruppen unterstützen keine Aktionen; eine Aktion auf sie wird auf alle Elemente ihres Geltungsbereichs (Abschnitt 8) verteilt, die sie unterstützen. Bei `set` muss ein Element **alle** gesetzten Schlüssel haben, sonst wird es übersprungen; es gibt keine halb gesetzten Elemente. Es entsteht ein übergeordneter Lauf mit einem Kind-Lauf pro Element; der übergeordnete Lauf fasst zusammen („7 von 8 bestätigt, 1 übersprungen: fehlender Schlüssel `codec.format`“).
 
 - **Verschwundene Mitglieder**, die die Aktion unterstützen würden, bekommen einen Kind-Lauf, der sofort mit `failed` („Element nicht vorhanden“) endet. Mitglieder, die die Aktion nie unterstützt haben, werden übersprungen; die Zusammenfassung nennt sie.
 - **Nicht überwachte Mitglieder** handeln normal; `monitored` betrifft nur die Bewertung.
@@ -764,7 +773,7 @@ Externe Systeme (Companion, Stream Deck, Node-RED) nutzen **Dienstkonten** (`app
 | Befunde (aktiv und Historie) | PostgreSQL `finding` | bei Statuswechsel |
 | Regeln, Presets, Rechte, Weiterleitungen | PostgreSQL | bei Änderung durch den User |
 | Läufe und Audit | PostgreSQL `action_run`, `audit_log` | pro Ereignis |
-| Fakten und Health als Zahl | **InfluxDB** | fester Takt |
+| Fakten und Health als Zeitreihe | **InfluxDB** | fester Takt |
 | Arbeitszustand der Bewertung | Speicher des Core | ständig |
 
 ### InfluxDB
@@ -800,7 +809,7 @@ Ein Dienst löscht einmal pro Nacht in Batches, was älter ist als eingestellt (
 
 - IDs: `uuid` mit UUIDv7 (zeitlich sortiert, gut für B-Tree-Inserts). Go erzeugt IDs vor dem Insert, damit ganze Discovery-Bäume in einem Batch geschrieben werden können.
 - Enums nur für kleine, stabile Mengen (`link_type`, `health`, `severity`, `rule_op`, `action_status`, `finding_origin`, `permission`, `session_kind`, `forward_kind`, `port_direction`).
-- Herstellerspezifisches in JSONB (`attributes`, `config`, `settings`).
+- Herstellerspezifisches in JSONB (`attributes`, `config`, `settings`, `params`).
 - Zugangsdaten nie in JSONB, sondern verschlüsselt im Secret-Store.
 
 ### Secret-Store
@@ -827,6 +836,7 @@ Beim Start liest Monika aus Umgebungsvariablen bzw. einer `.env`-Datei (`./.env`
 
 | Variable | Standard | Zweck |
 |---|---|---|
+| `MONIKA_ENV_FILE` | `./.env` | Pfad der `.env`-Datei; fehlt die Datei, ist das kein Fehler |
 | `MONIKA_MASTER_KEY` | **Pflicht** | Schlüssel des Secret-Stores |
 | `MONIKA_MASTER_KEY_PREVIOUS` | – | nur während einer Rotation |
 | `MONIKA_DATABASE_URL` | **Pflicht** | PostgreSQL-Verbindung |
@@ -978,7 +988,7 @@ X8A1111                   device                (Name = Label des Users)
    ├─ srtE1               sender · srt
    ├─ NdiD1               receiver · ndi
    ├─ L2S1                tunnel                ──uses──▶  eth2
-   └─ Peer X8A9001        peer                  connected, rtt, p2p   ──represents─▶  xlink:X8A9001
+   └─ Peer X8A9001        peer                  state.connected, stream.rtt_ms, videoxlink.p2p   ──represents─▶  xlink:X8A9001
       └─ X8A9001-E1       sender · xlink        Stellvertreter        ──represents─▶  xlink:X8A9001-E1
 ```
 
@@ -1020,7 +1030,9 @@ Diese Punkte sind **nicht entschieden** und dürfen nicht als festgelegt angenom
 | **Live** | Zustand einer Quelle nach `Connected` und vollständigem Snapshot, solange die Lebenszeichen aktuell sind; nur dann werden ihre Fakten bewertet |
 | **Ungeprüft** | Element ohne geltende Regel (und kein Zugang mit Lebenszeichen); hat keine Health |
 | **Geltungsbereich** | Menge von Elementen, für die eine Regel, ein Recht oder eine Weiterleitung gilt: Element mit Nachfahren oder Gruppe mit Mitgliedern und deren Nachfahren |
-| **Fakt-Katalog** | Liste der Fakt-Schlüssel eines Treibers mit festem Typ und Einheit |
+| **Fakt-Katalog** | Liste der rohen Fakt-Schlüssel eines Treibers mit Typ, Art und Beschreibung |
+| **Vokabular** | kontrollierte Namen für Arten, Transporte, Fakten und Aktionen (`contracts/vocabulary.md`); Fakten heißen `<measurement>.<feld>` |
+| **Measurement** | Domäne des Vokabulars (`state`, `ptp`, `sdi` …); zugleich Measurement in InfluxDB |
 | **Sende-Ziel** | System, an das Monika sendet, dessen Zustand sie aber nicht liest (z. B. HTTP-Endpunkt) |
 | **Treiber** | Plugin für einen Hersteller/Gerätetyp; meldet Inventar und Fakten, führt Aktionen aus |
 | **Fakt** | ein aktueller Wert eines Elements, Schlüssel `<measurement>.<feld>`, z. B. `state.running: true` |

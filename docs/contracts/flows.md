@@ -1,6 +1,6 @@
 # Vertrag: Abläufe
 
-**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 9, 10, 12, 13 und 14; Bausteine aus [`sdk.md`](sdk.md) und [`core.md`](core.md).
+**Status:** abgestimmt am 2026-10-09, überarbeitet am 2026-10-10 (Architektur-Audit) und 2026-10-11 (Einzelinstanz, Aufbewahrung). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 9, 10, 12, 13 und 14; Bausteine aus [`sdk.md`](sdk.md) und [`core.md`](core.md).
 
 Discovery-Lauf und „Fakt → Befund“ stehen in `core.md` (Abläufe: Meldungen eines Treibers). Hier stehen die Abläufe, die mehrere Komponenten verbinden.
 
@@ -72,7 +72,7 @@ sequenceDiagram
     participant P as Preset-Runner, Executor
     participant Sup as Supervisor
     participant C as Core
-    participant X as Weiterleitung, Influx
+    participant X as Weiterleitung, Influx, Aufbewahrung
     participant DB as PostgreSQL
 
     M->>M: SIGTERM / SIGINT
@@ -80,7 +80,7 @@ sequenceDiagram
     M->>P: Stopp: keine neuen Läufe und Stufen, offene Läufe abschließen (höchstens 5 s)
     M->>Sup: alle Quellen stoppen (ctx), höchstens 10 s je Quelle
     M->>C: Schleife beenden: Rest verarbeiten, letztes SaveHealth
-    M->>X: Rest senden bzw. schreiben (kurze Frist)
+    M->>X: Rest senden bzw. schreiben (kurze Frist), Aufbewahrung bricht den laufenden Batch ab
     M->>DB: Einzelinstanz-Sperre freigeben, Pool schließen
 ```
 

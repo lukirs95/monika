@@ -86,9 +86,10 @@ Project monika {
   - Ursache vs. Symptom über Links: feeds A→B wirkt auf B, uses A→B wirkt
     auf A, parent wirkt auf Kinder; member und represents wirken nicht.
     Die Zuordnung wird bei jeder Befundänderung neu abgeleitet.
-  - Geräte und Gruppen: Health = schlimmster Zustand der Elemente bzw.
-    Mitglieder mit Health (error > warning > unknown > ok); leere Menge →
-    keine Health. Keine Redundanzlogik.
+  - Geräte und Gruppen: Health = schlimmster Zustand der verschiedenen
+    Elemente mit Health in ihrem Geltungsbereich, jedes genau einmal
+    (error > warning > unknown > ok); leere Menge → keine Health.
+    Keine Redundanzlogik.
 
   Aktionen
   - Aktionen sind einmalige Befehle mit "Übernehmen", nie Regler mit Live-Wirkung.
@@ -172,8 +173,8 @@ Project monika {
 // ---------------------------------------------------------------------------
 
 Enum link_type {
-  feeds      [note: 'Signalfluss: from speist to (z.B. SDI-In → Encoder, Remote-E1 → D1)']
-  uses       [note: 'Ressourcenbindung ohne Signalrichtung (Unit → Port, Stream → Interface, D1 → Peer)']
+  feeds      [note: 'fester Signalfluss: from speist to (z.B. fest verdrahteter SDI-In → Sender, Remote-E1 → D1); nie durch Aktionen änderbar']
+  uses       [note: 'wählbare Bindung, auch ein wählbarer Signaleingang (Encoder → gewählter Port, Stream → Interface, D1 → Peer); darf durch Aktionen geändert werden']
   member     [note: 'Gruppenmitgliedschaft: from = Gruppe, to = Mitglied']
   represents [note: 'Perspektive: from ist Stellvertreter von to (Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts); nur über global_ref adressiert']
 }

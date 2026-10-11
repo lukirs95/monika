@@ -2114,7 +2114,6 @@ components:
           type: array
           description: erlaubte Werte bei `enum`
           items: { type: string }
-        unit: { type: string, nullable: true }
         critical: { type: boolean, description: 'Ändern erfordert zusätzlich das Recht critical' }
         write_only: { type: boolean, description: 'Gerät meldet den Wert nicht zurück: kein Fakt, keine Prüfung, Endzustand accepted' }
     Param:

@@ -58,4 +58,4 @@ Abhängigkeiten zeigen nur nach innen: `drivers/*` kennt nur `sdk/` (und die jew
 
 ## Konfiguration
 
-Bootstrap über Umgebungsvariablen bzw. `.env` – siehe [`.env.example`](.env.example) und `docs/ARCHITECTURE.md`, Abschnitt 14.
+Bootstrap über Umgebungsvariablen bzw. `.env` – siehe `docs/ARCHITECTURE.md`, Abschnitt 14. Eine `.env.example` mit allen Variablen entsteht mit dem Code (`docs/OPERATIONS.md`).

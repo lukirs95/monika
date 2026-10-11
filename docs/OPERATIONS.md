@@ -70,7 +70,7 @@ Die Migrationen legen das Schema `reporting` und seine Views an, nicht die Rolle
 ## Überwachung von Monika selbst
 
 - **Logs** als JSON auf `stdout` (`MONIKA_LOG_FORMAT=json`), vom Container-Runtime z. B. nach Loki.
-- **Kennzahlen** schreibt Monika im Takt des Influx-Schreibers in das reservierte Measurement `monika` (ein Punkt pro Takt, ohne Tags):
+- **Kennzahlen** schreibt Monika im Takt des Influx-Schreibers in das reservierte Measurement `monika` (ein Punkt pro Takt, ohne Tags). Die Werte der Schleife kommen aus `View.Stats` (`contracts/core.md`), die des Schreibers von ihm selbst, `api_streams` von der API:
 
 | Feld | Typ | Art | Bedeutung |
 |---|---|---|---|

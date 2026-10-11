@@ -1,6 +1,6 @@
 # Vertrag: Treiber-SDK
 
-**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10, Vokabular und Testbaukasten am 2026-10-11. **Vokabular:** [`vocabulary.md`](vocabulary.md). **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
+**Status:** abgestimmt am 2026-10-09, überarbeitet am 2026-10-10 (Architektur-Audit) und 2026-10-11 (Vokabular, Typen, Testbaukasten). **Vokabular:** [`vocabulary.md`](vocabulary.md). **Paket:** `sdk/` (öffentlich). **Hintergrund:** `docs/ARCHITECTURE.md`, Abschnitt 4, 5, 8, 9 und 11.
 
 Das SDK ist die einzige Schnittstelle zwischen Core und Treibern. Treiber importieren nur `sdk/` und ihre Gerätelibrary, nie `internal/`. Alles, was ein Treiber vom Core braucht, kommt über die Typen und Interfaces dieses Vertrags.
 
@@ -144,7 +144,6 @@ classDiagram
         +Min *float64
         +Max *float64
         +Values []string
-        +Unit string
         +Critical bool
         +WriteOnly bool
     }
@@ -199,14 +198,14 @@ classDiagram
 | `Element.GlobalRef` | global eindeutige ID mit Namensraum (`xlink:X8A9001-E1`, `nmos:<uuid>`); nur am Element im eigenen Baum, nie an Stellvertretern. Jeder Namensraum gehört einem Treiber; andere verwenden ihn nur in `Endpoint` |
 | `Endpoint` | entweder `ExternalID` (Element dieser Quelle) oder `GlobalRef` (Element einer anderen Quelle, ggf. noch unbekannt). `represents` zeigt immer per `GlobalRef` auf das Original: Stellvertreter-Unit → Original-Unit, Peer → Zugang des Remote-Geräts |
 | `Result.Status` | `Accepted` oder `Rejected`; ein `error` aus `Execute` bedeutet `failed` (nicht erreicht, Transportfehler) |
-| `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical`. `WriteOnly`: Das Gerät meldet den Wert nicht zurück; es gibt keinen Fakt dazu und keine Prüfung, `accepted` ist der Endzustand |
+| `Setting` | schreibbarer Fakt-Schlüssel: `Type` (`int`, `float`, `bool`, `string`, `enum`, `ipv4` …), Grenzen bzw. `Values` bei `enum`, `Critical`. Die Einheit steht als Endung im Schlüssel (`codec.bitrate_mbps`), auch bei rohen Einstellungen. `WriteOnly`: Das Gerät meldet den Wert nicht zurück; es gibt keinen Fakt dazu und keine Prüfung, `accepted` ist der Endzustand |
 | `Element.Attributes` | statische Attribute, nur zur Anzeige |
 | `Element.Params` | Parameter-Schemas von Aktionen, die an diesem Element ein eigenes Schema haben: Aktion → Parameter → `Param` (bei Sende-Zielen `trigger`). Die UI baut daraus das Formular, der Treiber prüft die Werte bei `Execute` selbst. Gespeichert in `element.params` |
 | `Param` | wie `Setting`, zusätzlich `Default` (`bool`, `int64`, `float64` oder `string`) |
 | `Condition.Value` | JSON-Wert als Text, darf Platzhalter enthalten |
 | `ActionDef.Verify` | Prüfbedingung mit Platzhaltern aus den Parametern (z. B. `codec.bitrate_mbps eq {{codec.bitrate_mbps}}`); bei `set` erzeugt der Core sie selbst aus den gesetzten Werten |
 
-**Vokabular** (`sdk/vocab`, vollständig in [`vocabulary.md`](vocabulary.md)): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten **mit Typ, Einheit und Measurement**, die Measurements, Kern- und bekannte Aktionen und die Namensräume von `global_ref` (`xlink`, `nmos` …) mit dem Treiber, dem sie gehören. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`; Measurements `health`, `rollup`.
+**Vokabular** (`sdk/vocab`, vollständig in [`vocabulary.md`](vocabulary.md)): Konstanten für `kind`, `transport`, Kern- und bekannte Fakten `<measurement>.<feld>` **mit Typ, Art und „historisiert“**, Kern- und bekannte Aktionen und die Namensräume von `global_ref` (`xlink`, `nmos` …) mit dem Treiber, dem sie gehören. Reserviert und für Treiber verboten: `kind` `device`, `group`, `access`; Fakt `present`; Measurements `health`, `rollup`, `monika`.
 
 **Verbote für Einstellungen:** **Nie** eine Einstellung, die die Management-Adresse ändert, und nie geheime Werte (Passwörter, Schlüssel): Nach dem Setzen der Adresse wäre die Quelle unerreichbar, und Parameter eines Laufs stehen im Klartext in `action_run.params`. Monika bietet dafür auch später keinen Weg; ein Treiber, der es trotzdem anbietet, verstößt gegen diesen Vertrag.
 
