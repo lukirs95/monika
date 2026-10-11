@@ -22,7 +22,7 @@ var (
 // Register meldet einen Treiber an; aufzurufen in init(). Ein ungültiger Katalog oder ein
 // doppelter Name ist ein Programmierfehler und führt zu panic.
 func Register(d Driver) {
-	if err := d.validate(); err != nil {
+	if err := d.Validate(); err != nil {
 		panic(fmt.Sprintf("sdk.Register(%q): %v", d.Name, err))
 	}
 	registryMu.Lock()
@@ -53,8 +53,8 @@ func Drivers() []Driver {
 	return out
 }
 
-// validate prüft den Katalog des Treibers.
-func (d Driver) validate() error {
+// Validate prüft den Katalog des Treibers; Register ruft es und reagiert mit panic.
+func (d Driver) Validate() error {
 	var errs []error
 	if !driverName.MatchString(d.Name) {
 		errs = append(errs, errors.New("name must match [a-z0-9]+ (package name)"))

@@ -46,9 +46,9 @@ func TestValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := testDriver()
 			tt.change(&d)
-			err := d.validate()
+			err := d.Validate()
 			if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
-				t.Fatalf("validate() = %v, want error containing %q", err, tt.want)
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.want)
 			}
 		})
 	}
