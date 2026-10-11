@@ -114,7 +114,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~8c Preset-Runner~~ (Verwaltung, Start mit eingefrorenen Zielen und Vorabprüfung, Stufen mit Wartezeit, Abbruch, verlorene Ereignisse, Stopp; Entscheidungen K1–K5; `auth.Principal`, `Executor.Targets`/`Finish`/`Result`): erledigt
    9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`); Entscheidungen L1–L7 vom 2026-10-11 in `services.md`:
       - ~~9a Influx-Schreiber~~ (Punkte pro Element und Measurement, Raten nur ohne Zähler, Health, Rollup, `monika`; gzip, Batches, 1 min Puffer, `InfluxStatus`, Rest beim Stopp): erledigt
-      - 9b Weiterleitung
+      - ~~9b Weiterleitung~~ (Format, Vorlagen, Syslog RFC 5424 über udp/tcp/tls, Webhook; Filter nach Typ, Schwere und Geltungsbereich, Ende auch nach dem Löschen; Warteschlange und Wiederholungen pro Ziel, gesammelte Ergebnisse): erledigt
       - 9c Aufbewahrung
    10. Anmeldung und Rechte (`internal/auth`)
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
