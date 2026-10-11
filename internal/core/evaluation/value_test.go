@@ -56,3 +56,25 @@ func TestParseValueErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestConditionCheck(t *testing.T) {
+	facts := map[string]any{"codec.bitrate_mbps": 25.0, "state.running": true}
+	tests := []struct {
+		c       Condition
+		want    bool
+		wantErr bool
+	}{
+		{Condition{Fact: "codec.bitrate_mbps", Op: OpEq, Value: json.RawMessage(`25`)}, true, false},
+		{Condition{Fact: "codec.bitrate_mbps", Op: OpEq, Value: json.RawMessage(`20`)}, false, false},
+		{Condition{Fact: "state.running", Op: OpEq, Value: json.RawMessage(`true`)}, true, false},
+		{Condition{Fact: "state.missing", Op: OpEq, Value: json.RawMessage(`true`)}, false, false},
+		{Condition{Fact: "state.running", Op: OpEq, Value: json.RawMessage(`25`)}, false, false}, // Typ passt nicht
+		{Condition{Fact: "state.running", Op: OpEq, Value: json.RawMessage(`{`)}, false, true},
+	}
+	for _, tt := range tests {
+		got, err := tt.c.Check(facts)
+		if got != tt.want || (err != nil) != tt.wantErr {
+			t.Errorf("Check(%s %s %s) = %v, %v", tt.c.Fact, tt.c.Op, tt.c.Value, got, err)
+		}
+	}
+}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+
+	"github.com/lukirs95/monika/sdk"
 )
 
 // Severity ist der Schweregrad eines Befunds bzw. einer Regel.
@@ -34,6 +36,22 @@ type Condition struct {
 	Fact  string
 	Op    Op
 	Value json.RawMessage
+}
+
+// Check prüft die Bedingung gegen die Fakten eines Elements (Prüfbedingung eines Laufs), mit
+// demselben Vergleich wie bei Regeln. Fehlt der Fakt oder passt sein Typ nicht, ist sie nicht
+// erfüllt; ein ungültiger Wert ist ein Fehler.
+func (c Condition) Check(facts sdk.Facts) (bool, error) {
+	v, err := parseValue(c.Value)
+	if err != nil {
+		return false, err
+	}
+	f, ok := facts[c.Fact]
+	if !ok {
+		return false, nil
+	}
+	h, ok := holds(c.Op, f, v)
+	return ok && h, nil
 }
 
 // Rule beschreibt einen Sollzustand: Fact Op Value, optional nur wenn When erfüllt ist.

@@ -1,14 +1,18 @@
-// Package action führt Aktionen aus: Läufe, Warteschlange pro Element, Prüfbedingung.
+// Package action enthält die Typen der Läufe; ausgeführt werden sie vom Paket executor.
 package action
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/lukirs95/monika/internal/core/evaluation"
 )
+
+// ErrNotFound bedeutet, dass der Lauf nicht existiert.
+var ErrNotFound = errors.New("run not found")
 
 // Status ist der Zustand eines Laufs (docs/contracts/flows.md, Lebenszyklus eines Laufs).
 type Status string

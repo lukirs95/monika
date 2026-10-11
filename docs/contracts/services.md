@@ -129,7 +129,7 @@ classDiagram
         +RequestedAt, SentAt, RespondedAt, FinishedAt time.Time
     }
     class Store {
-        <<interface, action.Store>>
+        <<interface, executor.Store>>
         +CreateRuns(ctx, runs []Run) error
         +UpdateRun(ctx, r Run) error
         +FinishInterruptedRuns(ctx, reason string) (int, error)
@@ -154,6 +154,12 @@ classDiagram
 - `Cancel` beendet Läufe, die noch `pending` sind, als `cancelled`; bereits gesendete laufen zu Ende. Für einen übergeordneten Lauf betrifft das alle seine offenen Kinder.
 - **Stopp:** keine neuen Läufe; `pending` → `failed`, `sent` wartet gemeinsam höchstens 5 s auf die Antwort, `accepted` → `unconfirmed`, Grund „Monika gestoppt“ (`flows.md`, F8).
 - `FinishInterruptedRuns` ruft der Bootstrap beim Start (F2).
+- **Paket:** `internal/action` enthält nur die Typen (`Run`, `Status`, `Verify`); der Executor und sein `Store`-Interface liegen in `internal/action/executor`, denn nur das Paket, das ein Store-Interface definiert, ruft es.
+- **Timeouts:** `Execute` bekommt fest 30 s, danach endet der Lauf als `failed` („timeout“). `ActionDef.Timeout` ist das Fenster der Prüfbedingung; ohne Angabe gilt 10 s.
+- **Platzhalter** `{{param}}` in `ActionDef.Verify` ersetzt `Submit` durch den JSON-Wert des gleichnamigen Parameters; fehlt er, lehnt `Submit` mit `ErrInvalidParams` ab. Bei `set` entsteht pro gesetztem Schlüssel `<schlüssel> eq <wert>`, außer für `WriteOnly`-Schlüssel.
+- **Prüfung** der Bedingungen mit demselben Vergleich wie bei Regeln (`evaluation.Condition.Check`); fehlt der Fakt, ist die Bedingung nicht erfüllt.
+- **Zusammenfassung** im `response` des übergeordneten Laufs: `{"targets": n, "unsupported": n, "skipped": [{"element_id", "element_path", "reason"}], "statuses": {"confirmed": n, …}}`. `skipped` nennt Elemente, die die Aktion zwar haben, aber nicht bekommen können (fehlender Schlüssel bei `set`), `unsupported` zählt die übrigen ohne die Aktion; beides beim Anlegen, `statuses` beim Ende.
+- **Lebenszyklus:** `Run(ctx)` besitzt das Abo auf `FactsChanged` und die Goroutinen pro Element; vor `Run` und nach dem Stopp liefert `Submit` `ErrStopped`.
 
 ## Preset-Runner (`internal/preset`)
 
