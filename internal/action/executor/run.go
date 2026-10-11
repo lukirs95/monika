@@ -51,6 +51,7 @@ type Executor struct {
 	runs    map[uuid.UUID]*runState       // Läufe, die noch nicht im Endzustand sind
 	queues  map[uuid.UUID][]uuid.UUID     // Element → wartende Läufe; vorhanden = Goroutine läuft
 	waiters map[uuid.UUID][]chan struct{} // Element → Läufe, die auf ihre Prüfbedingung warten
+	results map[uuid.UUID]action.Run      // beendete Schritt-Läufe offener Presets (Result)
 	workers sync.WaitGroup
 }
 
@@ -71,6 +72,7 @@ func New(cfg Config) *Executor {
 		runs:    map[uuid.UUID]*runState{},
 		queues:  map[uuid.UUID][]uuid.UUID{},
 		waiters: map[uuid.UUID][]chan struct{}{},
+		results: map[uuid.UUID]action.Run{},
 	}
 }
 
@@ -407,6 +409,9 @@ func (e *Executor) transition(id uuid.UUID, from, to action.Status, resp json.Ra
 	if final {
 		rs.run.FinishedAt = now
 		delete(e.runs, id)
+		if parent := e.runs[rs.run.ParentID]; parent != nil && parent.run.Action == ActionPreset {
+			e.results[id] = rs.run
+		}
 	}
 	return rs.run, true
 }
@@ -492,4 +497,66 @@ func response(res sdk.Result) json.RawMessage {
 	}
 	b, _ := json.Marshal(out)
 	return b
+}
+
+// Target ist ein Ziel, wie Submit es auflösen würde.
+type Target struct {
+	ElementID uuid.UUID
+	Critical  bool
+}
+
+// Targets löst einen Auftrag auf, ohne etwas anzulegen; der Preset-Runner friert damit die Ziele
+// ein und prüft an genau ihnen die Rechte.
+func (e *Executor) Targets(v *core.View, r Request) ([]Target, error) {
+	p, err := e.planner.plan(v, r, e.now())
+	if err != nil {
+		return nil, err
+	}
+	runs := p.runs
+	if len(runs) > 1 || runs[0].ElementID != r.ElementID || r.Targets != nil {
+		runs = runs[1:] // übergeordneter Lauf
+	}
+	out := make([]Target, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, Target{ElementID: run.ElementID, Critical: run.Critical})
+	}
+	return out, nil
+}
+
+// ErrNotPresetRoot bedeutet, dass Finish auf einen Lauf zielt, der kein Wurzel-Lauf eines Presets
+// ist.
+var ErrNotPresetRoot = errors.New("not the root run of a preset")
+
+// Finish beendet den Wurzel-Lauf eines Presets; den führt der Preset-Runner, schreiben darf ihn nur
+// der Executor.
+func (e *Executor) Finish(ctx context.Context, id uuid.UUID, status action.Status, resp json.RawMessage) error {
+	e.mu.Lock()
+	rs, ok := e.runs[id]
+	isRoot := ok && rs.run.Action == ActionPreset
+	for cid, r := range e.results {
+		if isRoot && r.ParentID == id {
+			delete(e.results, cid)
+		}
+	}
+	e.mu.Unlock()
+	switch {
+	case !ok:
+		return fmt.Errorf("finish %s: %w", id, ErrFinished)
+	case !isRoot:
+		return fmt.Errorf("finish %s: %w", id, ErrNotPresetRoot)
+	}
+	run, ok := e.transition(id, action.StatusPending, status, resp, true)
+	if ok {
+		e.update(ctx, run)
+	}
+	return nil
+}
+
+// Result liefert einen beendeten Schritt-Lauf eines noch offenen Presets; der Preset-Runner fragt
+// danach, wenn ihm Ereignisse entgangen sind.
+func (e *Executor) Result(id uuid.UUID) (action.Run, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	r, ok := e.results[id]
+	return r, ok
 }

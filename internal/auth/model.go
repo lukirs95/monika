@@ -30,6 +30,18 @@ func (p Permission) Global() bool {
 	return p == PermPresetRun || p == PermPresetEdit || p == PermSourceEdit || p == PermAdmin
 }
 
+// Principal ist der angemeldete Benutzer einer Anfrage (docs/contracts/auth.md). Die API gibt
+// seine UserID als actor an die Fachpakete weiter; ist ReadOnly gesetzt, lehnt sie jede
+// ändernde Anfrage ab.
+type Principal struct {
+	UserID    uuid.UUID
+	Username  string
+	Service   bool
+	SessionID uuid.UUID
+	TokenID   uuid.UUID
+	ReadOnly  bool
+}
+
 // User ist ein Mensch oder ein Dienstkonto. Benutzer werden nie gelöscht, nur deaktiviert.
 type User struct {
 	ID           uuid.UUID

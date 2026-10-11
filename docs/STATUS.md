@@ -108,10 +108,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    7. ~~Supervisor und Scheduler~~ (`internal/core/supervisor`): erledigt; Entscheidungen H1–H5 vom 2026-10-11 in `services.md` und `sdk.md` (Wartezeit im Backoff, `Run` ohne Stopp, Panic in `Execute`, Scheduler, Aufbau):
       - ~~7a Scheduler~~ (Versatz aus Quelle und Aufgabe, an der Uhr ausgerichtet, globale Obergrenze, keine Überlappung, Timeout, hängende Aufgaben, Panics): erledigt
       - ~~7b Supervisor~~ (Goroutine pro Quelle, Start/Neustart/Stopp, Backoff, Stuck, Panics in `New`, `Run`, `Execute` und Aufgaben, Herunterfahren; Ende-zu-Ende-Test mit Schleife und Fake-Treiber): erledigt
-   8. Executor und Preset-Runner (`internal/action/executor`, `internal/preset`); Entscheidungen J1–J6 vom 2026-10-11 in `services.md` (Timeouts, Platzhalter, Zusammenfassung, Prüfung der Bedingung, Paket des Stores, Lebenszyklus):
+   8. ~~Executor und Preset-Runner~~ (`internal/action/executor`, `internal/preset`): erledigt; Entscheidungen J1–J6 vom 2026-10-11 in `services.md` (Timeouts, Platzhalter, Zusammenfassung, Prüfung der Bedingung, Paket des Stores, Lebenszyklus):
       - ~~8a Executor: Ziele und Anlegen~~ (Auflösung, `critical` und Prüfbedingung einfrieren, Zusammenfassung; `executor.Store`, `evaluation.Condition.Check`): erledigt
       - ~~8b Executor: Ausführung~~ (FIFO pro Element, `Execute` mit Timeout, Prüfbedingung über `FactsChanged`, übergeordnete Läufe, `Cancel`, Stopp nach F8; `Run.Finished`): erledigt
-      - 8c Preset-Runner
+      - ~~8c Preset-Runner~~ (Verwaltung, Start mit eingefrorenen Zielen und Vorabprüfung, Stufen mit Wartezeit, Abbruch, verlorene Ereignisse, Stopp; Entscheidungen K1–K5; `auth.Principal`, `Executor.Targets`/`Finish`/`Result`): erledigt
    9. Weiterleitung, Influx-Schreiber, Aufbewahrung (`internal/forward`, `internal/history/influx`, `internal/retention`)
    10. Anmeldung und Rechte (`internal/auth`)
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)

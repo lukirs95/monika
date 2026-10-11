@@ -22,11 +22,14 @@ classDiagram
         +Run(ctx) error
         +Submit(ctx, r Request) (runID, error)
         +Cancel(ctx, runIDs []ID) error
+        +Targets(v *View, r Request) ([]Target, error)
+        +Finish(ctx, rootRunID, status, response) error
+        +Result(runID) (Run, bool)
     }
     class Runner {
         <<preset>>
         +Run(ctx) error
-        +Start(ctx, actor, presetID) (rootRunID, error)
+        +Start(ctx, p auth.Principal, presetID) (rootRunID, error)
         +Cancel(ctx, rootRunID) error
     }
     class Forwarder {
@@ -168,7 +171,12 @@ classDiagram
 - `Start` prüft das Recht `preset_run` nicht selbst (das tut die API). Er **friert die Ziele ein** (jeder Schritt über die `View` in eine Element-Liste aufgelöst) und macht gegen genau diese die **Vorabprüfung** (`auth.Allowed`, inkl. `critical`). Fehlt ein Recht: Fehler, nichts gestartet.
 - Danach legt er den Wurzel-Lauf an (`Submit` mit `Action = "preset"`) und arbeitet die Stufen in eigener Goroutine ab (`flows.md`, Preset-Lauf), jeden Schritt mit seinen eingefrorenen `Targets`. Auf das Ende der Läufe einer Stufe wartet er über `RunChanged`-Ereignisse.
 - `Cancel(rootRunID)` startet keine weiteren Stufen, beendet laufende Wartezeiten und ruft `Executor.Cancel` für die offenen Kinder; der Wurzellauf endet als `cancelled`.
-- Presets anlegen, ändern und löschen laufen ebenfalls über den Preset-Runner (er besitzt `preset.Store`); dorthin gehört die Prüfung, dass `device_level = true` einen `driver` hat.
+- Presets anlegen, ändern und löschen laufen ebenfalls über den Preset-Runner (er besitzt `preset.Store`); dorthin gehört die Prüfung, dass `device_level = true` einen `driver` hat, dazu `Stage` ≥ 1, `Delay` ≥ 0, Aktion und Ziel. Schritte ohne ID bekommen eine.
+- **Vorabprüfung** mit `auth.Principal` (`Allowed`): an jedem eingefrorenen Ziel `operate`, bei `set` `configure`, dazu `critical`, wenn der Lauf dort kritisch wäre. Die Ziele liefert `Executor.Targets` mit derselben Auflösung wie `Submit`.
+- **Wurzel-Lauf:** legt `Submit` mit `Action = "preset"` an; ihn beendet nur `Executor.Finish` im Auftrag des Runners, mit `{"stages", "completed_stages", "statuses"}` im `response`: schlechtester Status der Schritt-Läufe, `cancelled` bei `Cancel`, `failed` („monika stopped“), wenn der Stopp Stufen übrig ließ.
+- **Abbruch bei einem Fehler** (`failed` oder `rejected` ohne `continue_on_error`) sofort: Wartende Schritte der Stufe entfallen, offene Läufe werden abgebrochen, keine weitere Stufe.
+- **Verlorene Ereignisse:** Wird der Runner abgehängt, meldet er sich neu an; erwartete Läufe, die nicht mehr in `View.Runs` stehen, fragt er mit `Executor.Result` ab (der Executor merkt sich beendete Schritt-Läufe, bis der Wurzel-Lauf endet).
+- **Stopp:** keine neuen Presets (`ErrStopped`); laufende brechen ab, `Run` verteilt weiter Ereignisse, bis sie beendet sind.
 
 ## Weiterleitung (`internal/forward`)
 

@@ -337,3 +337,32 @@ func TestSubmitBeforeRun(t *testing.T) {
 		t.Errorf("Submit before Run = %v", err)
 	}
 }
+
+func TestPresetSupport(t *testing.T) {
+	r := newRig(t)
+	single, err := r.ex.Targets(r.w.view, Request{ElementID: r.w.m, Action: vocab.ActionStart})
+	if err != nil || len(single) != 1 || single[0].ElementID != r.w.m {
+		t.Fatalf("Targets(element) = %+v, %v", single, err)
+	}
+	group, err := r.ex.Targets(r.w.view, Request{ElementID: r.w.g, Action: vocab.ActionStart})
+	if err != nil || len(group) != 3 {
+		t.Fatalf("Targets(group) = %+v, %v", group, err)
+	}
+
+	root := r.submit(Request{Action: ActionPreset})
+	step := r.submit(Request{ElementID: r.w.g, Action: vocab.ActionStop, Targets: []uuid.UUID{r.w.m}, ParentID: root})
+	r.wait(step, action.StatusAccepted)
+	if res, ok := r.ex.Result(step); !ok || res.Status != action.StatusAccepted {
+		t.Errorf("Result(step) = %+v, %v", res, ok)
+	}
+	if err := r.ex.Finish(t.Context(), step, action.StatusConfirmed, nil); !errors.Is(err, ErrFinished) {
+		t.Errorf("Finish on a step run = %v", err)
+	}
+	if err := r.ex.Finish(t.Context(), root, action.StatusAccepted, json.RawMessage(`{"stages":1}`)); err != nil {
+		t.Fatalf("Finish(root) = %v", err)
+	}
+	r.wait(root, action.StatusAccepted)
+	if _, ok := r.ex.Result(step); ok {
+		t.Error("result kept after the preset finished")
+	}
+}
