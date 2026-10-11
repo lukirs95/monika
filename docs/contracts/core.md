@@ -91,7 +91,17 @@ classDiagram
         <<inventory>>
         +Load(snap inventory.Snapshot)
         +ApplySnapshot(ctx, sourceID, s sdk.Snapshot) (Diff, error)
-        +Apply(ctx, cmd Command) (Diff, error)
+        +CreateDevice(ctx, actor, e) (Diff, error)
+        +DeleteDevice(ctx, actor, id) (Diff, error)
+        +CreateSource(ctx, actor, s) (Diff, error)
+        +UpdateSource(ctx, actor, s) (Diff, error)
+        +DeleteSource(ctx, actor, id) (Diff, error)
+        +CreateGroup(ctx, actor, e) (Diff, error)
+        +DeleteGroup(ctx, actor, id) (Diff, error)
+        +UpdateUserFields(ctx, actor, id, f) (Diff, error)
+        +AddGroupMember(ctx, actor, l) (Diff, error)
+        +UpdateGroupMember(ctx, actor, l) (Diff, error)
+        +RemoveGroupMember(ctx, actor, id) (Diff, error)
         +Element(id) (Element, bool)
         +ByExternalID(sourceID, extID) (ID, bool)
         +FactsByID(sourceID, facts map~string, sdk.Facts~) (map~ID, sdk.Facts~, unknown []string)
@@ -290,7 +300,7 @@ sequenceDiagram
 
     A->>A: Rechte prüfen
     A->>+L: Do(ctx, DeleteDevice{actor, id})
-    L->>I: Apply(DeleteDevice)
+    L->>I: DeleteDevice(actor, id)
     I->>S: DeleteDevice(actor, id)
     S-->>I: ok bzw. InUseError
     I-->>L: Diff (Deleted, Missing)
@@ -302,6 +312,9 @@ sequenceDiagram
 ```
 
 - Jeder Befehl ist eine Transaktion im Store **und** ein Schritt der Schleife. Die API sieht nach `Do` die neue `View`.
+- **Befehle sind Structs nur im Core** (`internal/core`), denn nur dort überqueren sie die Grenze zwischen Goroutinen (`Do` → Schleife). Die Schleife übersetzt sie per Typ-Switch in Methoden der Komponenten (`Inventory.DeleteDevice` …); die Komponenten kennen keine Befehlstypen.
+- **Neue IDs vergibt die API** (UUIDv7) und gibt sie im Befehl mit, denn `Do` liefert nur den Fehler. Nur die ID des Zugangs-Elements einer neuen Quelle vergibt das Inventar.
+- Das Inventar prüft Vorbedingungen gegen den Speicher, bevor es den Store aufruft: `ErrNotFound` (unbekannt oder falsche Art), `ErrUnknownDriver`, `ErrNotAGroup`, `ErrMissingID`. Beim Löschen liefert es alle wegfallenden Elemente in `Diff.Deleted` und entfernt ihre Links aus dem Speicher wie die Datenbank per CASCADE.
 - Befehle, die Quellen betreffen (Gerät löschen, Quelle anlegen, ändern oder löschen, Secret ersetzen), beauftragen den Supervisor mit Start bzw. Stopp der Quelle (`sdk.md`, Stoppen). Die Schleife wartet nicht darauf; Start, Stopp, Fehler, Panics und hängende Quellen meldet der Supervisor per `Post` zurück.
 - `ReplaceSecret` schreibt über `secret.Service` und startet danach alle Quellen neu, die das Secret verwenden (aus der `View`). Anlegen und Löschen von Secrets betreffen keine laufende Quelle und gehen direkt an `secret.Service`.
 

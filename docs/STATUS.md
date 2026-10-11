@@ -16,7 +16,7 @@ Stand: 2026-10-11
 - **Make-Targets:** `build`, `test`, `test-integration`, `vet`, `db-generate`, `db-gen-go`, `db-validate`, `db-up`, `db-down`, `db-migrate`.
 - **Queries** (`internal/store/postgres/queries/`): `secret.sql`, `device.sql`, `element.sql`, `element_link.sql`.
 - **Inventar nach dem Store-Muster:**
-  - `internal/core/inventory`: Domänentypen, `inventory.Store`, Fehler (`ErrNotFound`, `ErrMemberCycle`, `DeviceInUseError`).
+  - `internal/core/inventory`: Domänentypen, `inventory.Store`, Fehler (`ErrNotFound`, `ErrMemberCycle`, `InUseError`).
   - `postgres.Store` implementiert `inventory.Store` (`Load`, `ApplyDiscovery`, Geräte, Quellen, Gruppen).
 - **Schema und Store an die Durchsicht angepasst** (2026-10-08): Tabelle `device` entfernt, Identität pro Quelle, `element.deleted_at`, `external_id` pro Quelle (Teilindex mit `NULLS NOT DISTINCT`, Migration `00003`), Zugangs-Element mit jeder Quelle, `FinishDiscovery` mit Zugangs-Element, `DeleteDevice` und `DeleteGroup` vollständig (Befunde zurückziehen, Konfiguration mit Geltungsbereich löschen, Mitgliedschaften entfernen, Presets blockieren).
 - **Audit des Inventars** (2026-10-08): Store-Methoden, die der User auslöst, bekommen den Akteur als expliziten Parameter (`uuid.Nil` = Monika). Änderung und Audit-Eintrag laufen im selben SQL-Statement. Discovery protokolliert neue Elemente, Wechsel von `present` und Links mit `actor_id = NULL`; Löschen schreibt einen Eintrag pro Gerät/Gruppe und je einen pro Mitgelöschtem.
@@ -94,7 +94,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    1. ~~SDK ohne Treiber~~: Typen, Vokabular, Registry mit `Validate` und `CheckElement`, `Counter`, `sdktest` mit `Reporter`, `Scheduler`, `Conformance` und Fake-Treiber (`sdk/`): erledigt
    2. ~~Konfiguration~~ (`internal/config`): erledigt
    3. ~~Fakten und Lebenszeichen~~ (`internal/core/state`): erledigt
-   4. Inventar-Logik: Snapshot → `Discovery`, `Diff`, Eltern `""` = Zugang (`internal/core/inventory`)
+   4. ~~Inventar-Logik~~ (`internal/core/inventory`): erledigt; Inventar im Speicher mit `Path` und `FactsByID`, `ApplySnapshot` (Prüfung, Abgleich, Links über Quellen, 5-min-Regel), Befehle als Methoden (Entscheidung B vom 2026-10-11: Befehls-Structs nur im Core, IDs vergibt die API)
    5. Bewertung: Präzedenz, `when`, Befunde, Health und Rollup, Ursache/Symptom, `InScope` (`internal/core/evaluation`)
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
    7. Supervisor und Scheduler (`internal/core/supervisor`)
@@ -109,7 +109,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
 - Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
-- `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.
+- `CreateMemberLink` prüft nicht selbst, dass die Gruppe `kind = group` hat; das prüft `Inventory.AddGroupMember` vor dem Store.
 - testcontainers schreibt viele Logzeilen in die Testausgabe.
 
 ## Offene Fragen an den User

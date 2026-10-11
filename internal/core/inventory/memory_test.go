@@ -24,7 +24,7 @@ func newTree(t *testing.T) tree {
 	tr.inv.Load(Snapshot{
 		Sources: []Source{{ID: tr.source, DeviceID: tr.device, Driver: "videoxlink", AccessElementID: tr.access}},
 		Elements: []Element{
-			{ID: tr.device, Kind: KindDevice, Label: "X8"},
+			{ID: tr.device, Kind: KindDevice, DeviceID: tr.device, Label: "X8", Present: true},
 			{ID: tr.access, Kind: KindAccess, ParentID: tr.device, DeviceID: tr.device, SourceID: tr.source, GlobalRef: "xlink:abc", Present: true},
 			{ID: tr.card, Kind: "module", ParentID: tr.access, DeviceID: tr.device, SourceID: tr.source, ExternalID: "card/1", Name: "Card 1", Label: "Decoder", Present: true},
 			{ID: tr.port, Kind: "port", ParentID: tr.card, DeviceID: tr.device, SourceID: tr.source, ExternalID: "sdi/1", Transport: "sdi", Direction: DirectionIn, Name: "SDI 1", Present: true},

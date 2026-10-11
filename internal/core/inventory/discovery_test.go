@@ -16,13 +16,54 @@ import (
 )
 
 // fakeStore ist die Attrappe des Stores. ApplyDiscovery bildet FinishDiscovery nach: Elemente der
-// Quelle, die nicht gesehen wurden, verschwinden.
+// Quelle, die nicht gesehen wurden, verschwinden. Die Befehle merkt sie sich nur in calls.
 type fakeStore struct {
-	Store // nicht nachgebildete Methoden: panic
-
 	inv         *Inventory // Stand vor dem Aufruf, gelesen wie die Datenbank
 	discoveries []Discovery
+	calls       []string
 	err         error
+}
+
+var _ Store = (*fakeStore)(nil)
+
+func (f *fakeStore) call(name string) error {
+	f.calls = append(f.calls, name)
+	return f.err
+}
+
+func (f *fakeStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, f.call("Load") }
+func (f *fakeStore) CreateDevice(context.Context, uuid.UUID, Element) error {
+	return f.call("CreateDevice")
+}
+func (f *fakeStore) DeleteDevice(context.Context, uuid.UUID, uuid.UUID) error {
+	return f.call("DeleteDevice")
+}
+func (f *fakeStore) CreateSource(context.Context, uuid.UUID, Source, uuid.UUID) error {
+	return f.call("CreateSource")
+}
+func (f *fakeStore) UpdateSource(context.Context, uuid.UUID, Source) error {
+	return f.call("UpdateSource")
+}
+func (f *fakeStore) DeleteSource(context.Context, uuid.UUID, uuid.UUID) error {
+	return f.call("DeleteSource")
+}
+func (f *fakeStore) CreateGroup(context.Context, uuid.UUID, Element) error {
+	return f.call("CreateGroup")
+}
+func (f *fakeStore) DeleteGroup(context.Context, uuid.UUID, uuid.UUID) error {
+	return f.call("DeleteGroup")
+}
+func (f *fakeStore) UpdateUserFields(context.Context, uuid.UUID, uuid.UUID, UserFields) error {
+	return f.call("UpdateUserFields")
+}
+func (f *fakeStore) AddGroupMember(context.Context, uuid.UUID, Link) error {
+	return f.call("AddGroupMember")
+}
+func (f *fakeStore) UpdateGroupMember(context.Context, uuid.UUID, Link) error {
+	return f.call("UpdateGroupMember")
+}
+func (f *fakeStore) RemoveGroupMember(context.Context, uuid.UUID, uuid.UUID) error {
+	return f.call("RemoveGroupMember")
 }
 
 func (f *fakeStore) ApplyDiscovery(_ context.Context, d Discovery) ([]uuid.UUID, error) {
