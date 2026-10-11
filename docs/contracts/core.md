@@ -122,6 +122,7 @@ classDiagram
         +InScope(scope, id) bool
         +ScopeElements(scope) iter.Seq~ID~
         +Monitored(id) bool
+        +Path(id) string
     }
     class Diff {
         <<struct>>
@@ -167,6 +168,13 @@ classDiagram
         +Evaluate(ctx, now, elements []ID, s State) ([]FindingChange, error)
         +Alarms(ctx, now, sourceID, alarms map~ID, []sdk.Alarm~, replace bool, s State) ([]FindingChange, error)
         +Tick(ctx, now, s State) ([]FindingChange, error)
+        +Discovery(ctx, now, sourceID, err error, s State) ([]FindingChange, error)
+        +CreateRule(ctx, actor, r Rule, s State) ([]FindingChange, error)
+        +UpdateRule(ctx, actor, r Rule, s State) ([]FindingChange, error)
+        +DeleteRule(ctx, actor, id, s State) ([]FindingChange, error)
+        +AckFinding(ctx, actor, id) (Finding, error)
+        +Rules() *Rules
+        +Findings() map~ID, Finding~
         +Health(s State, elements []ID) []ElementHealth
     }
     class State {
@@ -174,7 +182,7 @@ classDiagram
         +Graph() *inventory.Graph
         +Facts(elementID) sdk.Facts
         +Live(sourceID) bool
-        +Unreachable(sourceID) bool
+        +Unreachable(sourceID) (reason string, ok bool)
         +Heartbeat(sourceID) time.Duration
     }
     class Rules {
@@ -238,11 +246,16 @@ classDiagram
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
 | `State` | was die Bewertung vom Zustand liest; die `View` erfüllt es. Ein Interface beim Verwender, weil `core` `evaluation` importiert und nicht umgekehrt |
 | `Evaluator.Alarms` | Gerätealarme einer Quelle: bei `Snapshot` (`replace`) ersetzen sie alle Alarme der Quelle, bei `Update` nur die der genannten Elemente. Ein neuer Alarm erzeugt sofort einen Befund, ein fehlender beendet ihn als behoben |
-| Schreiben der Befunde | nur der Evaluator ruft `evaluation.Store` (`CLAUDE.md`); gescheiterte Schreibvorgänge bleiben offen und wiederholt `Tick` |
+| Schreiben der Befunde | nur der Evaluator ruft `evaluation.Store` (`CLAUDE.md`), jeder Aufruf mit 2 s Timeout. **Entstehen gescheitert:** Der Befund gilt noch nicht als aktiv (weder in der `View` noch als Ereignis), `Tick` wiederholt; fällt sein Grund vorher weg, wird er verworfen. **Enden gescheitert:** Der Befund bleibt aktiv, bis `Tick` das Schreiben wiederholt hat; `ErrNotFound` zählt als Erfolg. Die Methoden liefern die gelungenen Änderungen und die gesammelten Fehler |
+| Abgleich | Pro Element berechnet der Evaluator die Befunde, die sein sollen: Regel (verletzte Regeln der gewinnenden Stufe), Gerät (Codes der zuletzt gemeldeten Alarme), System am Zugang (`source.unreachable` laut `State.Unreachable`, `source.discovery_failed` laut letztem `Discovery`). Regel- und Gerätebefunde nur, wenn die Quelle `Live` ist, sonst bleiben sie eingefroren (auch eine abgelaufene Haltezeit wartet); Systembefunde immer |
+| Grund des Zurückziehens | der erste passende in dieser Reihenfolge: `deleted` (Element nicht mehr im Graph), `rule_deleted`, `rule_disabled`, `source_disabled`, `unmonitored`, `element_missing`, `fact_missing`, sonst `rule_changed` (Geltungsbereich, Filter oder Präzedenz). `deleted`, `rule_deleted` und `rule_disabled` hat der Store schon in derselben Transaktion geschrieben; der Evaluator beendet sie nur im Speicher und meldet sie |
+| `Evaluator.Discovery` | Ergebnis jedes Versuchs, einen `Snapshot` zu speichern: Fehler erzeugt `source.discovery_failed` am Zugang (Fehlertext in `details`), Erfolg beendet ihn als behoben |
+| Regelbefehle | `CreateRule`, `UpdateRule`, `DeleteRule` prüfen die Regel (auch: Geltungsbereich existiert, `match_driver` registriert), schreiben sie und bewerten alle Elemente im alten und neuen Geltungsbereich neu, damit auch überschriebene oder wieder geltende Regeln stimmen. IDs vergibt die API |
+| Regelbefund | `message` z. B. `temp lte 80`; `details` mit dem Snapshot der Regel (Name, Fakt, Operator, Wert, `when`, Hysterese) und dem gemessenen Wert, damit der Befund nach dem Löschen der Regel lesbar bleibt; `element_path` aus `Graph.Path` |
 | `Evaluator.Health` | Health von Elementen; bei Gerät und Gruppe über die verschiedenen Elemente in ihrem Geltungsbereich (`InScope`, ohne Gerät- und Gruppen-Elemente), jedes genau einmal |
 | `View` | unveränderlich; jede Verarbeitung erzeugt eine neue (`Version` steigt). Wer sie hält, sieht einen stimmigen Stand, auch wenn die Schleife weiterläuft |
 | `Inventory.FactsByID` | übersetzt die Fakten einer Meldung von `external_id`s in Element-IDs; unbekannte `external_id`s kommen zurück, die Schleife loggt sie einmal pro Quelle |
-| `Inventory.Path` | `element_path` eines Elements für Befunde und Läufe (Label, sonst Name, vom Gerät bis zum Element, ohne Zugang, getrennt durch „ / “) |
+| `Inventory.Path`, `Graph.Path` | `element_path` eines Elements für Befunde und Läufe (Label, sonst Name, vom Gerät bis zum Element, ohne Zugang, getrennt durch „ / “) |
 | `Diff` | was die Discovery bzw. ein Befehl am Inventar geändert hat; `Missing`/`Returned` sind Wechsel von `present` |
 | `Changed` | pro Element die Schlüssel der Fakten, die sich wirklich geändert haben, neu sind oder weggefallen sind |
 | `Facts` | copy-on-write: Die Fakten eines Elements werden nie verändert, sondern ersetzt; `Snapshot` kopiert nur die äußere Map, die `View` teilt den Rest (C7) |

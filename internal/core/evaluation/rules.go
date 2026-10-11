@@ -218,10 +218,14 @@ func newTarget(s State, id uuid.UUID) (target, bool) {
 	return target{g: g, e: e, driver: src.Driver, scopes: g.Scopes(id), facts: s.Facts(id)}, true
 }
 
-// fact liefert einen Fakt des Elements; present kommt aus dem Inventar.
+// fact liefert einen Fakt des Elements; present kommt aus dem Inventar. Ein verschwundenes
+// Element hat nur present, seine übrigen Fakten sind entfallen.
 func (t target) fact(key string) (any, bool) {
 	if key == vocab.Present {
 		return t.e.Present, true
+	}
+	if !t.e.Present {
+		return nil, false
 	}
 	v, ok := t.facts[key]
 	return v, ok
@@ -316,6 +320,15 @@ func newRules(byID map[uuid.UUID]*rule) *Rules {
 
 func compareRules(a, b *rule) int {
 	return cmp.Or(strings.Compare(a.Name, b.Name), slices.Compare(a.ID[:], b.ID[:]))
+}
+
+// without liefert einen neuen Satz ohne die Regeln.
+func (rs *Rules) without(ids ...uuid.UUID) *Rules {
+	byID := maps.Clone(rs.byID)
+	for _, id := range ids {
+		delete(byID, id)
+	}
+	return newRules(byID)
 }
 
 // Rule liefert eine Regel, All alle nach Name.

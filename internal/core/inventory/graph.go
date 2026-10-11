@@ -209,3 +209,6 @@ func (g *Graph) Monitored(id uuid.UUID) bool {
 	}
 	return true
 }
+
+// Path ist der Anzeigename eines Elements wie bei Inventory.Path.
+func (g *Graph) Path(id uuid.UUID) string { return path(g.elements, id) }

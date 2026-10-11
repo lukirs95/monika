@@ -111,11 +111,13 @@ func (inv *Inventory) FactsByID(source uuid.UUID, facts map[string]sdk.Facts) (m
 // Path ist der Anzeigename eines Elements: Label, sonst Name, vom Gerät bis zum Element,
 // getrennt durch " / ", ohne Zugang (docs/ARCHITECTURE.md, Abschnitt 5). Dieselbe Regel nutzt
 // die View reporting.element.
-func (inv *Inventory) Path(id uuid.UUID) string {
+func (inv *Inventory) Path(id uuid.UUID) string { return path(inv.elements, id) }
+
+func path(elements map[uuid.UUID]Element, id uuid.UUID) string {
 	var parts []string
 	for seen := map[uuid.UUID]bool{}; id != uuid.Nil && !seen[id]; {
 		seen[id] = true
-		e, ok := inv.elements[id]
+		e, ok := elements[id]
 		if !ok {
 			break
 		}

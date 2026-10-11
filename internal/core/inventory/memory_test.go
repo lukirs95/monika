@@ -54,6 +54,9 @@ func TestPath(t *testing.T) {
 			if got := tr.inv.Path(tt.id); got != tt.want {
 				t.Errorf("Path = %q, want %q", got, tt.want)
 			}
+			if got := tr.inv.Graph().Path(tt.id); got != tt.want {
+				t.Errorf("Graph.Path = %q, want %q", got, tt.want)
+			}
 		})
 	}
 }

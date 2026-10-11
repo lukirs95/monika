@@ -112,38 +112,75 @@ func TestViolated(t *testing.T) {
 	}
 }
 
-// fakeState ist die Attrappe von State über einen echten Graph des Inventars.
+// fakeState ist die Attrappe von State über einen echten Graph des Inventars. Quellen sind Live,
+// außer sie stehen in notLive.
 type fakeState struct {
-	graph *inventory.Graph
-	facts map[uuid.UUID]sdk.Facts
+	graph       *inventory.Graph
+	facts       map[uuid.UUID]sdk.Facts
+	notLive     map[uuid.UUID]bool
+	unreachable map[uuid.UUID]string
+	heartbeat   time.Duration
 }
 
-func (s fakeState) Graph() *inventory.Graph           { return s.graph }
-func (s fakeState) Facts(id uuid.UUID) sdk.Facts      { return s.facts[id] }
-func (s fakeState) Live(uuid.UUID) bool               { return true }
-func (s fakeState) Unreachable(uuid.UUID) bool        { return false }
-func (s fakeState) Heartbeat(uuid.UUID) time.Duration { return 0 }
+func (s *fakeState) Graph() *inventory.Graph           { return s.graph }
+func (s *fakeState) Facts(id uuid.UUID) sdk.Facts      { return s.facts[id] }
+func (s *fakeState) Live(id uuid.UUID) bool            { return !s.notLive[id] }
+func (s *fakeState) Heartbeat(uuid.UUID) time.Duration { return s.heartbeat }
+func (s *fakeState) Unreachable(id uuid.UUID) (string, bool) {
+	r, ok := s.unreachable[id]
+	return r, ok
+}
 
 // world ist ein kleines Inventar: Gerät X8 mit Zugang und SDI-Port, Gruppe g1 ∋ Port,
-// Gruppe g2 ∋ g1, dazu ein verschwundener und ein nicht überwachter Port.
+// Gruppe g2 ∋ g1, dazu ein verschwundener und ein nicht überwachter Port. Nach einer Änderung
+// an snap baut rebuild den Graph neu.
 type world struct {
-	state                                              fakeState
+	state                                              *fakeState
+	snap                                               inventory.Snapshot
+	source                                             uuid.UUID
 	device, access, port, missing, unmonitored, g1, g2 uuid.UUID
 }
 
-func newWorld(t *testing.T) world {
+func (w *world) rebuild() {
+	inv := inventory.New(nil, sdk.Lookup, slog.New(slog.DiscardHandler))
+	inv.Load(w.snap)
+	w.state.graph = inv.Graph()
+}
+
+// change ändert ein Element und baut den Graph neu.
+func (w *world) change(id uuid.UUID, f func(*inventory.Element)) {
+	for i := range w.snap.Elements {
+		if w.snap.Elements[i].ID == id {
+			f(&w.snap.Elements[i])
+		}
+	}
+	w.rebuild()
+}
+
+// remove löscht ein Element und baut den Graph neu.
+func (w *world) remove(id uuid.UUID) {
+	w.snap.Elements = slices.DeleteFunc(w.snap.Elements, func(e inventory.Element) bool { return e.ID == id })
+	w.rebuild()
+}
+
+// setSource ändert die Quelle und baut den Graph neu.
+func (w *world) setSource(f func(*inventory.Source)) {
+	f(&w.snap.Sources[0])
+	w.rebuild()
+}
+
+func newWorld(t *testing.T) *world {
 	t.Helper()
 	id := func() uuid.UUID { return uuid.Must(uuid.NewV7()) }
-	w := world{device: id(), access: id(), port: id(), missing: id(), unmonitored: id(), g1: id(), g2: id()}
-	source := id()
-	inv := inventory.New(nil, sdk.Lookup, slog.New(slog.DiscardHandler))
+	w := &world{source: id(), device: id(), access: id(), port: id(), missing: id(), unmonitored: id(), g1: id(), g2: id()}
+	source := w.source
 	el := func(eid, parent uuid.UUID, kind inventory.Kind, present, monitored bool) inventory.Element {
-		return inventory.Element{ID: eid, Kind: kind, ParentID: parent, DeviceID: w.device, SourceID: source, Transport: "sdi", Present: present, Monitored: monitored}
+		return inventory.Element{ID: eid, Kind: kind, ParentID: parent, DeviceID: w.device, SourceID: source, Transport: "sdi", Name: "e", Present: present, Monitored: monitored}
 	}
-	inv.Load(inventory.Snapshot{
+	w.snap = inventory.Snapshot{
 		Sources: []inventory.Source{{ID: source, DeviceID: w.device, Driver: "videoxlink", Enabled: true, AccessElementID: w.access}},
 		Elements: []inventory.Element{
-			{ID: w.device, Kind: inventory.KindDevice, DeviceID: w.device, Present: true, Monitored: true},
+			{ID: w.device, Kind: inventory.KindDevice, DeviceID: w.device, Label: "X8", Present: true, Monitored: true},
 			el(w.access, w.device, inventory.KindAccess, true, true),
 			el(w.port, w.access, "port", true, true),
 			el(w.missing, w.access, "port", false, true),
@@ -155,9 +192,10 @@ func newWorld(t *testing.T) world {
 			{ID: id(), Type: inventory.LinkMember, FromID: w.g1, ToID: w.port},
 			{ID: id(), Type: inventory.LinkMember, FromID: w.g2, ToID: w.g1},
 		},
-	})
+	}
 	facts := sdk.Facts{"temp": 70.0, "signal": true, "crc": int64(0), "running": true}
-	w.state = fakeState{graph: inv.Graph(), facts: map[uuid.UUID]sdk.Facts{w.port: facts, w.unmonitored: facts}}
+	w.state = &fakeState{facts: map[uuid.UUID]sdk.Facts{w.port: facts, w.unmonitored: facts}}
+	w.rebuild()
 	return w
 }
 

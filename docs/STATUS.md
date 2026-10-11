@@ -98,7 +98,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    5. Bewertung (`internal/core/evaluation`), in fünf Teilen; Entscheidungen vom 2026-10-11: Die Bewertung liest den Zustand über ein Interface `evaluation.State` (die `View` erfüllt es, kein Importzyklus), der Graph liegt im Inventar, nur der Evaluator schreibt Befunde, Gerätealarme kommen über `Evaluator.Alarms`
       - ~~5a Graph und Geltungsbereich~~ (`inventory.Graph`: `Scopes`, `InScope`, `ScopeElements`, effektives `Monitored`): erledigt
       - ~~5b Regeln~~ (`evaluation.Rules`: Prüfung gegen den Fakt-Katalog, Gelten, Präzedenz, `op`/`when`/Hysterese, `EffectiveRules`): erledigt
-      - 5c Befunde: Zustandsmaschine mit Haltezeiten, Gerätealarme, Systembefunde, Zurückziehen, Schreiben mit Wiederholung, Regelbefehle
+      - 5c Befunde (Entscheidungen F1–F5 vom 2026-10-11 in `core.md`): ~~5c1 Evaluator mit Regelbefunden~~ (Abgleich pro Element, Haltezeiten, Hysterese, Gründe des Zurückziehens, Wiederholung gescheiterter Schreibvorgänge, Regeln gelöschter Geltungsbereiche): erledigt; 5c2 Gerätealarme, Systembefunde, Regelbefehle, Quittieren
       - 5d Ursache und Symptom
       - 5e Health und Rollup
    6. Schleife: `View`, Ereignisse, Befehle, `Reporter`, `Post`, Datenbank-Wächter, `Stats` (`internal/core`)
@@ -113,7 +113,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 ## Bekannte Lücken
 
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
-- Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
+- Beim Löschen meldet der Evaluator die zurückgezogenen Befunde (`deleted`, `rule_deleted`) nur im Speicher; die Schleife muss dafür `Evaluate` mit `Diff.Deleted` aufrufen (Schritt 6).
 - `CreateMemberLink` prüft nicht selbst, dass die Gruppe `kind = group` hat; das prüft `Inventory.AddGroupMember` vor dem Store.
 - testcontainers schreibt viele Logzeilen in die Testausgabe.
 
