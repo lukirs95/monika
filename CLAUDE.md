@@ -4,7 +4,7 @@ Arbeitsregeln für Claude in diesem Repository.
 
 ## Projektstand
 
-- Verbindlich sind `docs/ARCHITECTURE.md` (Verhalten, Architekturentscheidungen) und `docs/schema/monika.dbml` (Datenbankschema).
+- Verbindlich sind `docs/ARCHITECTURE.md` (Verhalten, Architekturentscheidungen) und `schema/monika.dbml` (Datenbankschema); die API ist in `api/openapi.yaml` festgelegt.
 - Aktueller Arbeitsstand, nächste Schritte und bekannte Lücken stehen in `docs/STATUS.md`. Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 - Die Go-Architektur entsteht schrittweise; größere Entscheidungen werden vorher abgestimmt, nicht stillschweigend getroffen. Bereits festgelegt ist das Muster für die Persistenz (siehe unten).
 - **Erst Vertrag, dann Code:** Außerhalb des Stores entsteht Code erst, wenn sein Vertrag (Interfaces, Methoden, Abläufe) in `docs/contracts/` als Mermaid-Diagramm abgestimmt ist: `classDiagram` für Interfaces und Typen, `sequenceDiagram` für Abläufe, `stateDiagram-v2` für Lebenszyklen. `docs/ARCHITECTURE.md` erklärt das Warum, die Verträge legen das Wie fest. Vor jedem Commit mit geänderten Diagrammen läuft `make docs-check` (rendert alle Mermaid-Diagramme in `docs/`).
@@ -29,7 +29,7 @@ Arbeitsregeln für Claude in diesem Repository.
 
 Vorbild ist `internal/core/inventory` mit `internal/store/postgres`.
 
-- **Schema:** `docs/schema/monika.dbml` ist die Quelle. `make db-generate` erzeugt daraus `migrations/00001_init.sql`; nur was DBML nicht ausdrücken kann (z. B. Teilindizes), steht in handgeschriebenen Migrationen.
+- **Schema:** `schema/monika.dbml` ist die Quelle. `make db-generate` erzeugt daraus `migrations/00001_init.sql`; nur was DBML nicht ausdrücken kann (z. B. Teilindizes), steht in handgeschriebenen Migrationen.
 - **Queries:** SQL in `internal/store/postgres/queries/`, `make db-gen-go` erzeugt mit sqlc das Paket `internal/store/postgres/db/`. Generierten Code nie von Hand ändern.
 - **Interfaces beim Verwender:** Jedes Fachpaket definiert sein eigenes `Store`-Interface mit genau den Methoden, die es braucht (z. B. `inventory.Store`).
 - **Domänentypen im Fachpaket:** Typen und fachliche Fehler (`ErrNotFound`, `ErrMemberCycle` …) liegen im Fachpaket, nicht in einem gemeinsamen `model`-Paket. Leere Werte bedeuten „nicht gesetzt“; Pointer nur, wo der leere Wert ein gültiger Wert ist.

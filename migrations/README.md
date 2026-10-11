@@ -4,7 +4,7 @@ SQL-Migrationen für PostgreSQL ≥ 18 im Format von [goose](https://github.com/
 
 | Datei | Herkunft |
 |---|---|
-| `00001_init.sql` | **generiert** aus `docs/schema/monika.dbml` mit `make db-generate` – nicht von Hand ändern |
+| `00001_init.sql` | **generiert** aus `schema/monika.dbml` mit `make db-generate` – nicht von Hand ändern |
 | `00002_finding_active_uq.sql` | handgeschrieben: Teilindex, den DBML nicht ausdrücken kann |
 | `00003_element_source_external_uq.sql` | handgeschrieben: Index mit `NULLS NOT DISTINCT`, den DBML nicht ausdrücken kann |
 

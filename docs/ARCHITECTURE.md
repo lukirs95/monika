@@ -1,7 +1,7 @@
 # Monika – Architektur
 
 **Stand:** 2026-10-11 · **Status:** verbindlich für alle folgenden Arbeiten
-**Schema-Referenz:** [`schema/monika.dbml`](schema/monika.dbml) (PostgreSQL). Dieses Dokument erklärt das *Warum* und die Regeln; das DBML ist die exakte Definition der Tabellen.
+**Schema-Referenz:** [`schema/monika.dbml`](../schema/monika.dbml) (PostgreSQL). Dieses Dokument erklärt das *Warum* und die Regeln; das DBML ist die exakte Definition der Tabellen.
 
 ---
 
@@ -861,7 +861,7 @@ Alles Weitere (Zugangsdaten der Geräte, Tokens für Sende-Ziele und Webhooks, s
 
 ## 15. Datenbank
 
-21 Tabellen in sieben Bereichen. Exakte Definition: `monika.dbml`.
+21 Tabellen in sieben Bereichen. Exakte Definition: `schema/monika.dbml`.
 
 | Bereich | Tabellen |
 |---|---|

@@ -11,7 +11,7 @@ COMPOSE := $(DOCKER) compose -f deploy/compose.yaml
 # Go wird lokal vorausgesetzt. Übrige Werkzeuge mit fester Version per go run bzw. als fertiges Docker-Image.
 GOOSE          := $(GO) run github.com/pressly/goose/v3/cmd/goose@v3.28.0
 DBML2SQL       := $(DOCKER) run --rm -e NPM_CONFIG_UPDATE_NOTIFIER=false \
-                  -v $(CURDIR)/docs/schema:/schema:ro node:24-alpine \
+                  -v $(CURDIR)/schema:/schema:ro node:24-alpine \
                   npx --yes --loglevel=error -p @dbml/cli@10.3.0 dbml2sql --postgres
 SQLC           := $(DOCKER) run --rm --user $$(id -u):$$(id -g) -v $(CURDIR):/src -w /src sqlc/sqlc:1.31.1
 POSTGRES_IMAGE := postgres:18-alpine
@@ -57,15 +57,15 @@ docs-check: ## Rendert alle Mermaid-Diagramme in docs/ und bricht bei Syntaxfehl
 	    done; exit $$status' sh $$files
 
 .PHONY: api-check
-api-check: ## Prüft die OpenAPI-Spezifikation docs/contracts/api.yaml
-	$(DOCKER) run --rm -v $(CURDIR):/spec:ro -w /spec $(REDOCLY_IMAGE) lint --format=stylish docs/contracts/api.yaml
+api-check: ## Prüft die OpenAPI-Spezifikation api/openapi.yaml
+	$(DOCKER) run --rm -v $(CURDIR):/spec:ro -w /spec $(REDOCLY_IMAGE) lint --format=stylish api/openapi.yaml
 
 # --- Datenbank ---------------------------------------------------------------
 
 .PHONY: db-generate
-db-generate: ## Erzeugt migrations/00001_init.sql aus docs/schema/monika.dbml
+db-generate: ## Erzeugt migrations/00001_init.sql aus schema/monika.dbml
 	{ echo '-- +goose Up'; \
-	  echo '-- Generiert aus docs/schema/monika.dbml mit `make db-generate`. Nicht von Hand ändern.'; \
+	  echo '-- Generiert aus schema/monika.dbml mit `make db-generate`. Nicht von Hand ändern.'; \
 	  echo '-- +goose StatementBegin'; \
 	  $(DBML2SQL) /schema/monika.dbml; \
 	  echo '-- +goose StatementEnd'; } > migrations/00001_init.sql.tmp

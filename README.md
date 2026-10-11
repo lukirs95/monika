@@ -13,7 +13,8 @@ Stack: Go · PostgreSQL ≥ 18 · InfluxDB · Monolith · Treiber zur Compile-Ze
 | Dokument | Inhalt |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | alle verbindlichen Architekturentscheidungen |
-| [`docs/schema/monika.dbml`](docs/schema/monika.dbml) | exakte Definition des Datenbankschemas (dbdiagram.io) |
+| [`schema/monika.dbml`](schema/monika.dbml) | exakte Definition des Datenbankschemas (dbdiagram.io); Quelle der Migrationen |
+| [`api/openapi.yaml`](api/openapi.yaml) | HTTP-API als OpenAPI 3.0.3; Quelle des erzeugten Server-Codes |
 | [`docs/contracts/`](docs/contracts/) | Verträge zwischen den Komponenten: Interfaces, Methoden, Abläufe (Mermaid) |
 
 ## Projektstruktur
@@ -42,7 +43,9 @@ monika/
 │  ├─ embrionix/            Embrionix / Riedel emFUSION-2, MuoN
 │  ├─ ravio/                DirectOut RAVIO
 │  └─ http/                 generische Sende-Aufrufe
-├─ migrations/              SQL-Migrationen (aus docs/schema/monika.dbml)
+├─ api/openapi.yaml         HTTP-API (OpenAPI 3.0.3), Vertrag und Quelle für oapi-codegen
+├─ schema/monika.dbml       Datenbankschema (DBML), Quelle für make db-generate
+├─ migrations/              SQL-Migrationen (aus schema/monika.dbml)
 ├─ web/                     Frontend (Technologie offen)
 ├─ deploy/                  lokale Umgebung und Deployment
 └─ docs/
@@ -50,8 +53,7 @@ monika/
    ├─ DRIVERS.md            Leitfaden: einen Treiber schreiben
    ├─ OPERATIONS.md         Betrieb: Auslieferung, Stack, Backup, Updates
    ├─ STATUS.md             Arbeitsstand, nächste Schritte, bekannte Lücken
-   ├─ contracts/            Verträge (Mermaid, OpenAPI) vor dem Code
-   └─ schema/monika.dbml
+   └─ contracts/            Verträge (Mermaid) vor dem Code; die API-Spezifikation liegt in api/
 ```
 
 Abhängigkeiten zeigen nur nach innen: `drivers/*` kennt nur `sdk/` (und die jeweilige Gerätelibrary), nie `internal/`. `internal/` implementiert die Seite des Cores.

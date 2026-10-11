@@ -8,7 +8,7 @@
 
 | # | Entscheidung |
 |---|---|
-| P1 | API als JSON über HTTP, Vertrag als OpenAPI 3.0.3 (`api.yaml`, eigener Vertrag; Version siehe [`api.md`](api.md), R1) |
+| P1 | API als JSON über HTTP, Vertrag als OpenAPI 3.0.3 (`api/openapi.yaml`, eigener Vertrag; Version siehe [`api.md`](api.md), R1) |
 | P2 | Live-Push per Server-Sent Events; die Event-ID ist `View.Version` |
 | P3 | Sitzungen der UI auf dem Server (Tabelle), Token im `HttpOnly`-Cookie; lokale Anmeldung mit **TOTP** als zweitem Faktor |
 | P4 | Dienstkonten melden sich mit API-Token an: `Authorization: Bearer …` |

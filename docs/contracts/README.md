@@ -14,4 +14,4 @@ Diagramme in Mermaid: `classDiagram` für Interfaces und Typen, `sequenceDiagram
 | [`influx.md`](influx.md) | Influx-Schreiber: Schema, Takt, Puffer | abgestimmt 2026-10-11 |
 | [`bootstrap.md`](bootstrap.md) | Bootstrap: Konfiguration, Verdrahtung, Lebenszyklus der Dienste | abgestimmt 2026-10-11 |
 | [`auth.md`](auth.md) | Anmeldung (Passwort, TOTP, Sitzungen, Tokens, Kiosk) und Rechte (`Allowed`) | abgestimmt 2026-10-09, überarbeitet 2026-10-10 |
-| [`api.md`](api.md), [`api.yaml`](api.yaml) | HTTP-API: Konventionen, Verteiler und Abo-Modell; Endpunkte als OpenAPI 3.0.3 (`make api-check`) | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |
+| [`api.md`](api.md), [`api/openapi.yaml`](../../api/openapi.yaml) | HTTP-API: Konventionen, Verteiler und Abo-Modell; Endpunkte als OpenAPI 3.0.3 (`make api-check`) | abgestimmt 2026-10-09, überarbeitet 2026-10-11 |

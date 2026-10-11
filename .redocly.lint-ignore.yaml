@@ -1,4 +1,4 @@
 # Bewusste Ausnahmen von `make api-check`.
-docs/contracts/api.yaml:
+api/openapi.yaml:
   operation-4xx-response:
     - '#/paths/~1healthz/get/responses'

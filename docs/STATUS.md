@@ -8,7 +8,7 @@ Stand: 2026-10-11
 ## Erledigt
 
 - **Projektregeln:** `CLAUDE.md` (Go, make, Docker, kleine Commits, Persistenz-Muster), `.gitignore`.
-- **Schema:** Alle Constraints, Ausdrucksindizes und `ON DELETE`-Regeln stehen direkt in `docs/schema/monika.dbml`.
+- **Schema:** Alle Constraints, Ausdrucksindizes und `ON DELETE`-Regeln stehen direkt in `schema/monika.dbml`.
   - `make db-generate` erzeugt `migrations/00001_init.sql` (wird bis zum ersten produktiven Einsatz neu generiert, danach eingefroren).
   - `migrations/00002_finding_active_uq.sql` ist handgeschrieben (Teilindex, den DBML nicht kann).
   - `make db-validate` spielt alle Migrationen in eine frische PostgreSQL 18 ein.
@@ -33,7 +33,7 @@ Stand: 2026-10-11
 
 > **Überholt.** Dieser Abschnitt beschreibt den Stand vom 2026-10-08. Mehrere Punkte sind durch das Architektur-Audit (2026-10-10) und die Vervollständigung (2026-10-11) ersetzt, u. a. weiches Löschen, Health bei leerer Menge und `preset_step.driver` als Pflicht. Verbindlich sind `docs/ARCHITECTURE.md` und die Verträge.
 
-Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `docs/schema/monika.dbml`. Kurzfassung:
+Alle Entscheidungen stehen in `docs/ARCHITECTURE.md` und `schema/monika.dbml`. Kurzfassung:
 
 - **Zugangs-Element** (`kind = access`, ohne `external_id`) pro Quelle, vom Core beim Anlegen der Quelle erzeugt; trägt Fakten und Aktionen für das ganze Gerät und `source.unreachable`.
 - **Tabelle `device` entfällt:** Gerät = Element mit `kind = device`; Identität pro Quelle in `device_source`.
@@ -84,7 +84,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
-   5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api.yaml` (OpenAPI 3.0.3, `make api-check`)
+   5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api/openapi.yaml` (OpenAPI 3.0.3, `make api-check`)
 2. **Code an das Audit anpassen** (Schema und Stores, bevor der Core entsteht):
    - `make db-generate`, `make db-gen-go`; Migration `00003` bleibt.
    - `deleted_at`, `CreatePlannedElement` entfernen; `DeleteDevice` und `DeleteGroup` hart löschen (CASCADE, Audit vorher), `DeleteSource` neu; Presets blockieren weiterhin.
