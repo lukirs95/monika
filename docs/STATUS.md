@@ -88,19 +88,11 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    3. ~~Abläufe~~: abgestimmt am 2026-10-09, `docs/contracts/flows.md`
    4. ~~Dienste~~ (`services.md`) und ~~Anmeldung/Rechte~~ (`auth.md`): abgestimmt am 2026-10-09
    5. ~~API~~: abgestimmt am 2026-10-09, `docs/contracts/api.md` und `api/openapi.yaml` (OpenAPI 3.0.3, `make api-check`)
-2. **Code an das Audit anpassen** (Schema und Stores, bevor der Core entsteht); erledigt sind Teil 1 (Schema neu erzeugt, Inventar, `finding.element_path`, `ClearReason`) und Teil 2 (`Rollup.Unchecked`, `clear_hold_seconds`, `action_run.element_path`):
-   - `make db-generate`, `make db-gen-go`; Migration `00003` bleibt.
-   - `deleted_at`, `CreatePlannedElement` entfernen; `DeleteDevice` und `DeleteGroup` hart löschen (CASCADE, Audit vorher), `DeleteSource` neu; Presets blockieren weiterhin.
-   - `finding.element_path`, `action_run.element_path` (Namens-Snapshot), Queries ohne Fremdschlüssel auf `element`.
-   - `rule.clear_hold_seconds`, `preset_step.device_level`, `permission` `source_edit` (`auth.Permission.Global`).
-   - `ApplyDiscovery`: Eltern `""` = Zugang, `global_ref` am Zugang.
-   - `evaluation.ClearReason`: `fact_missing`, `deleted`; `Rollup.Unchecked`.
-   - `element.params`, Audit-Verben `appear`/`disappear`, `finding.caused_by_id` `SET NULL`, `action_run.parent_id` `CASCADE`, Migration für das Schema `reporting`.
+2. ~~**Code an das Audit anpassen**~~: erledigt am 2026-10-11 in drei Commits: Schema neu erzeugt und Inventar mit hartem Löschen (`DeleteSource` neu, `global_ref` am Zugang, `Source.AccessElementID`, Audit `appear`/`disappear`, `element.params`); Befunde und Läufe mit `element_path`, `ClearReason`, `Rollup.Unchecked`, `clear_hold_seconds`; `preset_step.device_level`, Recht `source_edit`, Migration `00004_reporting.sql`. Für den Core bleibt: Eltern `""` = Zugang beim Übersetzen der Discovery, `element_path` nach der Regel aus `ARCHITECTURE.md` Abschnitt 5 bilden.
 3. **Umsetzung nach den Verträgen**, beginnend mit dem Bootstrap in `cmd/monika` (Konfiguration aus Umgebung/`.env`, `secret.ParseKey`, `postgres.Open`, `postgres.Migrate`, `VerifyAndRotate`, Verdrahtung).
 
 ## Bekannte Lücken
 
-- `inventory.Source` kennt die ID ihres Zugangs-Elements nicht; die API (`Source.access_element_id`) braucht sie.
 - Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
 - Der Core muss beim Löschen die zurückgezogenen Befunde selbst als `finding.withdrawn` melden; der Store gibt sie nicht zurück.
 - `CreateMemberLink` prüft nicht, dass das Ziel der Mitgliedschaft wirklich eine Gruppe (`kind = group`) ist.

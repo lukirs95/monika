@@ -659,8 +659,8 @@ func (b *UpsertElementHealthBatchResults) Close() error {
 }
 
 const upsertPresetStep = `-- name: UpsertPresetStep :batchone
-INSERT INTO preset_step (id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, driver)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO preset_step (id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, device_level, driver)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (id) DO UPDATE
 SET stage             = excluded.stage,
     position          = excluded.position,
@@ -669,6 +669,7 @@ SET stage             = excluded.stage,
     action            = excluded.action,
     params            = excluded.params,
     continue_on_error = excluded.continue_on_error,
+    device_level      = excluded.device_level,
     driver            = excluded.driver
 WHERE preset_step.preset_id = excluded.preset_id
 RETURNING id
@@ -690,6 +691,7 @@ type UpsertPresetStepParams struct {
 	Action          string
 	Params          json.RawMessage
 	ContinueOnError bool
+	DeviceLevel     bool
 	Driver          *string
 }
 
@@ -707,6 +709,7 @@ func (q *Queries) UpsertPresetStep(ctx context.Context, arg []UpsertPresetStepPa
 			a.Action,
 			a.Params,
 			a.ContinueOnError,
+			a.DeviceLevel,
 			a.Driver,
 		}
 		batch.Queue(upsertPresetStep, vals...)

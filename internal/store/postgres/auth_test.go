@@ -132,8 +132,10 @@ func TestRolesAndGrants(t *testing.T) {
 	if err := s.SetGrants(ctx, admin, role.ID, grants); err != nil {
 		t.Fatalf("SetGrants: %v", err)
 	}
-	if err := s.SetGrants(ctx, admin, role.ID, []auth.Grant{{Permission: auth.PermAdmin, ScopeElementID: device}}); err == nil {
-		t.Fatal("SetGrants with scoped admin succeeded, want check violation")
+	for _, p := range []auth.Permission{auth.PermAdmin, auth.PermSourceEdit} {
+		if err := s.SetGrants(ctx, admin, role.ID, []auth.Grant{{Permission: p, ScopeElementID: device}}); err == nil {
+			t.Fatalf("SetGrants with scoped %s succeeded, want check violation", p)
+		}
 	}
 
 	// Ben kommt aus dem IdP und bleibt, wenn die manuellen Mitglieder ersetzt werden.

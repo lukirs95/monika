@@ -65,8 +65,8 @@ WHERE preset_id = @preset_id
 
 -- name: UpsertPresetStep :batchone
 -- Ein Schritt wechselt nie das Preset: Gehört die ID zu einem anderen, kommt keine Zeile zurück.
-INSERT INTO preset_step (id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, driver)
-VALUES (@id, @preset_id, @stage, @position, @delay_ms, @element_id, @action, @params, @continue_on_error, @driver)
+INSERT INTO preset_step (id, preset_id, stage, position, delay_ms, element_id, action, params, continue_on_error, device_level, driver)
+VALUES (@id, @preset_id, @stage, @position, @delay_ms, @element_id, @action, @params, @continue_on_error, @device_level, @driver)
 ON CONFLICT (id) DO UPDATE
 SET stage             = excluded.stage,
     position          = excluded.position,
@@ -75,6 +75,7 @@ SET stage             = excluded.stage,
     action            = excluded.action,
     params            = excluded.params,
     continue_on_error = excluded.continue_on_error,
+    device_level      = excluded.device_level,
     driver            = excluded.driver
 WHERE preset_step.preset_id = excluded.preset_id
 RETURNING id;

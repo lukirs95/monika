@@ -57,7 +57,7 @@ func TestPresets(t *testing.T) {
 	start := step(3, group, "start")
 	start.Delay = 5 * time.Second
 	reboot := step(3, device, "reboot")
-	reboot.Position, reboot.Driver, reboot.ContinueOnError = 2, "videoxlink", true
+	reboot.Position, reboot.DeviceLevel, reboot.Driver, reboot.ContinueOnError = 2, true, "videoxlink", true
 
 	p := preset.Preset{ID: newID(), Name: "Produktion XY", CreatedByID: user, Steps: []preset.Step{stop, set, start, reboot}}
 	if err := s.CreatePreset(ctx, user, p); err != nil {

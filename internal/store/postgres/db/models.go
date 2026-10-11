@@ -982,6 +982,35 @@ type PresetStep struct {
 	Driver *string
 }
 
+type ReportingElement struct {
+	ID       uuid.UUID
+	Kind     string
+	DeviceID *uuid.UUID
+	SourceID *uuid.UUID
+	Label    *string
+	Name     *string
+	Present  bool
+	Path     []byte
+}
+
+type ReportingFinding struct {
+	ID             uuid.UUID
+	ElementID      uuid.UUID
+	ElementPath    []byte
+	ElementDeleted interface{}
+	Origin         FindingOrigin
+	Code           string
+	Severity       Severity
+	Message        *string
+	RuleID         *uuid.UUID
+	CausedByID     *uuid.UUID
+	RaisedAt       time.Time
+	ClearedAt      *time.Time
+	ClearedReason  interface{}
+	AckedAt        *time.Time
+	AckedByID      *uuid.UUID
+}
+
 type Role struct {
 	ID          uuid.UUID
 	Name        string

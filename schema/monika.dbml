@@ -482,7 +482,7 @@ Ref: rule.scope_element_id > element.id [delete: cascade]
 Table finding {
   id           uuid           [pk, default: `uuidv7()`]
   element_id   uuid           [not null, note: 'ohne Fremdschlüssel: die Historie überlebt das Löschen des Elements']
-  element_path text           [not null, note: 'Anzeigename des Elements beim Entstehen, z.B. L1 · X8A1001 / D1']
+  element_path text           [not null, note: 'Anzeigename des Elements beim Entstehen: Label, sonst Name, vom Gerät bis zum Element, getrennt durch " / ", ohne Zugang, z.B. L1 / D1']
   origin       finding_origin [not null]
   rule_id      uuid           [note: 'bei origin = rule; wird beim Löschen der Regel NULL, damit die Historie bleibt']
   code         text           [not null, note: 'rule: rule.violated · device: Alarmcode des Geräts · system: source.unreachable, source.discovery_failed']

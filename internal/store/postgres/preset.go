@@ -121,7 +121,7 @@ func saveSteps(ctx context.Context, q *db.Queries, p preset.Preset) error {
 		return db.UpsertPresetStepParams{
 			ID: st.ID, PresetID: p.ID, Stage: int32(st.Stage), Position: int32(st.Position),
 			DelayMs: int32(st.Delay / time.Millisecond), ElementID: st.ElementID, Action: st.Action,
-			Params: st.Params, ContinueOnError: st.ContinueOnError, Driver: nullable(st.Driver),
+			Params: st.Params, ContinueOnError: st.ContinueOnError, DeviceLevel: st.DeviceLevel, Driver: nullable(st.Driver),
 		}
 	})
 	var err error
@@ -176,6 +176,6 @@ func toStep(st db.PresetStep) preset.Step {
 		ID: st.ID, Stage: int(st.Stage), Position: int(st.Position),
 		Delay:     time.Duration(st.DelayMs) * time.Millisecond,
 		ElementID: st.ElementID, Action: st.Action, Params: st.Params,
-		ContinueOnError: st.ContinueOnError, Driver: value(st.Driver),
+		ContinueOnError: st.ContinueOnError, DeviceLevel: st.DeviceLevel, Driver: value(st.Driver),
 	}
 }

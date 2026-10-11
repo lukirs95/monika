@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Permission ist ein Recht. preset_run, preset_edit und admin gelten nur global.
+// Permission ist ein Recht. preset_run, preset_edit, source_edit und admin gelten nur global.
 type Permission string
 
 const (
@@ -18,6 +18,7 @@ const (
 	PermConfigure     Permission = "configure"
 	PermCritical      Permission = "critical"
 	PermInventoryEdit Permission = "inventory_edit"
+	PermSourceEdit    Permission = "source_edit" // Quellen und Secret-Zuweisung; nur global, weil Secrets geteilt werden
 	PermRuleEdit      Permission = "rule_edit"
 	PermPresetRun     Permission = "preset_run"
 	PermPresetEdit    Permission = "preset_edit"
@@ -26,7 +27,7 @@ const (
 
 // Global meldet, ob das Recht nur ohne Geltungsbereich vergeben werden darf.
 func (p Permission) Global() bool {
-	return p == PermPresetRun || p == PermPresetEdit || p == PermAdmin
+	return p == PermPresetRun || p == PermPresetEdit || p == PermSourceEdit || p == PermAdmin
 }
 
 // User ist ein Mensch oder ein Dienstkonto. Benutzer werden nie gelöscht, nur deaktiviert.

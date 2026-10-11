@@ -27,5 +27,8 @@ type Step struct {
 	Action          string
 	Params          json.RawMessage
 	ContinueOnError bool
-	Driver          string // Pflicht bei Aktionen für das ganze Gerät auf Geräte oder Gruppen
+	// DeviceLevel: bei Gerät oder Gruppe als Ziel an die Zugangs-Elemente (das Gerät selbst)
+	// statt an alle übrigen Elemente; dann ist Driver Pflicht.
+	DeviceLevel bool
+	Driver      string // Filter auf Quellen dieses Treibers
 }

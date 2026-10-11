@@ -7,6 +7,7 @@ SQL-Migrationen für PostgreSQL ≥ 18 im Format von [goose](https://github.com/
 | `00001_init.sql` | **generiert** aus `schema/monika.dbml` mit `make db-generate` – nicht von Hand ändern |
 | `00002_finding_active_uq.sql` | handgeschrieben: Teilindex, den DBML nicht ausdrücken kann |
 | `00003_element_source_external_uq.sql` | handgeschrieben: Index mit `NULLS NOT DISTINCT`, den DBML nicht ausdrücken kann |
+| `00004_reporting.sql` | handgeschrieben: Schema `reporting` mit lesenden Views für externe Werkzeuge; DBML kennt keine Views |
 
 Prüfen: `make db-validate` spielt alle Migrationen in eine frische PostgreSQL in Docker ein.
 
