@@ -144,7 +144,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
    - `http` (Entscheidung vom 2026-10-12: zuerst, weil ohne Gerät von Ende zu Ende testbar; Vertrag `drivers/http/README.md`):
      - ~~A Aufrufe, Parameter, Vorlagen, Health-Check, Fakten~~: erledigt
-     - B Anmeldung vor dem Aufruf (`auth`)
+     - ~~B Anmeldung vor dem Aufruf (`auth`)~~: erledigt
      - C Ende-zu-Ende-Test in `cmd/monika`
 
 ## Leistung

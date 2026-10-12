@@ -20,15 +20,17 @@ import (
 
 // source ist eine laufende Quelle: ein Ziel mit seinen Aufrufen.
 type source struct {
-	log     *slog.Logger
-	sched   sdk.Scheduler
-	base    *url.URL
-	client  *http.Client
-	timeout time.Duration
-	health  *healthCfg
-	secret  secretValue
-	calls   map[string]*call
-	order   []*call
+	log        *slog.Logger
+	sched      sdk.Scheduler
+	base       *url.URL
+	client     *http.Client
+	timeout    time.Duration
+	health     *healthCfg
+	secret     secretValue
+	auth       *authenticator // nil ohne auth
+	retryLogin time.Duration  // login on_start: Abstand neuer Versuche
+	calls      map[string]*call
+	order      []*call
 
 	observed chan observation // Fakten aus Execute an die Goroutine von Run
 	checked  chan error       // Ergebnis des Health-Checks an die Goroutine von Run
@@ -62,13 +64,20 @@ func newSource(cfg sdk.SourceConfig) (sdk.Source, error) {
 			return nil, errors.New("secret: want a JSON object with username, password and headers") // ohne den Inhalt
 		}
 	}
+	var auth *authenticator
+	if c.Auth != nil {
+		auth = &authenticator{cfg: c.Auth, values: secretValues(cfg.Secret)}
+		if err := c.Auth.check(auth.values); err != nil {
+			return nil, fmt.Errorf("auth: %w", err)
+		}
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if c.InsecureSkipVerify {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // vom User gewählt, für selbst signierte Zertifikate
 	}
 	s := &source{
 		log: cfg.Logger, sched: cfg.Scheduler, base: base, timeout: time.Duration(c.TimeoutS * float64(time.Second)),
-		health: c.Health, secret: sec, calls: map[string]*call{}, order: calls,
+		health: c.Health, secret: sec, auth: auth, retryLogin: loginRetry, calls: map[string]*call{}, order: calls,
 		client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse // Weiterleitungen nicht verfolgen
 		}},
@@ -107,6 +116,9 @@ func (s *source) Run(ctx context.Context, r sdk.Reporter) error {
 		r.Snapshot(s.snapshot(facts))
 		connected = true
 	}
+	if s.auth != nil && s.auth.cfg.Login == "on_start" && !s.loginAtStart(ctx, r) {
+		return nil
+	}
 	if s.health == nil {
 		connect()
 	} else {
@@ -132,6 +144,36 @@ func (s *source) Run(ctx context.Context, r sdk.Reporter) error {
 			if connected {
 				r.Update(sdk.Update{Facts: map[string]sdk.Facts{o.id: o.facts}})
 			}
+		}
+	}
+}
+
+// loginAtStart meldet sich vor dem ersten Aufruf an (login: on_start). Scheitert es, meldet es
+// einmal Disconnected und versucht es im Takt des Health-Checks bzw. alle 10 s erneut; false,
+// wenn ctx vorher endet.
+func (s *source) loginAtStart(ctx context.Context, r sdk.Reporter) bool {
+	every := s.retryLogin
+	if s.health != nil {
+		every = s.Heartbeat()
+	}
+	reported := false
+	for {
+		_, gen := s.auth.current()
+		lctx, cancel := context.WithTimeout(ctx, s.timeout)
+		_, err := s.auth.refresh(lctx, gen, s.login)
+		cancel()
+		if err == nil {
+			return true
+		}
+		if !reported {
+			s.log.Warn("login failed", "err", err)
+			r.Disconnected(err)
+			reported = true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(every):
 		}
 	}
 }
@@ -197,7 +239,11 @@ func (s *source) Execute(ctx context.Context, cmd sdk.Command) (sdk.Result, erro
 	start := time.Now()
 	res, err := s.send(ctx, func(ctx context.Context) (*http.Request, error) { return s.request(ctx, c, values) })
 	s.observe(c.ID, start, time.Since(start), res.status)
+	var authErr *authError
 	switch {
+	case errors.As(err, &authErr):
+		resp, _ := json.Marshal(map[string]any{"status": authErr.status, "auth": true}) // ohne Body der Anmeldung
+		return sdk.Result{Status: sdk.Rejected, Detail: authErr.Error(), Response: resp}, nil
 	case err != nil:
 		return sdk.Result{}, err
 	case ok(res.status):
@@ -261,33 +307,64 @@ type response struct {
 	body   string
 }
 
-// send sendet eine Anfrage mit den Zugangsdaten des Secrets. build baut sie (für eine
-// Wiederholung erneut); ein Fehler heißt: keine Antwort.
+// send sendet eine Anfrage mit den Zugangsdaten des Secrets bzw. dem Token der Anmeldung. build
+// baut sie, für eine Wiederholung erneut. Antwortet das Ziel mit einem Status aus retry_on, meldet
+// sich send an und wiederholt genau einmal; scheitert die Anmeldung, kommt die erste Antwort mit
+// dem Fehler zurück. Ein anderer Fehler heißt: keine Antwort.
 func (s *source) send(ctx context.Context, build func(context.Context) (*http.Request, error)) (response, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+	var token string
+	var gen uint64
+	if s.auth != nil {
+		token, gen = s.auth.current()
+	}
+	res, err := s.sendOnce(ctx, build, token)
+	if err != nil || s.auth == nil || !s.auth.retry(res.status) {
+		return res, err
+	}
+	token, err = s.auth.refresh(ctx, gen, s.login)
+	if err != nil {
+		return res, err
+	}
+	return s.sendOnce(ctx, build, token)
+}
+
+func (s *source) sendOnce(ctx context.Context, build func(context.Context) (*http.Request, error), token string) (response, error) {
 	req, err := build(ctx)
 	if err != nil {
 		return response{}, err
 	}
-	if s.secret.Username != "" || s.secret.Password != "" {
+	if s.auth == nil && (s.secret.Username != "" || s.secret.Password != "") {
 		req.SetBasicAuth(s.secret.Username, s.secret.Password)
 	}
 	for k, v := range s.secret.Headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := s.client.Do(req)
+	if s.auth != nil {
+		s.auth.apply(req, token)
+	}
+	resp, err := s.do(req)
 	if err != nil {
-		// *url.Error nennt die ganze URL, samt Passwort, falls eins in der Adresse steht.
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err
-		}
-		return response{}, fmt.Errorf("%s %s: %w", req.Method, req.URL.Redacted(), err)
+		return response{}, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) // Rest verwerfen, Verbindung wiederverwenden
 	return response{status: resp.StatusCode, body: string(bytes.ToValidUTF8(b, []byte("�")))}, nil
+}
+
+// do sendet eine fertige Anfrage. Fehler nennen die URL ohne Passwort; *url.Error nennt sie
+// sonst ganz, falls eins in der Adresse steht.
+func (s *source) do(req *http.Request) (*http.Response, error) {
+	resp, err := s.client.Do(req)
+	if err != nil {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("%s %s: %w", req.Method, req.URL.Redacted(), err)
+	}
+	return resp, nil
 }
 
 func ok(status int) bool { return status >= 200 && status < 300 }

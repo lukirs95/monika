@@ -29,6 +29,39 @@ const configSchema = `{
         "interval_s": {"type": "integer", "minimum": 1, "maximum": 3600}
       }
     },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "token", "apply"],
+      "properties": {
+        "login": {"enum": ["on_demand", "on_start"]},
+        "method": {"enum": ["GET", "POST", "PUT"]},
+        "path": {"type": "string", "pattern": "^/[^?]*$"},
+        "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+        "body": {"type": "string"},
+        "token": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from"],
+          "properties": {
+            "from": {"enum": ["cookie", "header", "json"]},
+            "name": {"type": "string", "minLength": 1},
+            "pointer": {"type": "string"}
+          }
+        },
+        "apply": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["as", "name"],
+          "properties": {
+            "as": {"enum": ["cookie", "header"]},
+            "name": {"type": "string", "minLength": 1},
+            "format": {"type": "string"}
+          }
+        },
+        "retry_on": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 400, "maximum": 599}}
+      }
+    },
     "calls": {
       "type": "array",
       "minItems": 1,
@@ -68,7 +101,8 @@ const configSchema = `{
 
 const (
 	defaultTimeout  = 10 * time.Second
-	maxResponseBody = 4 << 10 // Body eines abgelehnten Aufrufs in der Antwort des Laufs
+	loginRetry      = 10 * time.Second // login on_start ohne Health-Check: so oft erneut anmelden
+	maxResponseBody = 4 << 10          // Body eines abgelehnten Aufrufs in der Antwort des Laufs
 )
 
 // config ist device_source.config.
@@ -76,6 +110,7 @@ type config struct {
 	TimeoutS           float64      `json:"timeout_s"`
 	InsecureSkipVerify bool         `json:"insecure_skip_verify"`
 	Health             *healthCfg   `json:"health"`
+	Auth               *authCfg     `json:"auth"`
 	Calls              []callConfig `json:"calls"`
 }
 
@@ -141,6 +176,11 @@ func parseConfig(raw json.RawMessage) (config, []*call, error) {
 			continue
 		}
 		calls = append(calls, cl)
+	}
+	if c.Auth != nil {
+		if err := c.Auth.compile(); err != nil {
+			errs = append(errs, fmt.Errorf("auth: %w", err))
+		}
 	}
 	return c, calls, errors.Join(errs...)
 }
