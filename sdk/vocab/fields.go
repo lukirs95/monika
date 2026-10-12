@@ -71,6 +71,7 @@ var fields = []Field{
 	st("aes3", "valid", Bool), co("aes3", "crc_errors"),
 
 	st("ethernet", "link_up", Bool), ga("ethernet", "speed_mbps", Float),
+	ga("ethernet", "rx_mbps", Float), ga("ethernet", "tx_mbps", Float),
 	co("ethernet", "rx_bytes"), co("ethernet", "tx_bytes"), co("ethernet", "rx_packets"), co("ethernet", "tx_packets"),
 	co("ethernet", "rx_errors"), co("ethernet", "tx_errors"), co("ethernet", "rx_discards"), co("ethernet", "tx_discards"),
 

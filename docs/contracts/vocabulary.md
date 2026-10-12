@@ -203,6 +203,7 @@ Generische UI, Sammelaktionen und Gruppenregeln über Hersteller und Transporte 
 | | `crc_errors` | int | counter | CRC-Fehler im Channel-Status-Block | AES3 |
 | `ethernet` | `link_up` | bool | status | Link aktiv | |
 | | `speed_mbps` | float | gauge | ausgehandelte Geschwindigkeit | |
+| | `rx_mbps`, `tx_mbps` | float | gauge | gemessener Durchsatz | |
 | | `rx_bytes`, `tx_bytes` | int | counter | empfangene bzw. gesendete Bytes | |
 | | `rx_packets`, `tx_packets` | int | counter | empfangene bzw. gesendete Pakete | |
 | | `rx_errors`, `tx_errors` | int | counter | Empfangsfehler inkl. FCS bzw. Sendefehler | |

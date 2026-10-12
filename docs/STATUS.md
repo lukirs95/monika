@@ -81,7 +81,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 ## Nächste Schritte
 
 0. ~~**Beschreibung vervollständigen**~~: für Phase 1 (Backend) abgeschlossen am 2026-10-11. Phase 2 (UI) bekommt nach dem Backend eine eigene Beschreibung (`docs/ARCHITECTURE.md` Abschnitt 1).
-   - **Treiber für Phase 1**, jeder mit eigenem Vertrag (`drivers/<name>/README.md`) vor dem Code: `videoxlink` (Vertrag offen), `http` (Vertrag offen), `embrionix` (Vertrag offen), `ravio` (Vertrag offen).
+   - **Treiber für Phase 1**, jeder mit eigenem Vertrag (`drivers/<name>/README.md`) vor dem Code: `videoxlink` (Vertrag abgestimmt am 2026-10-12), `http` (Vertrag abgestimmt am 2026-10-12), `embrionix` (Vertrag offen), `ravio` (Vertrag offen).
 1. **Verträge** in `docs/contracts/` (Mermaid), bevor weiterer Code außerhalb des Stores entsteht:
    1. ~~Treiber-SDK~~: abgestimmt am 2026-10-09, `docs/contracts/sdk.md`
    2. ~~Core-Komponenten~~: abgestimmt am 2026-10-09, `docs/contracts/core.md`
@@ -146,6 +146,11 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
      - ~~A Aufrufe, Parameter, Vorlagen, Health-Check, Fakten~~: erledigt
      - ~~B Anmeldung vor dem Aufruf (`auth`)~~: erledigt
      - ~~C Ende-zu-Ende-Test in `cmd/monika`~~: erledigt; Anmeldung samt TOTP, Gerät, Secret und Quelle über die API, Quelle Live, `trigger` mit Anmeldung am Ziel, Regel auf `call.ok` verletzt und erfüllt, abgelaufener Token erneuert
+   - `videoxlink` (Vertrag `drivers/videoxlink/README.md`, `goxlinkclient/v4` v4.0.1; Entscheidungen vom 2026-10-12: Links zu anderen Geräten nur über Stellvertreter, Temperaturen als `sensor`, `ethernet.rx_mbps`/`tx_mbps` im Vokabular, `reset_counters` statt `videoxlink.reset_stats`, Trunk-Start/-Stopp kritisch, `external_id` der Units ohne System-ID, Einstellungen zunächst nur Codec, Bitrate und 2110-Streams):
+     - A Abbildung `System`/`Stats` → Elemente, Links, Fakten, Alarme (reine Funktionen, table-driven)
+     - B `Run` mit Neuverbinden, Attrappe des Geräts (WebSocket/JSON-RPC), `sdktest.Conformance`
+     - C `Execute` (Aktionen, `set`, Übersetzung abgelehnter Felder)
+     - später: `reboot`/`shutdown` und Audio-Einstellungen, sobald `goxlinkclient` sie liefert
 
 ## Leistung
 

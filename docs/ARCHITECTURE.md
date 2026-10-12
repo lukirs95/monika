@@ -571,7 +571,7 @@ Unterstützte Befehle stehen pro Element in `element.actions` (z. B. `{start, st
 {
   "codec.bitrate_mbps":              { "type": "float", "min": 1, "max": 100 },
   "codec.format":                    { "type": "enum",  "values": ["H264", "HEVC", "VC5"] },
-  "videoxlink.video2110_interface":  { "type": "enum",  "values": ["eth6", "eth7"] },
+  "videoxlink.interface":            { "type": "enum",  "values": ["eth6", "eth7", "none"] },
   "ptp.domain":                      { "type": "int",   "min": 0, "max": 127, "critical": true }
 }
 ```
@@ -653,7 +653,7 @@ Die meisten Geräte haben keine eigenen Presets. Produktionen brauchen aber z. B
 Preset „Produktion XY – 25 Mbit“
   Stufe 1                  Gruppe „REMI Encoder“   stop
   Stufe 2                  Gruppe „REMI Encoder“   set {"codec.bitrate_mbps": 25, "codec.format": "HEVC"}
-                           L1 / D2                 set {"videoxlink.video2110_interface": "eth7"}
+                           L1 / D2 / Video 2110    set {"videoxlink.interface": "eth7"}
   Stufe 3  delay 5000 ms   Gruppe „REMI Encoder“   start
 ```
 
@@ -992,32 +992,39 @@ Quelle der Daten: `goxlinkclient` (JSON-RPC des Web-Frontends; `System`-Snapshot
 
 ```
 X8A1111                   device                (Name = Label des Users)
-└─ XLink-API              access                VideoXLink X8 R2 · FW 1.8.4 · xlink:X8A1111 · system.temperature_c, videoxlink.needs_reboot · reboot
+└─ XLink-API              access                VideoXLink X8 · FW 1.8.4 · xlink:X8A1111 · system.cpu_percent, system.licenses_used, videoxlink.needs_reboot
+   ├─ CPU, System         sensor                system.temperature_c
    ├─ SDI 1–8             port · sdi · bidir
    ├─ eth0–eth7           network_interface        (eth6/7 2110-fähig)
-   ├─ PTP                 clock
+   ├─ PTP                 clock · ptp
    ├─ E1                  sender · xlink        ──uses──▶  SDI 3
-   │                                            ──feeds─▶  xlink:X8A2222-D2   (anderes Gerät)
+   │                                            ──uses──▶  Peer X8A2222
+   │                                            ──feeds─▶  Peer X8A2222 / X8A2222-D2
    ├─ D2                  receiver · xlink      ──feeds─▶  SDI 5
+   │                                            ◀─feeds──  Peer X8A9001 / X8A9001-E1
    │  ├─ Video 2110       sender · st2110-20    ──uses──▶  eth6
    │  └─ Audio 2110       sender · st2110-30    ──uses──▶  eth6
    ├─ srtE1               sender · srt
    ├─ NdiD1               receiver · ndi
-   ├─ L2S1                tunnel                ──uses──▶  eth2
-   └─ Peer X8A9001        peer                  state.connected, stream.rtt_ms, videoxlink.p2p   ──represents─▶  xlink:X8A9001
-      └─ X8A9001-E1       sender · xlink        Stellvertreter        ──represents─▶  xlink:X8A9001-E1
+   ├─ L2S1                tunnel · xlink        ──uses──▶  eth2
+   ├─ Peer X8A9001        peer                  state.connected, stream.rtt_ms, videoxlink.p2p   ──represents─▶  xlink:X8A9001
+   │  └─ X8A9001-E1       sender · xlink        Stellvertreter        ──represents─▶  xlink:X8A9001-E1
+   └─ Peer X8A2222        peer                                                                    ──represents─▶  xlink:X8A2222
+      └─ X8A2222-D2       receiver · xlink      Stellvertreter        ──represents─▶  xlink:X8A2222-D2
 ```
+
+Jede Quelle verlinkt nur in ihren eigenen Baum; Links zu einem anderen Gerät laufen über dessen Stellvertreter, den Bezug zum Original stellt `represents` her (Abschnitt 7). Vollständig: `drivers/videoxlink/README.md`.
 
 | Thema | Umsetzung |
 |---|---|
-| Fakten | `state.running`, `state.signal_present`, `video.*`, `codec.bitrate_mbps` an den Units, `state.connected`, `stream.rtt_ms` am Peer; Werte für das ganze Gerät (`system.temperature_c`, `system.licenses_used`, `videoxlink.needs_reboot`) am Zugangs-Element |
+| Fakten | `state.running`, `state.signal_present`, `video.*`, `codec.bitrate_mbps` an den Units, `state.connected`, `stream.rtt_ms` am Peer; Werte für das ganze Gerät (`system.cpu_percent`, `system.licenses_used`, `videoxlink.needs_reboot`) am Zugangs-Element, Temperaturen an je einem `sensor` |
 | Identität | Modell und Firmware aus Sicht der XLink-Quelle (`device_source`); `global_ref` des Geräts am Zugang (`xlink:<UnitID>`) |
 | Gerätealarme | SRT-`Error` |
 | Abgeleitete Alarme | über Regeln (PTP-Sync, Temperaturen, Lizenzen, `videoxlink.needs_reboot`) |
-| Befehle | `start`, `stop`, `videoxlink.reset_stats`, `videoxlink.reset_video_buffer`, `videoxlink.flush_audio` |
-| Einstellungen | Bitrate, Codec, 2110-Interface und -Adressen, … |
+| Befehle | `start`, `stop`, `reset_counters`, `videoxlink.reset_video_buffer`, `videoxlink.flush_audio`; `reboot` folgt, sobald `goxlinkclient` ihn kann |
+| Einstellungen | Bitrate, Codec, 2110-Interface und -Adressen |
 | Ausgeschlossen | `DecoderSender` (ändert `feeds`) |
-| Kritisch (Beispiel) | Reboot, Änderungen an PTP und Referenztakt; Management-Adresse und Zugangsdaten werden nie angeboten |
+| Kritisch (Beispiel) | Reboot, Start und Stopp von Trunks; Management-Adresse und Zugangsdaten werden nie angeboten |
 | Fallstrick | Start vor Verbindungsaufbau oder ohne Decoder-Lizenz wird angenommen, wirkt aber nicht → `unconfirmed` |
 
 ---
