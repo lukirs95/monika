@@ -1,0 +1,5 @@
+# Reverse-Proxy mit automatischem TLS (docs/OPERATIONS.md). Caddy setzt X-Forwarded-For und
+# reicht Server-Sent Events ohne Puffer durch; keine Kompression, damit Ereignisse sofort ankommen.
+{$MONIKA_DOMAIN} {
+	reverse_proxy monika:8080
+}

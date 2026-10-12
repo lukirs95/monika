@@ -6,7 +6,7 @@ Wie Monika ausgeliefert, betrieben, gesichert und aktualisiert wird. Konfigurati
 
 - **Ein statisches Binary** (`CGO_ENABLED=0`) für `linux/amd64` und `linux/arm64`.
 - **Container-Image** auf Basis von `distroless/static` (ohne Shell und Paketmanager), Benutzer ohne Root-Rechte, nur lesbares Dateisystem.
-- `make image` baut das Binary **lokal** und kopiert es ins Image. Go wird auch für Releases nie in Docker gebaut (`CLAUDE.md`).
+- `make image` baut das Binary **lokal** und kopiert es ins Image (`deploy/Dockerfile`). Go wird auch für Releases nie in Docker gebaut (`CLAUDE.md`). Architektur über `ARCH=amd64|arm64`, Name über `IMAGE=…`; die Version setzt `make` aus `git describe`. `make build` baut das Binary `bin/monika` für das eigene System.
 - **Healthcheck:** `monika -healthcheck` fragt `GET /healthz` auf der eigenen Adresse ab und endet mit `0` (gesund) oder `1`. Das Image hat kein `curl`; Docker ruft dafür das Binary selbst auf. Neben `-version` ist das das einzige Flag.
 
 ## Stack für den Produktivbetrieb
@@ -24,6 +24,7 @@ Wie Monika ausgeliefert, betrieben, gesichert und aktualisiert wird. Konfigurati
 - **Grafana** ist nicht im Stack: Es ist ein Werkzeug, das Monika nutzt, kein Teil davon. Es liest InfluxDB und das Schema `reporting` in PostgreSQL (Rolle `monika_reporting`).
 - `MONIKA_TRUSTED_PROXIES` enthält das Netz des Stacks, damit Monika die echte IP des Clients sieht.
 - **`.env.example`** im Projektstamm listet alle Variablen aus `ARCHITECTURE.md` Abschnitt 14 mit Standardwerten und Kommentaren; die echte `.env` gehört nicht ins Git und hat Rechte `600`.
+- **Einrichten:** `.env.example` nach `deploy/.env` kopieren und ausfüllen; `docker compose -f deploy/compose.prod.yaml up -d`. Die `deploy/.env` liefert die Variablen für Monika (`env_file`) und die Werte des Stacks (`STACK_DOMAIN`, `STACK_POSTGRES_PASSWORD`, `STACK_INFLUX_PASSWORD` mit mindestens 8 Zeichen, `STACK_IMAGE`). Werte des Stacks heißen bewusst nicht `MONIKA_*`: Monika bricht bei unbekannten `MONIKA_*`-Variablen ab. Die Verbindungen zu PostgreSQL und InfluxDB sowie `MONIKA_TRUSTED_PROXIES` (Netz des Stacks) setzt der Stack selbst; `MONIKA_INFLUX_TOKEN` richtet beim ersten Start auch InfluxDB ein.
 
 ## Netzwerk
 
@@ -43,7 +44,7 @@ Der Host muss per **NTP synchron** laufen. TOTP verträgt nur ±30 s Abweichung,
 | `monika_reporting` | liest nur das Schema `reporting` (Grafana, Reporting, Skripte) |
 | `monika_backup` | liest alles für `pg_dump`, schreibt nichts |
 
-Die Migrationen legen das Schema `reporting` und seine Views an, nicht die Rollen; Rollen und Passwörter richtet der Betreiber einmal ein (Beispiel-Skript in `deploy/`).
+Die Migrationen legen das Schema `reporting` und seine Views an, nicht die Rollen; Rollen und Passwörter richtet der Betreiber einmal ein: `deploy/roles.sql` (nach dem ersten Start, `psql … -v reporting_password=… -v backup_password=… -f deploy/roles.sql`).
 
 **`monika_reporting` sieht alles.** Die Views kennen Monikas Rechte nicht; wer Grafana bzw. diese Rolle nutzt, sieht alle Namen und Befunde. Das ist bewusst so (Zeilenrechte in PostgreSQL nach Monikas Rechtemodell wären viel Aufwand für wenig Nutzen). Zugang dazu bekommt nur, wer in Monika auch global `view` hätte.
 

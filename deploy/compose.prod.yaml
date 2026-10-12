@@ -1,0 +1,87 @@
+# Produktivbetrieb (docs/OPERATIONS.md): Monika, PostgreSQL, InfluxDB und Caddy.
+#
+#   cp .env.example deploy/.env && chmod 600 deploy/.env   # ausfüllen
+#   docker compose -f deploy/compose.prod.yaml up -d
+#
+# Die Datei deploy/.env liefert die Variablen für Monika und die Werte, die dieser Stack
+# einsetzt (STACK_*). Die Verbindungen zu PostgreSQL und InfluxDB setzt der Stack selbst.
+name: monika
+
+services:
+  monika:
+    image: ${STACK_IMAGE:-monika:latest}
+    env_file: .env
+    environment:
+      MONIKA_DATABASE_URL: postgres://monika:${STACK_POSTGRES_PASSWORD:?}@postgres:5432/monika?sslmode=disable
+      MONIKA_INFLUX_URL: http://influxdb:8086
+      MONIKA_INFLUX_ORG: monika
+      MONIKA_INFLUX_BUCKET: monika
+      MONIKA_LISTEN: :8080
+      MONIKA_TRUSTED_PROXIES: 172.30.0.0/24
+    read_only: true
+    stop_grace_period: 35s # Herunterfahren in Phasen dauert höchstens 30 s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      influxdb:
+        condition: service_started
+    restart: unless-stopped
+    networks: [monika]
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: monika
+      POSTGRES_PASSWORD: ${STACK_POSTGRES_PASSWORD:?}
+      POSTGRES_DB: monika
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "monika"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks: [monika]
+
+  influxdb:
+    image: influxdb:2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${STACK_INFLUX_PASSWORD:?}
+      DOCKER_INFLUXDB_INIT_ORG: monika
+      DOCKER_INFLUXDB_INIT_BUCKET: monika
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${MONIKA_INFLUX_TOKEN:?}
+    volumes:
+      - influxdb:/var/lib/influxdb2
+    restart: unless-stopped
+    networks: [monika]
+
+  caddy:
+    image: caddy:2
+    environment:
+      MONIKA_DOMAIN: ${STACK_DOMAIN:?}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    networks: [monika]
+
+networks:
+  monika:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24 # = MONIKA_TRUSTED_PROXIES
+
+volumes:
+  postgres:
+  influxdb:
+  caddy-data:
+  caddy-config:

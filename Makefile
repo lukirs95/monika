@@ -28,8 +28,19 @@ help: ## Zeigt diese Hilfe
 # --- Go ----------------------------------------------------------------------
 
 .PHONY: build
-build: ## Baut alle Pakete
+build: ## Baut alle Pakete und das Binary bin/monika für dieses System
 	$(GO) build ./...
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/monika ./cmd/monika
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
+ARCH    ?= $(shell $(GO) env GOARCH)
+IMAGE   ?= monika:$(VERSION)
+
+.PHONY: image
+image: ## Baut das Binary für linux/ARCH lokal und das Image IMAGE daraus (deploy/Dockerfile)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o bin/linux-$(ARCH)/monika ./cmd/monika
+	$(DOCKER) build --platform linux/$(ARCH) --build-arg BINARY=bin/linux-$(ARCH)/monika -f deploy/Dockerfile -t $(IMAGE) .
 
 .PHONY: test
 test: ## Unit-Tests (ohne Docker)
