@@ -39,6 +39,10 @@ type Store interface {
 	// RecordLogin schreibt login bzw. login_failed ins Audit, bei Erfolg auch last_login_at.
 	RecordLogin(ctx context.Context, l Login) error
 
+	// CreateInitialAdmin legt in einer Transaktion Benutzer, Rolle, Rechte und Mitgliedschaft an,
+	// aber nur, wenn es noch keinen Benutzer gibt; sonst false (M8).
+	CreateInitialAdmin(ctx context.Context, u User, r Role, gs []Grant) (bool, error)
+
 	CreateRole(ctx context.Context, actor uuid.UUID, r Role) error
 	UpdateRole(ctx context.Context, actor uuid.UUID, r Role) error
 	// DeleteRole löscht die Rolle samt Rechten und Mitgliedschaften.

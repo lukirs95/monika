@@ -20,14 +20,15 @@ import (
 // memStore ist die Attrappe von Store im Speicher, nur mit dem, was der Service braucht.
 type memStore struct {
 	Store
-	mu       sync.Mutex
-	users    map[uuid.UUID]User
-	sessions map[string]Session // Hash → Sitzung
-	tokens   map[string]Token   // Hash → Token
-	totp     map[uuid.UUID]TOTP
-	recovery map[uuid.UUID][]string
-	logins   []Login
-	touched  []Touch
+	mu        sync.Mutex
+	users     map[uuid.UUID]User
+	sessions  map[string]Session // Hash → Sitzung
+	tokens    map[string]Token   // Hash → Token
+	totp      map[uuid.UUID]TOTP
+	recovery  map[uuid.UUID][]string
+	logins    []Login
+	touched   []Touch
+	authzData Authz
 }
 
 func newMemStore() *memStore {

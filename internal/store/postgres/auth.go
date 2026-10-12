@@ -121,63 +121,101 @@ func (s *Store) DeleteRole(ctx context.Context, actor uuid.UUID, id uuid.UUID) e
 }
 
 func (s *Store) SetGrants(ctx context.Context, actor uuid.UUID, role uuid.UUID, gs []auth.Grant) error {
-	return s.changeRole(ctx, actor, role, func(q *db.Queries) error {
-		if err := q.DeleteGrants(ctx, role); err != nil {
-			return err
-		}
-		params := mapSlice(gs, func(g auth.Grant) db.InsertGrantParams {
-			return db.InsertGrantParams{RoleID: role, Permission: db.Permission(g.Permission), ScopeElementID: nullable(g.ScopeElementID)}
-		})
-		var err error
-		q.InsertGrant(ctx, params).Exec(func(i int, e error) {
-			if err == nil && e != nil {
-				err = fmt.Errorf("insert grant %s: %w", params[i].Permission, e)
-			}
-		})
-		return err
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		return changeRole(ctx, db.New(tx), actor, role, func(q *db.Queries) error { return replaceGrants(ctx, q, role, gs) })
 	})
 }
 
 func (s *Store) SetMembers(ctx context.Context, actor uuid.UUID, role uuid.UUID, users []uuid.UUID) error {
-	return s.changeRole(ctx, actor, role, func(q *db.Queries) error {
-		if err := q.DeleteManualMembersExcept(ctx, db.DeleteManualMembersExceptParams{RoleID: role, KeepUserIds: users}); err != nil {
-			return err
-		}
-		params := mapSlice(users, func(u uuid.UUID) db.InsertManualMemberParams {
-			return db.InsertManualMemberParams{RoleID: role, UserID: u}
-		})
-		var err error
-		q.InsertManualMember(ctx, params).Exec(func(i int, e error) {
-			if err == nil && e != nil {
-				err = fmt.Errorf("insert member %s: %w", params[i].UserID, e)
-			}
-		})
-		return err
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		return changeRole(ctx, db.New(tx), actor, role, func(q *db.Queries) error { return replaceMembers(ctx, q, role, users) })
 	})
 }
 
-// changeRole führt eine Änderung an Rechten oder Mitgliedern einer Rolle in einer Transaktion aus
-// und schreibt den Audit-Eintrag mit dem Stand der Rolle vorher und nachher.
-func (s *Store) changeRole(ctx context.Context, actor, role uuid.UUID, change func(q *db.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+// CreateInitialAdmin legt in einer Transaktion Benutzer, Rolle, Rechte und Mitgliedschaft an, aber
+// nur, wenn es noch keinen Benutzer gibt; sonst false.
+func (s *Store) CreateInitialAdmin(ctx context.Context, u auth.User, r auth.Role, gs []auth.Grant) (bool, error) {
+	created := false
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
-		before, err := q.RoleSnapshot(ctx, role)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return auth.ErrNotFound
+		if _, err := tx.Exec(ctx, `LOCK TABLE app_user IN EXCLUSIVE MODE`); err != nil {
+			return fmt.Errorf("lock users: %w", err)
 		}
-		if err != nil {
+		n, err := q.CountUsers(ctx)
+		if err != nil || n > 0 {
 			return err
 		}
-		if err := change(q); err != nil {
+		if err := q.CreateUser(ctx, db.CreateUserParams{ID: u.ID, Username: u.Username, DisplayName: nullable(u.DisplayName), PasswordHash: nullable(u.PasswordHash)}); err != nil {
+			return fmt.Errorf("create user: %w", err)
+		}
+		if err := q.CreateRole(ctx, db.CreateRoleParams{ID: r.ID, Name: r.Name, Description: nullable(r.Description)}); err != nil {
+			return fmt.Errorf("create role: %w", err)
+		}
+		if err := changeRole(ctx, q, uuid.Nil, r.ID, func(q *db.Queries) error {
+			if err := replaceGrants(ctx, q, r.ID, gs); err != nil {
+				return err
+			}
+			return replaceMembers(ctx, q, r.ID, []uuid.UUID{u.ID})
+		}); err != nil {
 			return err
 		}
-		after, err := q.RoleSnapshot(ctx, role)
-		if err != nil {
-			return err
+		created = true
+		return nil
+	})
+	return created, err
+}
+
+func replaceGrants(ctx context.Context, q *db.Queries, role uuid.UUID, gs []auth.Grant) error {
+	if err := q.DeleteGrants(ctx, role); err != nil {
+		return err
+	}
+	params := mapSlice(gs, func(g auth.Grant) db.InsertGrantParams {
+		return db.InsertGrantParams{RoleID: role, Permission: db.Permission(g.Permission), ScopeElementID: nullable(g.ScopeElementID)}
+	})
+	var err error
+	q.InsertGrant(ctx, params).Exec(func(i int, e error) {
+		if err == nil && e != nil {
+			err = fmt.Errorf("insert grant %s: %w", params[i].Permission, e)
 		}
-		return q.InsertAuditEntry(ctx, db.InsertAuditEntryParams{
-			ActorID: nullable(actor), Verb: "update", ObjectType: "role", ObjectID: role, Before: before, After: after,
-		})
+	})
+	return err
+}
+
+func replaceMembers(ctx context.Context, q *db.Queries, role uuid.UUID, users []uuid.UUID) error {
+	if err := q.DeleteManualMembersExcept(ctx, db.DeleteManualMembersExceptParams{RoleID: role, KeepUserIds: users}); err != nil {
+		return err
+	}
+	params := mapSlice(users, func(u uuid.UUID) db.InsertManualMemberParams {
+		return db.InsertManualMemberParams{RoleID: role, UserID: u}
+	})
+	var err error
+	q.InsertManualMember(ctx, params).Exec(func(i int, e error) {
+		if err == nil && e != nil {
+			err = fmt.Errorf("insert member %s: %w", params[i].UserID, e)
+		}
+	})
+	return err
+}
+
+// changeRole führt eine Änderung an Rechten oder Mitgliedern einer Rolle in der Transaktion von q
+// aus und schreibt den Audit-Eintrag mit dem Stand der Rolle vorher und nachher.
+func changeRole(ctx context.Context, q *db.Queries, actor, role uuid.UUID, change func(q *db.Queries) error) error {
+	before, err := q.RoleSnapshot(ctx, role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return auth.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := change(q); err != nil {
+		return err
+	}
+	after, err := q.RoleSnapshot(ctx, role)
+	if err != nil {
+		return err
+	}
+	return q.InsertAuditEntry(ctx, db.InsertAuditEntryParams{
+		ActorID: nullable(actor), Verb: "update", ObjectType: "role", ObjectID: role, Before: before, After: after,
 	})
 }
 

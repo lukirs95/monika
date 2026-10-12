@@ -87,6 +87,7 @@ type Service struct {
 	seen       map[uuid.UUID]time.Time // Sitzung → letzte Anfrage (Leerlauf)
 	sessions   map[uuid.UUID]time.Time // noch zu schreiben: last_seen_at
 	tokens     map[uuid.UUID]time.Time // noch zu schreiben: last_used_at
+	authz      authz                   // Rollen und Rechte
 }
 
 type challenge struct {

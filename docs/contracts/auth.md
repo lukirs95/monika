@@ -32,13 +32,16 @@ classDiagram
         +ConfirmTOTP(ctx, challenge, code, meta) (IssuedSession, recoveryCodes []string, error)
         +CreateUser(ctx, actor, u NewUser) error
         +UpdateUser(ctx, actor, u User) error
-        +SetPassword(ctx, actor, user ID, password) error
+        +SetPassword(ctx, actor, user ID, password, keepSession ID) error
         +ResetTOTP(ctx, actor, user ID) error
         +CreateRole(ctx, actor, r Role) error
         +SetGrants(ctx, actor, role ID, g []Grant) error
         +SetMembers(ctx, actor, role ID, users []ID) error
         +CreateToken(ctx, actor, user ID, name, readOnly, expires) (plaintext string, error)
         +RevokeToken(ctx, actor, token ID) error
+        +Restore(ctx) error
+        +EnsureAdmin(ctx, username, password) (bool, error)
+        +Run(ctx) error
     }
     class Principal {
         <<struct>>
@@ -94,6 +97,9 @@ classDiagram
 - **Fehler:** `ErrInvalidCredentials` (gleich für unbekannten Namen, falsches Passwort, deaktivierten Benutzer und Dienstkonto), `ThrottledError` mit Wartezeit (`errors.Is(err, ErrThrottled)`), `ErrInvalidChallenge`, `ErrInvalidCode`, `ErrUnauthenticated`. Bei unbekanntem Namen vergleicht `Login` trotzdem gegen einen Hash, damit die Antwortzeit nichts verrät.
 - **Falsche Codes** (TOTP und Wiederherstellung) zählen bei der Begrenzung der Fehlversuche mit; erst eine vollständige Anmeldung setzt sie zurück. Sonst ließe sich mit bekanntem Passwort der Code über viele Challenges durchprobieren.
 - **`Run`** schreibt jede Minute `last_seen_at` und `last_used_at` gesammelt und räumt abgelaufene Challenges auf; beim Stopp ein letztes Mal.
+- **`Allowed`** mit `element = uuid.Nil` fragt ein globales Recht ab; ein Recht mit Geltungsbereich gilt dann nicht. `Restore` lädt Rollen und Rechte beim Start, jede Änderung an Rollen, Rechten oder Mitgliedern lädt sie neu.
+- **`SetPassword`** beendet alle Sitzungen des Benutzers außer `keepSession` (die eigene, wenn er es selbst ändert).
+- **`EnsureAdmin`** (M8) nutzt `Store.CreateInitialAdmin`: Benutzer, Rolle, Rechte und Mitgliedschaft in **einer** Transaktion und nur ohne vorhandene Benutzer, damit ein Abbruch keinen Admin ohne Rechte hinterlässt.
 - **Rollen und Rechte hält `auth` im Speicher** (`LoadAuthz` beim Start, nach jeder Änderung neu). `Allowed` braucht deshalb keine Datenbank, nur die `View` für den Geltungsbereich.
 
 ## Anmeldung mit Passwort und TOTP

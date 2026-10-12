@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,15 @@ const (
 	PermPresetEdit    Permission = "preset_edit"
 	PermAdmin         Permission = "admin"
 )
+
+// Permissions sind alle Rechte; jedes steht für sich (M1).
+var Permissions = []Permission{
+	PermView, PermAcknowledge, PermOperate, PermConfigure, PermCritical, PermInventoryEdit,
+	PermSourceEdit, PermRuleEdit, PermPresetRun, PermPresetEdit, PermAdmin,
+}
+
+// Valid meldet, ob es das Recht gibt.
+func (p Permission) Valid() bool { return slices.Contains(Permissions, p) }
 
 // Global meldet, ob das Recht nur ohne Geltungsbereich vergeben werden darf.
 func (p Permission) Global() bool {

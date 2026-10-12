@@ -170,3 +170,29 @@ func TestRolesAndGrants(t *testing.T) {
 		t.Fatalf("SetGrants on deleted role = %v, want ErrNotFound", err)
 	}
 }
+
+func TestCreateInitialAdmin(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	s := postgres.New(pool)
+	admin := auth.User{ID: newID(), Username: "admin", PasswordHash: "$argon2id$x"}
+	role := auth.Role{ID: newID(), Name: "Administratoren"}
+	grants := []auth.Grant{{Permission: auth.PermAdmin}, {Permission: auth.PermView}}
+
+	created, err := s.CreateInitialAdmin(ctx, admin, role, grants)
+	if err != nil || !created {
+		t.Fatalf("CreateInitialAdmin = %v, %v", created, err)
+	}
+	authz, err := s.LoadAuthz(ctx)
+	if err != nil || len(authz.Roles) != 1 || len(authz.Grants) != 2 || len(authz.Members) != 1 || authz.Members[0].UserID != admin.ID {
+		t.Fatalf("authz = %+v, %v", authz, err)
+	}
+	again, err := s.CreateInitialAdmin(ctx, auth.User{ID: newID(), Username: "other"}, auth.Role{ID: newID(), Name: "x"}, nil)
+	if err != nil || again {
+		t.Errorf("second CreateInitialAdmin = %v, %v; want false", again, err)
+	}
+	if n, _ := s.CountUsers(ctx); n != 1 {
+		t.Errorf("users = %d", n)
+	}
+}
