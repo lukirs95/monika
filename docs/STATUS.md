@@ -3,7 +3,7 @@
 Zwischenstand der Implementierung, damit die Arbeit in einer neuen Sitzung nahtlos weitergeht.
 Zu Beginn einer Sitzung lesen, am Ende aktualisieren.
 
-Stand: 2026-10-11
+Stand: 2026-10-12
 
 ## Erledigt
 
@@ -120,7 +120,15 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~10a Zugangsdaten~~ (argon2id, API- und Sitzungs-Tokens, TOTP nach RFC 6238, Wiederherstellungscodes, Begrenzung der Fehlversuche): erledigt
       - ~~10b Anmeldung und Sitzungen~~ (`Login`, `VerifyTOTP`, Einrichtung, `Authenticate`, `AuthenticateToken`, `KioskLogin`, `Logout`, Aktivität gesammelt; `IssuedSession`): erledigt
       - ~~10c Rechte und Verwaltung, initialer Admin~~ (`Allowed` mit Rechten im Speicher, Benutzer, Rollen, Rechte, Tokens, `EnsureAdmin` über `CreateInitialAdmin` in einer Transaktion): erledigt
-   11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`)
+   11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`); Entscheidungen E1–E8 vom 2026-10-12 in `api.md` (`go tool oapi-codegen`, `ServeMux`, Prüfung gegen die Spezifikation mit `400 invalid_request`, `resync` bei geänderten Rechten, Anmeldung alle 60 s prüfen ohne Aktivität, Nutzdaten aus der aktuellen View, Keepalive 30 s, Sichtbarkeit im Verlauf per ID-Array in SQL):
+      - ~~11a Lücken vor der API~~: erledigt; Konflikte aus der Datenbank sind fachliche Fehler (`ErrSourceExists`, `ErrMemberExists`, `ErrSecretNotFound`) statt Störung der Datenbank, `SourceStatus.Since`, `auth.CheckSession`/`CheckToken` und `AuthzVersion`
+      - 11b Code-Erzeugung, Problem Details, Middleware (Anmeldung, Origin, `read_only`, Prüfung), Server mit Platzhaltern
+      - 11c Anmeldung, eigene Sitzungen und Passwort, `/auth/me`, `/healthz`
+      - 11d Sichtbarkeit und Gerüst: `/state`, Fakten, geltende Regeln, Treiber
+      - 11e Befehle für Inventar, Regeln und Quittierung über `Core.Do`
+      - 11f Läufe, Presets, Weiterleitung, Secrets, Benutzer, Rollen, Tokens
+      - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams`
+      - 11h Verlauf (lesende Queries) und abgeschlossene Läufe in `GET /runs/{id}`
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`)
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
 

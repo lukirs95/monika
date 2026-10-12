@@ -8,7 +8,8 @@ info:
   description: |
     HTTP-API von Monika. Konventionen, Filter und das Abo-Modell stehen in `docs/contracts/api.md`.
     Fehler sind Problem Details (RFC 9457) mit stabilem `code`. Zeitpunkte sind RFC 3339 in UTC,
-    IDs UUIDs, Feldnamen snake_case.
+    IDs UUIDs, Feldnamen snake_case. Jede Anfrage wird gegen diese Spezifikation geprüft; was nicht
+    passt, bekommt 400 mit `code = invalid_request` (nicht bei jedem Endpunkt aufgeführt).
 servers:
   - url: /api/v1
 security:
@@ -1455,7 +1456,7 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
     Conflict:
-      description: Widerspricht dem Stand, z. B. `source_exists`, `member_cycle`, `external_id_taken`
+      description: Widerspricht dem Stand, z. B. `source_exists`, `member_exists`, `member_cycle`, `run_finished`
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -2229,7 +2230,7 @@ components:
         source_id: { type: string, format: uuid }
         state: { type: string, enum: [starting, connecting, live, unreachable, backoff, stopping, stuck, disabled], description: 'nur live wird bewertet' }
         heartbeat_seconds: { type: number, nullable: true, description: 'erwarteter Abstand der Lebenszeichen der laufenden Instanz; 0 = keine Überwachung' }
-        since: { type: string, format: date-time, nullable: true }
+        since: { type: string, format: date-time, nullable: true, description: 'Beginn des aktuellen Zustands' }
         last_error: { type: string, nullable: true }
 
     Facts:

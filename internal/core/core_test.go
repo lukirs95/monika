@@ -51,7 +51,9 @@ func (s *invStore) ApplyDiscovery(_ context.Context, d inventory.Discovery) ([]u
 
 func (s *invStore) CreateDevice(context.Context, uuid.UUID, inventory.Element) error { return nil }
 func (s *invStore) CreateSource(context.Context, uuid.UUID, inventory.Source, uuid.UUID) error {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 func (s *invStore) UpdateSource(context.Context, uuid.UUID, inventory.Source) error { return nil }
 func (s *invStore) DeleteSource(context.Context, uuid.UUID, uuid.UUID) error        { return nil }
@@ -273,6 +275,23 @@ func TestLoopSnapshotAndUpdate(t *testing.T) {
 	r.collect("finding ended", func(e Event) bool { _, ok := e.(FindingEnded); return ok })
 	if got := bytes.Count([]byte(r.logs.String()), []byte("external_id=sdi/9")); got != 1 {
 		t.Errorf("unknown external id logged %d times", got)
+	}
+}
+
+// Since ist der Beginn des aktuellen Zustands: Er wechselt mit dem Zustand, nicht mit jeder Meldung.
+func TestSourceStatusSince(t *testing.T) {
+	r := newRig(t)
+	rep := r.c.Reporter(r.source)
+	before := r.waitView("status", func(v *View) bool { return !v.Sources[r.source].Since.IsZero() }).Sources[r.source]
+	port := r.goLive(rep, 70)
+	live := r.c.View().Sources[r.source]
+	if !live.Since.After(before.Since) {
+		t.Fatalf("since live %v, since %s %v", live.Since, before.State, before.Since)
+	}
+	rep.Update(sdk.Update{Facts: map[string]sdk.Facts{"sdi/1": {"temp": 71.0}}})
+	v := r.waitView("update", func(v *View) bool { return v.Facts[port]["temp"] == 71.0 })
+	if got := v.Sources[r.source]; got.State != StateLive || !got.Since.Equal(live.Since) {
+		t.Errorf("status after update = %s since %v, want live since %v", got.State, got.Since, live.Since)
 	}
 }
 

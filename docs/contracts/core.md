@@ -49,6 +49,7 @@ classDiagram
     class SourceStatus {
         <<struct>>
         +State SourceState
+        +Since time.Time
         +Heartbeat time.Duration
         +LastSeen time.Time
         +Error string
@@ -270,7 +271,7 @@ classDiagram
 | Vergleich | ganze Zahlen exakt als `int64`, sonst `float64`; Fakt und Wert vom falschen Typ: Die Regel gilt nicht |
 | `View.InScope(scope, element)` | = `Graph.InScope`; **die** Auflösung von Geltungsbereichen für Regeln, Rechte, Weiterleitung, Verlauf und Watch: NULL = alles; Element = es selbst und alle Nachfahren über `parent_id`; Gruppe = Mitglieder rekursiv, jeweils mit Nachfahren |
 | `View.EffectiveRules(element)` | = `Rules.EffectiveRules(View, element)`: pro Fakt und Richtung die geltenden (gewinnende Stufe) und die überschriebenen Regeln (für die UI); dieselbe Auswahl verwendet der Evaluator |
-| `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz |
+| `SourceStatus.State` | `starting`, `connecting`, `live`, `backoff`, `unreachable`, `stopping`, `stuck`, `disabled`; aus `Reporter` und Nachrichten des Supervisors. `Heartbeat` ist `Source.Heartbeat()` der laufenden Instanz. `Since` ist der Beginn des aktuellen Zustands (Zeit der Runde, die den Wechsel feststellt), `LastSeen` das letzte Lebenszeichen |
 | `View.DB` | Datenbank erreichbar: letzter Ping **und** letzte Schreibvorgänge erfolgreich, höchstens 5 s alt. Ein kleiner Wächter (eigene Goroutine des Core) pingt alle 5 s mit 2 s Timeout und meldet `DBPing`. Ist er falsch, meldet die API `503` an `GET /healthz` und die UI zeigt ein Banner; `/healthz` liest nur diesen Wert |
 | `View.History` | Zustand des Influx-Schreibers (`influx.md`); nur Anzeige, ohne Wirkung auf `/healthz` |
 | `View.Stats` | Kennzahlen der Schleife, bei jeder Veröffentlichung gesetzt: `LoopLag` (Wartezeit der ältesten Nachricht), `LoopQueue`, `Subscribers`, `SubscribersDropped` und `Events` (beide Zähler seit dem Start). Der Influx-Schreiber schreibt sie mit seinen eigenen und dem Zähler der SSE-Ströme der API in das Measurement `monika` (`docs/OPERATIONS.md`) |
@@ -418,7 +419,7 @@ sequenceDiagram
 - Jeder Befehl ist eine Transaktion im Store **und** ein Schritt der Schleife. Die API sieht nach `Do` die neue `View`.
 - **Befehle sind Structs nur im Core** (`internal/core`), denn nur dort überqueren sie die Grenze zwischen Goroutinen (`Do` → Schleife). Die Schleife übersetzt sie per Typ-Switch in Methoden der Komponenten (`Inventory.DeleteDevice` …); die Komponenten kennen keine Befehlstypen.
 - **Neue IDs vergibt die API** (UUIDv7) und gibt sie im Befehl mit, denn `Do` liefert nur den Fehler. Nur die ID des Zugangs-Elements einer neuen Quelle vergibt das Inventar.
-- Das Inventar prüft Vorbedingungen gegen den Speicher, bevor es den Store aufruft: `ErrNotFound` (unbekannt oder falsche Art), `ErrUnknownDriver`, `ErrNotAGroup`, `ErrMissingID`. Beim Löschen liefert es alle wegfallenden Elemente in `Diff.Deleted` und entfernt ihre Links aus dem Speicher wie die Datenbank per CASCADE.
+- Das Inventar prüft Vorbedingungen gegen den Speicher, bevor es den Store aufruft: `ErrNotFound` (unbekannt oder falsche Art), `ErrUnknownDriver`, `ErrNotAGroup`, `ErrMissingID`. Konflikte, die erst die Datenbank erkennt, übersetzt der Store in fachliche Fehler: `ErrSourceExists` (Gerät hat schon eine Quelle mit dem Treiber), `ErrMemberExists`, `ErrSecretNotFound`, `ErrMemberCycle`, `*InUseError`. Fachliche Fehler gehen an die API zurück; nur andere Fehler gelten als Störung der Datenbank (`View.DB`). Beim Löschen liefert es alle wegfallenden Elemente in `Diff.Deleted` und entfernt ihre Links aus dem Speicher wie die Datenbank per CASCADE.
 - Befehle, die Quellen betreffen (Gerät löschen, Quelle anlegen, ändern oder löschen, Secret ersetzen), beauftragen den Supervisor mit Start bzw. Stopp der Quelle (`sdk.md`, Stoppen). Die Schleife wartet nicht darauf; Start, Stopp, Fehler, Panics und hängende Quellen meldet der Supervisor per `Post` zurück.
 - `ReplaceSecret` schreibt über `secret.Service` und startet danach alle Quellen neu, die das Secret verwenden (aus der `View`). Anlegen und Löschen von Secrets betreffen keine laufende Quelle und gehen direkt an `secret.Service`.
 

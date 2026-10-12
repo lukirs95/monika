@@ -28,9 +28,11 @@ type Store interface {
 	DeleteDevice(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 
 	// CreateSource legt eine Quelle samt Zugangs-Element (ID accessID) an. Ist das Gerät
-	// unbekannt: ErrNotFound.
+	// unbekannt: ErrNotFound; hat es schon eine Quelle mit dem Treiber: ErrSourceExists; ist das
+	// Secret unbekannt: ErrSecretNotFound.
 	CreateSource(ctx context.Context, actor uuid.UUID, s Source, accessID uuid.UUID) error
-	// UpdateSource ändert Adresse, Konfiguration, Secret und Aktivierung einer Quelle.
+	// UpdateSource ändert Adresse, Konfiguration, Secret und Aktivierung einer Quelle. Ist das
+	// Secret unbekannt: ErrSecretNotFound.
 	UpdateSource(ctx context.Context, actor uuid.UUID, s Source) error
 	// DeleteSource löscht eine Quelle hart, mit Zugang, Elementen und Links; sonst wie
 	// DeleteDevice.
@@ -44,7 +46,7 @@ type Store interface {
 	UpdateUserFields(ctx context.Context, actor uuid.UUID, id uuid.UUID, f UserFields) error
 
 	// AddGroupMember nimmt ein Element in eine Gruppe auf (Link vom Typ member).
-	// Würde dadurch ein Zyklus entstehen: ErrMemberCycle.
+	// Würde dadurch ein Zyklus entstehen: ErrMemberCycle; ist es schon Mitglied: ErrMemberExists.
 	AddGroupMember(ctx context.Context, actor uuid.UUID, l Link) error
 	// UpdateGroupMember ändert Position und Label einer Mitgliedschaft.
 	UpdateGroupMember(ctx context.Context, actor uuid.UUID, l Link) error
@@ -56,6 +58,12 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrMemberCycle bedeutet, dass die Mitgliedschaft einen Zyklus zwischen Gruppen schließen würde.
 	ErrMemberCycle = errors.New("member link would create a cycle")
+	// ErrSourceExists bedeutet, dass das Gerät schon eine Quelle mit diesem Treiber hat.
+	ErrSourceExists = errors.New("device already has a source with this driver")
+	// ErrMemberExists bedeutet, dass das Element schon Mitglied der Gruppe ist.
+	ErrMemberExists = errors.New("element is already a member of the group")
+	// ErrSecretNotFound bedeutet, dass das Secret einer Quelle nicht existiert.
+	ErrSecretNotFound = errors.New("secret not found")
 )
 
 // PresetRef verweist auf ein Preset.

@@ -6,7 +6,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/lukirs95/monika/internal/core/inventory"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
@@ -280,7 +282,7 @@ func (s *Store) CreateSource(ctx context.Context, actor uuid.UUID, src inventory
 		SecretID: nullable(src.SecretID),
 		Enabled:  src.Enabled,
 	})
-	return affected(n, err, inventory.ErrNotFound)
+	return affected(n, sourceErr(err), inventory.ErrNotFound)
 }
 
 func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory.Source) error {
@@ -292,7 +294,21 @@ func (s *Store) UpdateSource(ctx context.Context, actor uuid.UUID, src inventory
 		SecretID: nullable(src.SecretID),
 		Enabled:  src.Enabled,
 	})
-	return affected(n, err, inventory.ErrNotFound)
+	return affected(n, sourceErr(err), inventory.ErrNotFound)
+}
+
+// sourceErr übersetzt Verletzungen von Constraints der Quelle in fachliche Fehler.
+func sourceErr(err error) error {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	switch {
+	case !ok:
+		return err
+	case pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == "device_source_device_id_driver_idx":
+		return inventory.ErrSourceExists
+	case pgErr.Code == pgerrcode.ForeignKeyViolation && pgErr.ConstraintName == "device_source_secret_id_fkey":
+		return inventory.ErrSecretNotFound
+	}
+	return err
 }
 
 func (s *Store) CreateGroup(ctx context.Context, actor uuid.UUID, e inventory.Element) error {
@@ -333,6 +349,10 @@ func (s *Store) AddGroupMember(ctx context.Context, actor uuid.UUID, l inventory
 			Position: convert(l.Position, toInt32),
 			Label:    nullable(l.Label),
 		}); err != nil {
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok &&
+				pgErr.Code == pgerrcode.UniqueViolation && pgErr.ConstraintName == "element_link_uq" {
+				return inventory.ErrMemberExists
+			}
 			return fmt.Errorf("create member link: %w", err)
 		}
 		return nil

@@ -1,6 +1,6 @@
 # Vertrag: HTTP-API
 
-**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10. **Spezifikation:** [`api/openapi.yaml`](../../api/openapi.yaml) (OpenAPI 3.0.3). **Hintergrund:** [`auth.md`](auth.md), [`services.md`](services.md) (Zusammenspiel mit der API), [`core.md`](core.md) (`View`, Ereignisse, Abonnenten).
+**Status:** abgestimmt am 2026-10-09, nach dem Architektur-Audit überarbeitet am 2026-10-10, vor der Umsetzung ergänzt am 2026-10-12 (R9, Konflikte, Verteiler). **Spezifikation:** [`api/openapi.yaml`](../../api/openapi.yaml) (OpenAPI 3.0.3). **Hintergrund:** [`auth.md`](auth.md), [`services.md`](services.md) (Zusammenspiel mit der API), [`core.md`](core.md) (`View`, Ereignisse, Abonnenten).
 
 Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket aufrufen, Fehler übersetzen. Sie schreibt nie selbst in einen Store.
 
@@ -9,19 +9,21 @@ Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket au
 | # | Thema | Festlegung |
 |---|---|---|
 | R1 | Format der Spezifikation | OpenAPI **3.0.3** (wegen der Werkzeuge für die Code-Erzeugung) |
-| R2 | Spezifikation und Code | Code wird erzeugt (`oapi-codegen`, strict server): `make api-gen` erzeugt Typen und Server-Interface, die Handler implementieren es. `make api-check` prüft die Spezifikation |
+| R2 | Spezifikation und Code | Code wird erzeugt (`oapi-codegen`, strict server): `make api-gen` erzeugt Typen und Server-Interface, die Handler implementieren es. `make api-check` prüft die Spezifikation. oapi-codegen ist als `tool` in `go.mod` eingetragen (`go tool oapi-codegen`, Version fest, ohne Docker); Router ist der `ServeMux` der Standardbibliothek (`std-http-server`). `/events` liefert ein eigenes Antwortobjekt, das selbst in den Strom schreibt |
 | R3 | Pfad und Version | alles unter `/api/v1/`; inkompatible Änderungen bedeuten `/api/v2/` |
 | R4 | Fehler | RFC 9457 Problem Details (`application/problem+json`) mit stabilem `code`, z. B. `device_in_use`, `invalid_target`, `not_found` |
 | R5 | Verlauf | Cursor-Paginierung über UUIDv7: `?before=<id>&limit=100` (höchstens 500); Filter siehe unten, sie bleiben beim Weiterblättern gleich |
 | R6 | Stand und Live-Push | `GET /state` ohne Fakten; Fakten pro Element bzw. per Abo; Ereignisse per SSE (siehe unten) |
 | R7 | Sichtbarkeit | Ohne `view` fehlen Objekte in Listen; einzelne Objekte antworten mit 404, nicht 403. Ausnahme Gerüst, siehe unten |
 | R8 | Formate | IDs als UUID-Strings; Zeitpunkte RFC 3339 in UTC (`2026-10-09T12:00:00.123Z`); Dauern als Ganzzahl mit Einheit im Namen (`hold_seconds`, `delay_ms`); Feldnamen `snake_case` |
+| R9 | Prüfung der Anfragen | Eine Middleware prüft jede Anfrage gegen die eingebettete Spezifikation (kin-openapi): Pflichtfelder, Typen, Enums, `minLength`, Grenzen. Was nicht passt, bekommt `400` mit `code = invalid_request`, ohne dass es pro Endpunkt in der Spezifikation steht. Fachliche Prüfungen (Regel, Ziele, Konfiguration) bleiben bei den Fachpaketen und antworten mit `422` |
 
 Weitere Regeln:
 
 - **Ändernde Anfragen** (`POST`, `PUT`, `PATCH`, `DELETE`) mit Sitzung prüfen den `Origin`-Header (`auth.md`, A4). Ein `Principal` mit `read_only` bekommt `403` mit `code = read_only`.
 - **Anlegen** liefert `201` mit dem angelegten Objekt; IDs vergibt der Server.
 - **Rechte fehlen** bei sichtbarem Objekt: `403` mit `code = forbidden`.
+- **Konflikte beim Anlegen:** Quelle mit einem Treiber, den das Gerät schon hat: `409 source_exists`; Element schon Mitglied der Gruppe: `409 member_exists`; Zyklus zwischen Gruppen: `409 member_cycle`; unbekanntes Secret an einer Quelle: `422 invalid_secret`.
 
 ## Sichtbarkeit
 
@@ -45,6 +47,8 @@ Ein Gerüst-Element ist kein sichtbares Objekt im Sinne von R7: Einzelabfragen d
 | Läufe | `GET /runs/history` | `element` (+ `recursive`), `status`, `action`, `preset`, `requested_by` |
 
 | Audit | `GET /audit` | `object_type`, `object_id`, `actor` (`monika` für Einträge ohne Akteur), `verb` |
+
+Die Sichtbarkeit filtert die Datenbank, damit jede Seite voll ist und das Blättern stimmt: Die API gibt die IDs der sichtbaren Elemente als Array mit (`element_id = ANY(…)`); mit `view` global entfällt der Filter. Gerüst-Elemente zählen nicht als sichtbar.
 
 Einträge zu gelöschten Elementen bleiben im Verlauf; sie tragen `element_path` (Name beim Entstehen) und `element_deleted = true`. Weil sich ihr Geltungsbereich nicht mehr auflösen lässt, sieht sie nur, wer `view` global hat. Mit `recursive` findet der Filter nur Elemente, die noch existieren.
 
@@ -114,4 +118,8 @@ sequenceDiagram
 
 - Ein Strom beobachtet höchstens 1 000 Elemente; darüber `422` mit `code = watch_limit`.
 - Wird der Verteiler vom Core abgehängt (C6), bekommen alle Ströme `resync`.
+- **Nutzdaten aus der aktuellen View:** Der Verteiler baut die Nutzdaten eines Ereignisses (Elemente, Health, Fakten) aus der View, die er beim Empfang liest; sie ist mindestens so neu wie das Ereignis. Weil Ereignisse einen Stand beschreiben, schadet ein neuerer Stand nicht. Für `links` und `removed_links` vergleicht er die Links des zuletzt verteilten Graphen mit denen des aktuellen, denn `ElementsChanged` meldet nur `LinksChanged`.
+- **Rechte ändern sich:** Jeder Strom filtert nach den Rechten seines Benutzers. Ändert sich `auth.AuthzVersion` (Rollen, Rechte oder Mitglieder geändert), bekommen alle Ströme `resync` und laden den Stand nach den neuen Rechten. Rechte ändern sich selten; das ist einfacher und sicherer als eine Neuberechnung pro Strom.
+- **Anmeldung erneut prüfen:** Alle 60 s prüft jeder Strom seine Sitzung bzw. sein Token (`auth.CheckSession`, `auth.CheckToken`). Gilt sie nicht mehr (abgemeldet, widerrufen, abgelaufen, Benutzer deaktiviert, Leerlauf), endet der Strom. Die Prüfung zählt nicht als Aktivität: Ein offener Tab allein hält eine Sitzung nicht über den Leerlauf hinaus am Leben; `watch` und alle anderen Anfragen zählen.
+- **Keepalive:** Ist 30 s nichts gesendet worden, schickt der Strom einen SSE-Kommentar (`: ping`). Das hält Proxys offen und erkennt tote Verbindungen; jedes Schreiben hat eine Deadline von 30 s (`http.ResponseController`), danach wird getrennt.
 - Ereignistypen im Strom: `hello`, `resync`, `elements_changed`, `facts_changed`, `health_changed`, `finding_raised`, `finding_ended`, `finding_acked`, `finding_cause_changed`, `run_changed`, `source_status_changed`.

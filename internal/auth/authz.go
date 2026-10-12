@@ -41,8 +41,13 @@ func (s *Service) reloadAuthz(ctx context.Context) error {
 	s.mu.Lock()
 	s.authz = z
 	s.mu.Unlock()
+	s.authzVersion.Add(1)
 	return nil
 }
+
+// AuthzVersion zählt die Änderungen an Rollen und Rechten. Ändert sie sich, filtern offene
+// Ereignisströme nach einem anderen Stand der Rechte und laden neu (docs/contracts/api.md).
+func (s *Service) AuthzVersion() uint64 { return s.authzVersion.Load() }
 
 // Allowed meldet, ob der Benutzer das Recht am Element hat (docs/contracts/auth.md): Ein Recht
 // seiner Rollen mit Geltungsbereich S gilt, wenn S leer ist oder das Element umfasst

@@ -25,9 +25,12 @@ classDiagram
         +VerifyTOTP(ctx, challenge, code, meta) (IssuedSession, error)
         +Authenticate(ctx, sessionToken) (Principal, error)
         +AuthenticateToken(ctx, bearer) (Principal, error)
+        +CheckSession(ctx, sessionToken) error
+        +CheckToken(ctx, bearer) error
         +KioskLogin(ctx, bearer, meta) (IssuedSession, error)
         +Logout(ctx, sessionToken) error
         +Allowed(v *View, p Principal, perm Permission, element ID) bool
+        +AuthzVersion() uint64
         +EnrollTOTP(ctx, challenge) (Enrollment, error)
         +ConfirmTOTP(ctx, challenge, code, meta) (IssuedSession, recoveryCodes []string, error)
         +CreateUser(ctx, actor, u NewUser) error
@@ -98,6 +101,8 @@ classDiagram
 - **Falsche Codes** (TOTP und Wiederherstellung) zählen bei der Begrenzung der Fehlversuche mit; erst eine vollständige Anmeldung setzt sie zurück. Sonst ließe sich mit bekanntem Passwort der Code über viele Challenges durchprobieren.
 - **`Run`** schreibt jede Minute `last_seen_at` und `last_used_at` gesammelt und räumt abgelaufene Challenges auf; beim Stopp ein letztes Mal.
 - **`Allowed`** mit `element = uuid.Nil` fragt ein globales Recht ab; ein Recht mit Geltungsbereich gilt dann nicht. `Restore` lädt Rollen und Rechte beim Start, jede Änderung an Rollen, Rechten oder Mitgliedern lädt sie neu.
+- **`CheckSession`, `CheckToken`** prüfen wie `Authenticate` bzw. `AuthenticateToken`, zählen aber nicht als Aktivität bzw. Verwendung. Offene Ereignisströme prüfen damit alle 60 s, ob ihre Anmeldung noch gilt (`api.md`); ein offener Tab allein verlängert den Leerlauf einer Sitzung nicht. Für Wände gibt es Kiosk-Sitzungen.
+- **`AuthzVersion`** zählt jedes Neuladen von Rollen und Rechten. Offene Ereignisströme filtern nach den Rechten; ändert sich die Zahl, bekommen sie `resync` (`api.md`).
 - **`SetPassword`** beendet alle Sitzungen des Benutzers außer `keepSession` (die eigene, wenn er es selbst ändert).
 - **`EnsureAdmin`** (M8) nutzt `Store.CreateInitialAdmin`: Benutzer, Rolle, Rechte und Mitgliedschaft in **einer** Transaktion und nur ohne vorhandene Benutzer, damit ein Abbruch keinen Admin ohne Rechte hinterlässt.
 - **Rollen und Rechte hält `auth` im Speicher** (`LoadAuthz` beim Start, nach jeder Änderung neu). `Allowed` braucht deshalb keine Datenbank, nur die `View` für den Geltungsbereich.

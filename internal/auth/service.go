@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,6 +89,8 @@ type Service struct {
 	sessions   map[uuid.UUID]time.Time // noch zu schreiben: last_seen_at
 	tokens     map[uuid.UUID]time.Time // noch zu schreiben: last_used_at
 	authz      authz                   // Rollen und Rechte
+
+	authzVersion atomic.Uint64 // zählt jedes Neuladen von Rollen und Rechten
 }
 
 type challenge struct {
@@ -307,6 +310,27 @@ func (s *Service) createSession(ctx context.Context, u User, kind SessionKind, t
 // Authenticate prüft das Sitzungs-Token aus dem Cookie: nicht widerrufen, nicht abgelaufen,
 // Benutzer aktiv, bei Menschen nicht zu lange untätig, bei Kiosk das Token noch gültig.
 func (s *Service) Authenticate(ctx context.Context, sessionToken string) (Principal, error) {
+	p, err := s.session(ctx, sessionToken)
+	if err != nil {
+		return Principal{}, err
+	}
+	now := s.now()
+	s.mu.Lock()
+	s.seen[p.SessionID], s.sessions[p.SessionID] = now, now
+	s.mu.Unlock()
+	return p, nil
+}
+
+// CheckSession prüft eine Sitzung wie Authenticate, zählt aber nicht als Aktivität. Ein offener
+// Ereignisstrom prüft damit regelmäßig, ob seine Sitzung noch gilt, ohne sie am Leben zu halten
+// (docs/contracts/api.md).
+func (s *Service) CheckSession(ctx context.Context, sessionToken string) error {
+	_, err := s.session(ctx, sessionToken)
+	return err
+}
+
+// session prüft eine Sitzung, ohne sie als Aktivität zu zählen.
+func (s *Service) session(ctx context.Context, sessionToken string) (Principal, error) {
 	sess, u, tok, err := s.cfg.Store.SessionByHash(ctx, HashToken(sessionToken))
 	if errors.Is(err, ErrNotFound) {
 		return Principal{}, ErrUnauthenticated
@@ -328,9 +352,6 @@ func (s *Service) Authenticate(ctx context.Context, sessionToken string) (Princi
 	case sess.Kind == SessionKiosk && !tokenValid(tok, now):
 		return Principal{}, ErrUnauthenticated
 	}
-	s.mu.Lock()
-	s.seen[sess.ID], s.sessions[sess.ID] = now, now
-	s.mu.Unlock()
 	return Principal{UserID: u.ID, Username: u.Username, Service: u.Service, SessionID: sess.ID, TokenID: sess.TokenID,
 		ReadOnly: sess.Kind == SessionKiosk}, nil
 }
@@ -345,6 +366,12 @@ func (s *Service) AuthenticateToken(ctx context.Context, bearer string) (Princip
 	s.tokens[tok.ID] = s.now()
 	s.mu.Unlock()
 	return Principal{UserID: u.ID, Username: u.Username, Service: u.Service, TokenID: tok.ID, ReadOnly: tok.ReadOnly}, nil
+}
+
+// CheckToken prüft ein API-Token wie AuthenticateToken, zählt aber nicht als Verwendung.
+func (s *Service) CheckToken(ctx context.Context, bearer string) error {
+	_, _, err := s.token(ctx, bearer)
+	return err
 }
 
 // KioskLogin tauscht ein Token mit read_only eines Dienstkontos gegen eine Kiosk-Sitzung; sie

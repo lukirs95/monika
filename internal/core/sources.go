@@ -209,6 +209,9 @@ func (c *Core) updateSources(ctx context.Context, r *round) {
 	for id, src := range g.Sources() {
 		st := c.sourceStatus(src, r.now)
 		old, ok := c.statuses.m[id]
+		if st.Since = old.Since; !ok || old.State != st.State {
+			st.Since = r.now
+		}
 		if !ok || old != st {
 			c.statuses.set(id, st)
 		}

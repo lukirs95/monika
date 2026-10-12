@@ -174,9 +174,14 @@ func TestAdministration(t *testing.T) {
 		{"unknown", Grant{Permission: "superuser"}, false},
 	}
 	for _, tt := range grants {
+		version := s.AuthzVersion()
 		err := s.SetGrants(ctx, admin.ID, uuid.New(), []Grant{tt.g})
 		if (err == nil) != tt.ok || (err != nil && !errors.Is(err, ErrInvalidGrant)) {
 			t.Errorf("%s: SetGrants = %v", tt.name, err)
+		}
+		// Nur eine gelungene Änderung zählt; offene Ströme laden dann neu.
+		if changed := s.AuthzVersion() != version; changed != tt.ok {
+			t.Errorf("%s: authz version changed = %v", tt.name, changed)
 		}
 	}
 }

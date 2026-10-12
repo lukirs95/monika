@@ -28,6 +28,7 @@ const (
 // SourceStatus ist der Zustand einer Quelle aus Reporter und Supervisor.
 type SourceStatus struct {
 	State     SourceState
+	Since     time.Time     // Beginn des aktuellen Zustands (Zeit der Runde, die ihn festgestellt hat)
 	Heartbeat time.Duration // Source.Heartbeat() der laufenden Instanz
 	LastSeen  time.Time
 	Error     string

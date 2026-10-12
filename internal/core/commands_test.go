@@ -56,6 +56,12 @@ func TestCommandsInventory(t *testing.T) {
 	if !errors.Is(err, inventory.ErrNotAGroup) || !r.c.View().DB.OK {
 		t.Errorf("AddGroupMember = %v, db ok %v", err, r.c.View().DB.OK)
 	}
+	// Auch Konflikte, die erst der Store erkennt.
+	r.store.setErr(inventory.ErrSourceExists)
+	err = r.do(CreateSource{Source: inventory.Source{ID: uuid.New(), DeviceID: device, Driver: "videoxlink", Enabled: true}})
+	if !errors.Is(err, inventory.ErrSourceExists) || !r.c.View().DB.OK {
+		t.Errorf("CreateSource = %v, db ok %v", err, r.c.View().DB.OK)
+	}
 }
 
 func TestCommandsDeleteSourceWithdrawsFindings(t *testing.T) {

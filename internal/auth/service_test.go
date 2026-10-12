@@ -375,6 +375,24 @@ func TestSessions(t *testing.T) {
 	}
 }
 
+// CheckSession hält eine Sitzung nicht am Leben: Ein offener Ereignisstrom allein verlängert den
+// Leerlauf nicht.
+func TestCheckSession(t *testing.T) {
+	b := newBench(t)
+	_, issued, _ := b.enroll()
+	b.now = b.now.Add(11 * time.Hour)
+	if err := b.s.CheckSession(t.Context(), issued.Token); err != nil {
+		t.Fatalf("within idle time: %v", err)
+	}
+	b.now = b.now.Add(2 * time.Hour)
+	if err := b.s.CheckSession(t.Context(), issued.Token); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("after idle time = %v, want ErrUnauthenticated", err)
+	}
+	if b.s.flush(t.Context()); len(b.store.touched) != 0 {
+		t.Errorf("touches = %+v, want none", b.store.touched)
+	}
+}
+
 func TestTokensAndKiosk(t *testing.T) {
 	b := newBench(t)
 	wall := User{ID: uuid.New(), Username: "wand", Service: true}
@@ -408,5 +426,11 @@ func TestTokensAndKiosk(t *testing.T) {
 	}
 	if _, err := b.s.AuthenticateToken(t.Context(), plain); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("revoked token = %v", err)
+	}
+	if err := b.s.CheckToken(t.Context(), plain); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("CheckToken of a revoked token = %v", err)
+	}
+	if err := b.s.CheckToken(t.Context(), writer); err != nil {
+		t.Errorf("CheckToken = %v", err)
 	}
 }

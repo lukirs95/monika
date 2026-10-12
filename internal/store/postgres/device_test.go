@@ -203,3 +203,49 @@ func TestDeleteDeviceRemovesScopedConfig(t *testing.T) {
 		}
 	}
 }
+
+// Verletzte Constraints sind fachliche Fehler, keine Störung der Datenbank.
+func TestSourceAndMemberConflicts(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := server.NewDB(t)
+	q := db.New(pool)
+	s := postgres.New(pool)
+
+	device, source := newDeviceWithSource(t, q, "videoxlink")
+	group := newGroups(t, q, 1)[0]
+	src := inventory.Source{DeviceID: device, Driver: "ipmi", Enabled: true}
+
+	tests := []struct {
+		name string
+		do   func() error
+		want error
+	}{
+		{"second source with the same driver", func() error {
+			dup := src
+			dup.ID, dup.Driver = newID(), "videoxlink"
+			return s.CreateSource(ctx, uuid.Nil, dup, newID())
+		}, inventory.ErrSourceExists},
+		{"create with unknown secret", func() error {
+			next := src
+			next.ID, next.SecretID = newID(), newID()
+			return s.CreateSource(ctx, uuid.Nil, next, newID())
+		}, inventory.ErrSecretNotFound},
+		{"update with unknown secret", func() error {
+			return s.UpdateSource(ctx, uuid.Nil, inventory.Source{ID: source, SecretID: newID(), Enabled: true})
+		}, inventory.ErrSecretNotFound},
+		{"member twice", func() error {
+			if err := addMember(ctx, pool, group, device); err != nil {
+				return err
+			}
+			return addMember(ctx, pool, group, device)
+		}, inventory.ErrMemberExists},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.do(); !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
