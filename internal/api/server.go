@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,7 +21,9 @@ import (
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
+	"github.com/lukirs95/monika/internal/forward"
 	"github.com/lukirs95/monika/internal/preset"
+	"github.com/lukirs95/monika/internal/secret"
 	"github.com/lukirs95/monika/sdk"
 )
 
@@ -68,12 +71,30 @@ type Presets interface {
 	Cancel(ctx context.Context, root uuid.UUID) error
 }
 
+// Forwarder verwaltet die Weiterleitungsziele (forward.Forwarder).
+type Forwarder interface {
+	ListTargets(ctx context.Context) ([]forward.Target, error)
+	CreateTarget(ctx context.Context, actor uuid.UUID, t forward.Target) error
+	UpdateTarget(ctx context.Context, actor uuid.UUID, t forward.Target) error
+	DeleteTarget(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
+}
+
+// Secrets legt Secrets an, listet und löscht sie (secret.Service); ersetzt wird über
+// Core.Do(ReplaceSecret), weil Quellen neu starten.
+type Secrets interface {
+	List(ctx context.Context) ([]secret.Secret, error)
+	Create(ctx context.Context, actor uuid.UUID, name, description string, value json.RawMessage) (secret.Secret, error)
+	Delete(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
+}
+
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.
 type Config struct {
 	Auth           Auth
 	Core           Core
 	Executor       Executor
 	Presets        Presets
+	Forwarder      Forwarder
+	Secrets        Secrets
 	PublicURL      *url.URL            // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
 	TrustedProxies []netip.Prefix      // Proxys, deren X-Forwarded-For gilt
 	Drivers        func() []sdk.Driver // registrierte Treiber (sdk.Drivers)

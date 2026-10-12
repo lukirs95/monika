@@ -13,8 +13,14 @@ import (
 	"github.com/lukirs95/monika/internal/core/evaluation"
 )
 
-// ErrInvalidTarget bedeutet, dass ein Ziel unvollständig oder falsch konfiguriert ist.
-var ErrInvalidTarget = errors.New("invalid forward target")
+// Fehler beim Prüfen eines Ziels; ErrSecretInBody steht zusätzlich in ErrInvalidTarget.
+var (
+	// ErrInvalidTarget bedeutet, dass ein Ziel unvollständig oder falsch konfiguriert ist.
+	ErrInvalidTarget = errors.New("invalid forward target")
+	// ErrSecretInBody bedeutet, dass die Vorlage des Bodys ein Secret einsetzen würde; Secrets
+	// gehören nur in URL und Header.
+	ErrSecretInBody = errors.New("secret placeholder only in url and headers, not in the body")
+)
 
 var events = []string{EventFindingRaised, EventFindingCleared, EventFindingWithdrawn, EventFindingAcked, EventActionFinished}
 
@@ -135,7 +141,7 @@ func parseWebhook(raw json.RawMessage) (webhookConfig, error) {
 	errs = append(errs, err)
 	for _, n := range names {
 		if strings.HasPrefix(n, "secret.") {
-			errs = append(errs, fmt.Errorf("secret placeholder {{%s}} only in url and headers, not in the body", n))
+			errs = append(errs, fmt.Errorf("{{%s}}: %w", n, ErrSecretInBody))
 		}
 	}
 	return c, errors.Join(errs...)

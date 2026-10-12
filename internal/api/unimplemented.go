@@ -22,18 +22,6 @@ func (unimplemented) Watch(context.Context, oapi.WatchRequestObject) (oapi.Watch
 func (unimplemented) ListFindingHistory(context.Context, oapi.ListFindingHistoryRequestObject) (oapi.ListFindingHistoryResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) ListForwardTargets(context.Context, oapi.ListForwardTargetsRequestObject) (oapi.ListForwardTargetsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreateForwardTarget(context.Context, oapi.CreateForwardTargetRequestObject) (oapi.CreateForwardTargetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteForwardTarget(context.Context, oapi.DeleteForwardTargetRequestObject) (oapi.DeleteForwardTargetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdateForwardTarget(context.Context, oapi.UpdateForwardTargetRequestObject) (oapi.UpdateForwardTargetResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) ListRoles(context.Context, oapi.ListRolesRequestObject) (oapi.ListRolesResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -53,18 +41,6 @@ func (unimplemented) SetRoleMembers(context.Context, oapi.SetRoleMembersRequestO
 	return nil, errNotImplemented
 }
 func (unimplemented) ListRunHistory(context.Context, oapi.ListRunHistoryRequestObject) (oapi.ListRunHistoryResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ListSecrets(context.Context, oapi.ListSecretsRequestObject) (oapi.ListSecretsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreateSecret(context.Context, oapi.CreateSecretRequestObject) (oapi.CreateSecretResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteSecret(context.Context, oapi.DeleteSecretRequestObject) (oapi.DeleteSecretResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ReplaceSecretValue(context.Context, oapi.ReplaceSecretValueRequestObject) (oapi.ReplaceSecretValueResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) RevokeToken(context.Context, oapi.RevokeTokenRequestObject) (oapi.RevokeTokenResponseObject, error) {

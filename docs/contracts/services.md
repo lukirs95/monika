@@ -208,7 +208,7 @@ classDiagram
 - **Format:** ein JSON-Objekt pro Ereignis (`event`, `at`, `finding` bzw. `run`, `element` mit `path` und `url`); Syslog nach RFC 5424 mit dem JSON in `MSG`, Webhook mit dem JSON als Body oder mit Vorlage (`docs/ARCHITECTURE.md` Abschnitt 13). Beim Anlegen prüft sie, dass `{{secret.…}}` nur in `url` und `headers` steht.
 - `SetTargetResults` schreibt `last_sent_at` und `last_error` gesammelt alle 10 s, nicht pro Ereignis.
 - **`action.finished`** nur für Läufe ohne übergeordneten Lauf (einzelne Aktionen, Sammelaktionen, Wurzel-Läufe von Presets); die Kinder stehen in deren Zusammenfassung.
-- **Vorlagen** wie beim HTTP-Treiber (`docs/ARCHITECTURE.md` Abschnitt 11): Platzhalter sind Pfade in das JSON des Ereignisses (`{{finding.severity}}`, `{{element.path}}`, `{{run.status}}`), eingesetzt im Body als JSON-Wert, in der URL URL-kodiert, in Headern als Text; `{{secret.<schlüssel>}}` nur in URL und Headern.
+- **Vorlagen** wie beim HTTP-Treiber (`docs/ARCHITECTURE.md` Abschnitt 11): Platzhalter sind Pfade in das JSON des Ereignisses (`{{finding.severity}}`, `{{element.path}}`, `{{run.status}}`), eingesetzt im Body als JSON-Wert, in der URL URL-kodiert, in Headern als Text; `{{secret.<schlüssel>}}` nur in URL und Headern. Fehler beim Anlegen und Ändern: `ErrInvalidTarget` (darin `ErrSecretInBody` für ein Secret im Body), `ErrSecretNotFound` für ein unbekanntes Secret.
 - **`element.url`** = `<MONIKA_PUBLIC_URL>/elements/<id>`; die UI bedient diese Route.
 - **Warteschlange** pro Ziel 1 000 Ereignisse, bei Überlauf fallen die ältesten weg (geloggt); 3 Wiederholungen nach 1 s, 5 s, 30 s (F5), danach `last_error`.
 - **`acked_by`** ist vorerst die ID des Benutzers.

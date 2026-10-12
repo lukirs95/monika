@@ -130,7 +130,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
         - ~~11e2 Endpunkte~~: erledigt; Tests gegen einen laufenden Core mit Stores im Speicher (`coretest.Start`), doppelte Quellen und Mitgliedschaften prüft das Inventar jetzt auch vorab
       - 11f Läufe, Presets, Weiterleitung, Secrets, Benutzer, Rollen, Tokens (Entscheidung A vom 2026-10-12: Rechte an jedem aufgelösten Ziel):
         - ~~11f1 Läufe und Presets~~: erledigt, mit `preset.MissingRightsError`; beendete Läufe in `GET /runs/{id}` und `cancel` (409 statt 404) kommen mit 11h
-        - 11f2 Weiterleitung und Secrets (`forward.ErrSecretNotFound`, `ErrSecretInBody`, Secrets im Test-Core)
+        - ~~11f2 Weiterleitung und Secrets~~: erledigt, mit `forward.ErrSecretNotFound`, `ErrSecretInBody` und Secrets im Test-Core
         - 11f3 Benutzer, Rollen, Tokens (`totp_enabled`, `CreateToken` mit Metadaten)
       - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams`
       - 11h Verlauf (lesende Queries) und abgeschlossene Läufe in `GET /runs/{id}`

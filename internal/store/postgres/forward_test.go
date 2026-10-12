@@ -43,6 +43,15 @@ func TestForwardTargets(t *testing.T) {
 	if err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], target) {
 		t.Fatalf("ListTargets = %+v, %v;\nwant %+v", list, err, target)
 	}
+	unknown := target
+	unknown.ID, unknown.SecretID = newID(), newID()
+	if err := s.CreateTarget(ctx, user, unknown); !errors.Is(err, forward.ErrSecretNotFound) {
+		t.Errorf("CreateTarget with an unknown secret = %v", err)
+	}
+	unknown.ID = target.ID
+	if err := s.UpdateTarget(ctx, user, unknown); !errors.Is(err, forward.ErrSecretNotFound) {
+		t.Errorf("UpdateTarget with an unknown secret = %v", err)
+	}
 
 	t.Run("results", func(t *testing.T) {
 		ok := time.Now().Truncate(time.Microsecond)

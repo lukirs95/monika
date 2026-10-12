@@ -15,22 +15,11 @@ import (
 // preset_run und den Rechten an allen Zielen (preset.Runner.Start).
 
 func (s *Server) requirePresets(ctx context.Context) (auth.Principal, error) {
-	v, p, err := s.viewFor(ctx)
-	if err != nil {
-		return p, err
-	}
-	if !s.seesPresets(v, p) {
-		return p, errForbidden
-	}
-	return p, nil
+	return s.requireGlobal(ctx, auth.PermPresetRun, auth.PermPresetEdit)
 }
 
 func (s *Server) requirePresetEdit(ctx context.Context) (auth.Principal, error) {
-	v, p, err := s.viewFor(ctx)
-	if err != nil {
-		return p, err
-	}
-	return p, s.require(v, p, auth.PermPresetEdit, uuid.Nil)
+	return s.requireGlobal(ctx, auth.PermPresetEdit)
 }
 
 func (s *Server) ListPresets(ctx context.Context, _ oapi.ListPresetsRequestObject) (oapi.ListPresetsResponseObject, error) {

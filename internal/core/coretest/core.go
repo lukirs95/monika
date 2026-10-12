@@ -2,6 +2,8 @@ package coretest
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ type Options struct {
 	Rules    []evaluation.Rule
 	Findings []evaluation.Finding // aktive Befunde
 	Drivers  []sdk.Driver         // registrierte Treiber; ohne Angabe nur Driver ohne Katalog
+	Secrets  core.Secrets         // für ReplaceSecret; ohne Angabe scheitert der Befehl
 }
 
 // Running ist ein laufender Core mit Inventar und Bewertung, aber ohne Datenbank, Supervisor
@@ -63,7 +66,10 @@ func Start(t testing.TB, o Options) *Running {
 	ev := evaluation.New(stores, types, func(name string) bool { _, ok := lookup(name); return ok }, log)
 	ev.Load(o.Rules, o.Findings, nil)
 
-	c := core.New(core.Config{Inventory: inv, Evaluator: ev, Log: log})
+	if o.Secrets == nil {
+		o.Secrets = noSecrets{}
+	}
+	c := core.New(core.Config{Inventory: inv, Evaluator: ev, Secrets: o.Secrets, Log: log})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- c.Run(ctx) }()
@@ -79,6 +85,12 @@ func Start(t testing.TB, o Options) *Running {
 		}
 	}
 	return &Running{Core: c, Stores: stores}
+}
+
+type noSecrets struct{}
+
+func (noSecrets) Replace(context.Context, uuid.UUID, uuid.UUID, json.RawMessage) error {
+	return errors.New("coretest: no secrets configured")
 }
 
 // Stores ist der Inventar- und der Evaluation-Store im Speicher: Jeder Schreibvorgang gelingt,

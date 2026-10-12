@@ -7,8 +7,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrNotFound bedeutet, dass das Ziel nicht existiert.
-var ErrNotFound = errors.New("forward target not found")
+var (
+	// ErrNotFound bedeutet, dass das Ziel nicht existiert.
+	ErrNotFound = errors.New("forward target not found")
+	// ErrSecretNotFound bedeutet, dass das Secret eines Ziels nicht existiert.
+	ErrSecretNotFound = errors.New("secret not found")
+)
 
 // Store persistiert Weiterleitungsziele. Jede Methode ist eine in sich atomare Operation.
 //
@@ -17,8 +21,9 @@ var ErrNotFound = errors.New("forward target not found")
 type Store interface {
 	// ListTargets liefert alle Ziele, sortiert nach Name.
 	ListTargets(ctx context.Context) ([]Target, error)
+	// CreateTarget legt ein Ziel an. Unbekanntes Secret: ErrSecretNotFound.
 	CreateTarget(ctx context.Context, actor uuid.UUID, t Target) error
-	// UpdateTarget ändert ein Ziel. Unbekannt: ErrNotFound.
+	// UpdateTarget ändert ein Ziel. Unbekannt: ErrNotFound; unbekanntes Secret: ErrSecretNotFound.
 	UpdateTarget(ctx context.Context, actor uuid.UUID, t Target) error
 	// DeleteTarget löscht ein Ziel. Unbekannt: ErrNotFound.
 	DeleteTarget(ctx context.Context, actor uuid.UUID, id uuid.UUID) error

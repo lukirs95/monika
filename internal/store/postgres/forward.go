@@ -2,9 +2,12 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/lukirs95/monika/internal/core/evaluation"
 	"github.com/lukirs95/monika/internal/forward"
@@ -21,17 +24,26 @@ func (s *Store) ListTargets(ctx context.Context) ([]forward.Target, error) {
 
 func (s *Store) CreateTarget(ctx context.Context, actor uuid.UUID, t forward.Target) error {
 	p := targetParams(t)
-	return s.q.CreateForwardTarget(ctx, db.CreateForwardTargetParams{
+	return targetErr(s.q.CreateForwardTarget(ctx, db.CreateForwardTargetParams{
 		ActorID: nullable(actor), ID: t.ID, Name: p.Name, Kind: p.Kind, Enabled: p.Enabled, Config: p.Config,
 		SecretID: p.SecretID, Events: p.Events, MinSeverity: p.MinSeverity, ScopeElementID: p.ScopeElementID,
-	})
+	}))
+}
+
+// targetErr übersetzt ein unbekanntes Secret in forward.ErrSecretNotFound.
+func targetErr(err error) error {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok &&
+		pgErr.Code == pgerrcode.ForeignKeyViolation && pgErr.ConstraintName == "forward_target_secret_id_fkey" {
+		return forward.ErrSecretNotFound
+	}
+	return err
 }
 
 func (s *Store) UpdateTarget(ctx context.Context, actor uuid.UUID, t forward.Target) error {
 	p := targetParams(t)
 	p.ActorID, p.ID = nullable(actor), t.ID
 	n, err := s.q.UpdateForwardTarget(ctx, p)
-	return affected(n, err, forward.ErrNotFound)
+	return affected(n, targetErr(err), forward.ErrNotFound)
 }
 
 func (s *Store) DeleteTarget(ctx context.Context, actor uuid.UUID, id uuid.UUID) error {

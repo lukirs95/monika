@@ -88,7 +88,9 @@ var codes = []struct {
 	{executor.ErrInvalidParams, http.StatusUnprocessableEntity, "invalid_params"},
 	{preset.ErrInvalidTarget, http.StatusUnprocessableEntity, "invalid_target"},
 	{preset.ErrInvalidStep, http.StatusUnprocessableEntity, "invalid_step"},
+	{forward.ErrSecretInBody, http.StatusUnprocessableEntity, "secret_in_body"}, // vor ErrInvalidTarget, das es umschließt
 	{forward.ErrInvalidTarget, http.StatusUnprocessableEntity, "invalid_target"},
+	{forward.ErrSecretNotFound, http.StatusUnprocessableEntity, "invalid_secret"},
 	{secret.ErrInvalidName, http.StatusUnprocessableEntity, "invalid_secret"},
 	{secret.ErrInvalidValue, http.StatusUnprocessableEntity, "invalid_secret"},
 	{auth.ErrWeakPassword, http.StatusUnprocessableEntity, "weak_password"},

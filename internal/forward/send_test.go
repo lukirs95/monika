@@ -113,6 +113,9 @@ func TestValidate(t *testing.T) {
 			if (err == nil) != tt.ok || (err != nil && !errors.Is(err, ErrInvalidTarget)) {
 				t.Errorf("validate = %v", err)
 			}
+			if inBody := errors.Is(err, ErrSecretInBody); inBody != (tt.name == "secret in body") {
+				t.Errorf("ErrSecretInBody = %v", inBody)
+			}
 		})
 	}
 }
