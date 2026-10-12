@@ -51,7 +51,11 @@ func (s *Store) ListUsers(ctx context.Context) ([]auth.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(rows, toUser), nil
+	return mapSlice(rows, func(r db.ListUsersRow) auth.User {
+		u := toUser(r.AppUser)
+		u.TOTPEnabled = r.TotpEnabled
+		return u
+	}), nil
 }
 
 func (s *Store) CountUsers(ctx context.Context) (int, error) {

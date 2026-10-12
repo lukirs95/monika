@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core/inventory"
+	"github.com/lukirs95/monika/internal/secret"
 	"github.com/lukirs95/monika/internal/store/postgres"
 )
 
@@ -61,6 +62,37 @@ func TestUsers(t *testing.T) {
 		t.Fatalf("UserByName unknown = %v, want ErrNotFound", err)
 	}
 
+	t.Run("totp enabled only when confirmed", func(t *testing.T) {
+		totpOf := func() bool {
+			users, err := s.ListUsers(ctx)
+			if err != nil {
+				t.Fatalf("ListUsers: %v", err)
+			}
+			for _, x := range users {
+				if x.ID == u.ID {
+					return x.TOTPEnabled
+				}
+			}
+			t.Fatal("anna not listed")
+			return false
+		}
+		if totpOf() {
+			t.Error("without TOTP: enabled")
+		}
+		if err := s.SaveTOTP(ctx, u.ID, secret.Encrypted{Ciphertext: []byte("c"), Nonce: []byte("n"), KeyID: "k"}); err != nil {
+			t.Fatalf("SaveTOTP: %v", err)
+		}
+		if totpOf() {
+			t.Error("unconfirmed TOTP: enabled")
+		}
+		if err := s.ConfirmTOTP(ctx, u.ID, 1, nil); err != nil {
+			t.Fatalf("ConfirmTOTP: %v", err)
+		}
+		if !totpOf() {
+			t.Error("confirmed TOTP: not enabled")
+		}
+	})
+
 	t.Run("password change keeps the current session", func(t *testing.T) {
 		current, other := newSession(t, pool, u.ID), newSession(t, pool, u.ID)
 		if err := s.SetPasswordHash(ctx, u.ID, u.ID, fakeHash+"neu", current); err != nil {
@@ -104,7 +136,8 @@ func TestUsers(t *testing.T) {
 			t.Errorf("audit entry %s contains the password hash: %s", e.Verb, text)
 		}
 	}
-	if want := []string{"create", "update", "update", "login", "login_failed"}; !slices.Equal(verbs, want) {
+	// update: TOTP bestätigt, Passwort, Deaktivierung
+	if want := []string{"create", "update", "update", "update", "login", "login_failed"}; !slices.Equal(verbs, want) {
 		t.Errorf("audit verbs = %v, want %v", verbs, want)
 	}
 }

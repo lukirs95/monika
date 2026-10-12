@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
@@ -45,6 +46,24 @@ type Auth interface {
 	RevokeSession(ctx context.Context, user, id uuid.UUID) error
 	Grants(user uuid.UUID) []auth.Grant
 	Allowed(v *core.View, p auth.Principal, perm auth.Permission, element uuid.UUID) bool
+}
+
+// Admin verwaltet Benutzer, Tokens, Rollen und Rechte (auth.Service).
+type Admin interface {
+	ListUsers(ctx context.Context) ([]auth.User, error)
+	CreateUser(ctx context.Context, actor uuid.UUID, nu auth.NewUser) error
+	UpdateUser(ctx context.Context, actor uuid.UUID, u auth.User) error
+	SetPassword(ctx context.Context, actor, user uuid.UUID, password string, keepSession uuid.UUID) error
+	ResetTOTP(ctx context.Context, actor, user uuid.UUID) error
+	ListTokens(ctx context.Context, user uuid.UUID) ([]auth.Token, error)
+	CreateToken(ctx context.Context, actor, user uuid.UUID, name string, readOnly bool, expires time.Time) (auth.Token, string, error)
+	RevokeToken(ctx context.Context, actor, id uuid.UUID) error
+	Authz() auth.Authz
+	CreateRole(ctx context.Context, actor uuid.UUID, r auth.Role) error
+	UpdateRole(ctx context.Context, actor uuid.UUID, r auth.Role) error
+	DeleteRole(ctx context.Context, actor, id uuid.UUID) error
+	SetGrants(ctx context.Context, actor, role uuid.UUID, gs []auth.Grant) error
+	SetMembers(ctx context.Context, actor, role uuid.UUID, users []uuid.UUID) error
 }
 
 // Core liefert den aktuellen Stand und nimmt Befehle an (core.Core).
@@ -90,6 +109,7 @@ type Secrets interface {
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.
 type Config struct {
 	Auth           Auth
+	Admin          Admin
 	Core           Core
 	Executor       Executor
 	Presets        Presets

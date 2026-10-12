@@ -8,7 +8,10 @@ SELECT * FROM permission_grant ORDER BY role_id, id;
 SELECT * FROM role_member ORDER BY role_id, user_id;
 
 -- name: ListUsers :many
-SELECT * FROM app_user ORDER BY username;
+-- Mit TOTP eingerichtet (bestätigt), für die Verwaltung.
+SELECT sqlc.embed(app_user), (user_totp.confirmed_at IS NOT NULL)::boolean AS totp_enabled
+FROM app_user LEFT JOIN user_totp ON user_totp.user_id = app_user.id
+ORDER BY app_user.username;
 
 -- name: CountUsers :one
 SELECT count(*) FROM app_user;

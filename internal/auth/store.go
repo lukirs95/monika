@@ -64,6 +64,7 @@ type Store interface {
 	RevokeSession(ctx context.Context, user uuid.UUID, id uuid.UUID) error
 
 	// CreateToken legt ein Token an; gespeichert und protokolliert wird nie der Klartext.
+	// Unbekannter Benutzer: ErrNotFound.
 	CreateToken(ctx context.Context, actor uuid.UUID, t Token, tokenHash string) error
 	// TokenByHash liefert Token und Benutzer. Ob es gilt, prüft der Aufrufer. Unbekannt: ErrNotFound.
 	TokenByHash(ctx context.Context, tokenHash string) (Token, User, error)

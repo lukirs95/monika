@@ -6,7 +6,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/store/postgres/db"
@@ -68,10 +70,15 @@ func (s *Store) RevokeSession(ctx context.Context, user uuid.UUID, id uuid.UUID)
 }
 
 func (s *Store) CreateToken(ctx context.Context, actor uuid.UUID, t auth.Token, tokenHash string) error {
-	return s.q.CreateToken(ctx, db.CreateTokenParams{
+	err := s.q.CreateToken(ctx, db.CreateTokenParams{
 		ActorID: nullable(actor), ID: t.ID, UserID: t.UserID, Name: t.Name, TokenHash: tokenHash,
 		ReadOnly: t.ReadOnly, ExpiresAt: nullable(t.ExpiresAt),
 	})
+	// Unbekannter Benutzer.
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == pgerrcode.ForeignKeyViolation {
+		return auth.ErrNotFound
+	}
+	return err
 }
 
 func (s *Store) TokenByHash(ctx context.Context, tokenHash string) (auth.Token, auth.User, error) {

@@ -62,6 +62,7 @@ type User struct {
 	PasswordHash string // argon2id; leer bei Dienstkonten und nur externer Anmeldung
 	Service      bool
 	Disabled     bool
+	TOTPEnabled  bool // TOTP eingerichtet und bestätigt; nur von ListUsers gesetzt
 	CreatedAt    time.Time
 	LastLoginAt  time.Time
 }

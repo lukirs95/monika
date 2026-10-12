@@ -173,14 +173,15 @@ func (s *Service) afterAuthz(ctx context.Context, err error) error {
 	return s.reloadAuthz(ctx)
 }
 
-// CreateToken legt ein API-Token an und liefert den Klartext; danach ist er nie wieder sichtbar.
-func (s *Service) CreateToken(ctx context.Context, actor, user uuid.UUID, name string, readOnly bool, expires time.Time) (string, error) {
+// CreateToken legt ein API-Token an und liefert es mit dem Klartext; danach ist der Klartext nie
+// wieder sichtbar.
+func (s *Service) CreateToken(ctx context.Context, actor, user uuid.UUID, name string, readOnly bool, expires time.Time) (Token, string, error) {
 	plain, hash := newAPIToken()
-	t := Token{ID: uuid.Must(uuid.NewV7()), UserID: user, Name: name, ReadOnly: readOnly, ExpiresAt: expires}
+	t := Token{ID: uuid.Must(uuid.NewV7()), UserID: user, Name: name, ReadOnly: readOnly, ExpiresAt: expires, CreatedAt: s.now()}
 	if err := s.cfg.Store.CreateToken(ctx, actor, t, hash); err != nil {
-		return "", err
+		return Token{}, "", err
 	}
-	return plain, nil
+	return t, plain, nil
 }
 
 func (s *Service) ListTokens(ctx context.Context, user uuid.UUID) ([]Token, error) {

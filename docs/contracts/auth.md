@@ -42,7 +42,7 @@ classDiagram
         +CreateRole(ctx, actor, r Role) error
         +SetGrants(ctx, actor, role ID, g []Grant) error
         +SetMembers(ctx, actor, role ID, users []ID) error
-        +CreateToken(ctx, actor, user ID, name, readOnly, expires) (plaintext string, error)
+        +CreateToken(ctx, actor, user ID, name, readOnly, expires) (Token, plaintext string, error)
         +RevokeToken(ctx, actor, token ID) error
         +Restore(ctx) error
         +EnsureAdmin(ctx, username, password) (bool, error)
@@ -107,6 +107,8 @@ classDiagram
 - **`AuthzVersion`** zählt jedes Neuladen von Rollen und Rechten. Offene Ereignisströme filtern nach den Rechten; ändert sich die Zahl, bekommen sie `resync` (`api.md`).
 - **`ChangePassword`** ist das eigene Passwort: Es prüft das aktuelle; ein falsches zählt wie ein Fehlversuch bei der Anmeldung (Begrenzung, Audit `login_failed`). Danach wie `SetPassword` mit der eigenen Sitzung als `keepSession`.
 - **`ListSessions`** liefert die gültigen Sitzungen mit der letzten Aktivität aus dem Speicher; durch Leerlauf abgelaufene fehlen.
+- **`CreateToken`** liefert das Token mit seinen Metadaten (für die Antwort der API) und einmalig den Klartext; unbekannter Benutzer: `ErrNotFound`.
+- **`User.TOTPEnabled`** (TOTP eingerichtet und bestätigt) setzt nur `ListUsers`, für die Verwaltung.
 - **`Principal.DisplayName`** kommt mit der Anmeldung mit, für `GET /auth/me`.
 - **`SetPassword`** beendet alle Sitzungen des Benutzers außer `keepSession` (die eigene, wenn er es selbst ändert).
 - **`EnsureAdmin`** (M8) nutzt `Store.CreateInitialAdmin`: Benutzer, Rolle, Rechte und Mitgliedschaft in **einer** Transaktion und nur ohne vorhandene Benutzer, damit ein Abbruch keinen Admin ohne Rechte hinterlässt.

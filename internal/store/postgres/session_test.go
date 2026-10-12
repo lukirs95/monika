@@ -36,6 +36,9 @@ func TestSessionsAndTokens(t *testing.T) {
 	if _, _, err := s.TokenByHash(ctx, "unknown"); !errors.Is(err, auth.ErrNotFound) {
 		t.Fatalf("TokenByHash unknown = %v, want ErrNotFound", err)
 	}
+	if err := s.CreateToken(ctx, admin, auth.Token{ID: newID(), UserID: newID(), Name: "x"}, "hash-2"); !errors.Is(err, auth.ErrNotFound) {
+		t.Fatalf("CreateToken for an unknown user = %v, want ErrNotFound", err)
+	}
 
 	expires := time.Now().Add(7 * 24 * time.Hour)
 	userSession := auth.Session{ID: newID(), UserID: anna, Kind: auth.SessionUser, ExpiresAt: expires, UserAgent: "Firefox"}

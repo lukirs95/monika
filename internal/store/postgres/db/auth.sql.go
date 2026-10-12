@@ -265,28 +265,37 @@ func (q *Queries) ListRoles(ctx context.Context) ([]Role, error) {
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, email, password_hash, is_service, disabled, created_at, last_login_at FROM app_user ORDER BY username
+SELECT app_user.id, app_user.username, app_user.display_name, app_user.email, app_user.password_hash, app_user.is_service, app_user.disabled, app_user.created_at, app_user.last_login_at, (user_totp.confirmed_at IS NOT NULL)::boolean AS totp_enabled
+FROM app_user LEFT JOIN user_totp ON user_totp.user_id = app_user.id
+ORDER BY app_user.username
 `
 
-func (q *Queries) ListUsers(ctx context.Context) ([]AppUser, error) {
+type ListUsersRow struct {
+	AppUser     AppUser
+	TotpEnabled bool
+}
+
+// Mit TOTP eingerichtet (bestätigt), für die Verwaltung.
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	rows, err := q.db.Query(ctx, listUsers)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AppUser
+	var items []ListUsersRow
 	for rows.Next() {
-		var i AppUser
+		var i ListUsersRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Username,
-			&i.DisplayName,
-			&i.Email,
-			&i.PasswordHash,
-			&i.IsService,
-			&i.Disabled,
-			&i.CreatedAt,
-			&i.LastLoginAt,
+			&i.AppUser.ID,
+			&i.AppUser.Username,
+			&i.AppUser.DisplayName,
+			&i.AppUser.Email,
+			&i.AppUser.PasswordHash,
+			&i.AppUser.IsService,
+			&i.AppUser.Disabled,
+			&i.AppUser.CreatedAt,
+			&i.AppUser.LastLoginAt,
+			&i.TotpEnabled,
 		); err != nil {
 			return nil, err
 		}
