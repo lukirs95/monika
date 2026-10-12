@@ -48,7 +48,6 @@ var (
 	errUnauthenticated = problem(http.StatusUnauthorized, "unauthenticated", "not authenticated")
 	errReadOnly        = problem(http.StatusForbidden, "read_only", "read-only access")
 	errOrigin          = problem(http.StatusForbidden, "origin_mismatch", "origin does not match the public URL")
-	errNotImplemented  = problem(http.StatusNotImplemented, "not_implemented", "not implemented yet")
 )
 
 // codes ordnet fachlichen Fehlern Status und Code zu. Die Reihenfolge zählt nicht: Jeder Fehler

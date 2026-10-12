@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
+	"maps"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -13,8 +16,8 @@ import (
 	"github.com/lukirs95/monika/sdk/vocab"
 )
 
-// Läufe (docs/contracts/flows.md, Aktion ausführen). Laufende Läufe stehen in der View; beendete
-// kommen mit dem Verlauf (Schritt 11h).
+// Läufe (docs/contracts/flows.md, Aktion ausführen). Laufende Läufe stehen in der View, beendete
+// im Verlauf.
 
 func (s *Server) SubmitRun(ctx context.Context, rq oapi.SubmitRunRequestObject) (oapi.SubmitRunResponseObject, error) {
 	v, p, err := s.viewFor(ctx)
@@ -83,16 +86,32 @@ func (s *Server) GetRun(ctx context.Context, rq oapi.GetRunRequestObject) (oapi.
 		return nil, err
 	}
 	r, err := s.run(v, p, rq.RunID)
-	if err != nil {
+	if errors.Is(err, errNotFound) {
+		stored, children, err := s.storedRun(ctx, v, p, rq.RunID)
+		if err != nil {
+			return nil, err
+		}
+		out := toRun(stored, children)
+		out.ElementDeleted = deleted(v, stored.ElementID)
+		return oapi.GetRun200JSONResponse(out), nil
+	} else if err != nil {
 		return nil, err
 	}
-	var children []action.Run
+	// Kinder aus dem Verlauf (auch beendete), laufende mit ihrem Stand aus der View.
+	_, stored, err := s.cfg.History.RunByID(ctx, r.ID)
+	if err != nil && !errors.Is(err, action.ErrNotFound) {
+		return nil, err
+	}
+	children := map[uuid.UUID]action.Run{}
+	for _, c := range stored {
+		children[c.ID] = c
+	}
 	for _, c := range v.Runs {
 		if c.ParentID == r.ID {
-			children = append(children, c)
+			children[c.ID] = c
 		}
 	}
-	return oapi.GetRun200JSONResponse(toRun(r, children)), nil
+	return oapi.GetRun200JSONResponse(toRun(r, slices.Collect(maps.Values(children)))), nil
 }
 
 func (s *Server) CancelRun(ctx context.Context, rq oapi.CancelRunRequestObject) (oapi.CancelRunResponseObject, error) {
@@ -101,7 +120,13 @@ func (s *Server) CancelRun(ctx context.Context, rq oapi.CancelRunRequestObject) 
 		return nil, err
 	}
 	r, err := s.run(v, p, rq.RunID)
-	if err != nil {
+	if errors.Is(err, errNotFound) {
+		// Nicht mehr in der View: beendet (409), wenn der Benutzer ihn sieht, sonst unbekannt.
+		if _, _, err := s.storedRun(ctx, v, p, rq.RunID); err != nil {
+			return nil, err
+		}
+		return nil, executor.ErrFinished
+	} else if err != nil {
 		return nil, err
 	}
 	root := r.Action == executor.ActionPreset && r.ParentID == uuid.Nil

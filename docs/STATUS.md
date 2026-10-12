@@ -120,7 +120,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~10a Zugangsdaten~~ (argon2id, API- und Sitzungs-Tokens, TOTP nach RFC 6238, Wiederherstellungscodes, Begrenzung der Fehlversuche): erledigt
       - ~~10b Anmeldung und Sitzungen~~ (`Login`, `VerifyTOTP`, Einrichtung, `Authenticate`, `AuthenticateToken`, `KioskLogin`, `Logout`, Aktivität gesammelt; `IssuedSession`): erledigt
       - ~~10c Rechte und Verwaltung, initialer Admin~~ (`Allowed` mit Rechten im Speicher, Benutzer, Rollen, Rechte, Tokens, `EnsureAdmin` über `CreateInitialAdmin` in einer Transaktion): erledigt
-   11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`); Entscheidungen E1–E8 vom 2026-10-12 in `api.md` (`go tool oapi-codegen`, `ServeMux`, Prüfung gegen die Spezifikation mit `400 invalid_request`, `resync` bei geänderten Rechten, Anmeldung alle 60 s prüfen ohne Aktivität, Nutzdaten aus der aktuellen View, Keepalive 30 s, Sichtbarkeit im Verlauf per ID-Array in SQL):
+   11. ~~API mit `oapi-codegen`, Verteiler und SSE~~ (`internal/api`): erledigt, alle 68 Operationen; Entscheidungen E1–E8 vom 2026-10-12 in `api.md` (`go tool oapi-codegen`, `ServeMux`, Prüfung gegen die Spezifikation mit `400 invalid_request`, `resync` bei geänderten Rechten, Anmeldung alle 60 s prüfen ohne Aktivität, Nutzdaten aus der aktuellen View, Keepalive 30 s, Sichtbarkeit im Verlauf per ID-Array in SQL):
       - ~~11a Lücken vor der API~~: erledigt; Konflikte aus der Datenbank sind fachliche Fehler (`ErrSourceExists`, `ErrMemberExists`, `ErrSecretNotFound`) statt Störung der Datenbank, `SourceStatus.Since`, `auth.CheckSession`/`CheckToken` und `AuthzVersion`
       - ~~11b Code-Erzeugung, Problem Details, Middleware~~: erledigt; `make api-gen` erzeugt `internal/api/oapi`, Guard (Operation, Anmeldung, `read_only`, Origin, Prüfung gegen die Spezifikation), Fehlertabelle, alle noch fehlenden Operationen antworten mit `501` (`unimplemented.go`, entfällt mit 11h)
       - ~~11c Anmeldung, eigene Sitzungen und Passwort, `/auth/me`, `/healthz`~~: erledigt; dazu `auth.ChangePassword` (Prüfung des aktuellen Passworts mit Begrenzung), `ListSessions` ohne abgelaufene, `Principal.DisplayName`, Adresse des Clients hinter Proxys
@@ -135,7 +135,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams` (Festlegungen V1–V7 vom 2026-10-12 in `api.md`):
         - ~~11g1 Verteiler und Warteschlange pro Strom~~: erledigt; `core.WithVersion` für Tests von Abonnenten exportiert
         - ~~11g2 `/events` (SSE), `watch`, `api_streams`~~: erledigt; Ende-zu-Ende-Test über echtes HTTP mit laufendem Core und Reporter; `hello` ohne SSE-`id`; Ereignisschemas mit `skip-prune` erzeugt
-      - 11h Verlauf (lesende Queries) und abgeschlossene Läufe in `GET /runs/{id}`
+      - ~~11h Verlauf und abgeschlossene Läufe~~: erledigt; Filter und Einträge im Paket `internal/history`, lesende Queries in `queries/history.sql`, beendete Läufe in `GET /runs/{id}` (mit beendeten Kindern auch bei laufenden) und `409 run_finished` beim Abbrechen
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`). Vorgaben aus den vorigen Schritten: Supervisor → Core (mit dem Supervisor) → `sup.Run(ctx, core)`; den Verteiler der API vor `http.Server.Shutdown` stoppen (V7); `http.Server` ohne `WriteTimeout`, die Ströme setzen ihre Deadline selbst; `Distributor.Streams` als Kennzahl `api_streams` an den Influx-Schreiber
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
 
@@ -150,7 +150,6 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
 
 ## Bekannte Lücken
 
-- Leseabfragen für den Verlauf (Audit, Befunde, Läufe mit Filtern) fehlen noch; sie entstehen mit der API.
 - Beim Löschen meldet der Evaluator die zurückgezogenen Befunde (`deleted`, `rule_deleted`) nur im Speicher; die Schleife muss dafür `Evaluate` mit `Diff.Deleted` aufrufen (Schritt 6).
 - `CreateMemberLink` prüft nicht selbst, dass die Gruppe `kind = group` hat; das prüft `Inventory.AddGroupMember` vor dem Store.
 - testcontainers schreibt viele Logzeilen in die Testausgabe.

@@ -18,11 +18,14 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/google/uuid"
 
+	"github.com/lukirs95/monika/internal/action"
 	"github.com/lukirs95/monika/internal/action/executor"
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
+	"github.com/lukirs95/monika/internal/core/evaluation"
 	"github.com/lukirs95/monika/internal/forward"
+	"github.com/lukirs95/monika/internal/history"
 	"github.com/lukirs95/monika/internal/preset"
 	"github.com/lukirs95/monika/internal/secret"
 	"github.com/lukirs95/monika/sdk"
@@ -110,6 +113,14 @@ type Secrets interface {
 	Delete(ctx context.Context, actor uuid.UUID, id uuid.UUID) error
 }
 
+// History liest den Verlauf (postgres.Store, rein lesende Queries).
+type History interface {
+	ListAudit(ctx context.Context, f history.AuditFilter) ([]history.AuditEntry, error)
+	ListFindings(ctx context.Context, f history.FindingFilter) ([]evaluation.Finding, error)
+	ListRuns(ctx context.Context, f history.RunFilter) ([]action.Run, error)
+	RunByID(ctx context.Context, id uuid.UUID) (action.Run, []action.Run, error)
+}
+
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.
 type Config struct {
 	Auth           Auth
@@ -119,6 +130,7 @@ type Config struct {
 	Presets        Presets
 	Forwarder      Forwarder
 	Secrets        Secrets
+	History        History
 	PublicURL      *url.URL            // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
 	TrustedProxies []netip.Prefix      // Proxys, deren X-Forwarded-For gilt
 	Drivers        func() []sdk.Driver // registrierte Treiber (sdk.Drivers)
@@ -127,8 +139,6 @@ type Config struct {
 
 // Server implementiert die Endpunkte der Spezifikation.
 type Server struct {
-	unimplemented
-
 	cfg      Config
 	dist     *Distributor
 	times    streamTimes
@@ -184,7 +194,7 @@ func (s *Server) requestError(w http.ResponseWriter, _ *http.Request, err error)
 // responseError übersetzt den Fehler eines Handlers; unbekannte Fehler werden geloggt.
 func (s *Server) responseError(w http.ResponseWriter, r *http.Request, err error) {
 	p := toProblem(err)
-	if p.Status >= http.StatusInternalServerError && p.Status != http.StatusNotImplemented {
+	if p.Status >= http.StatusInternalServerError {
 		s.cfg.Log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 	}
 	writeProblem(w, p)

@@ -60,6 +60,8 @@ Ein Gerüst-Element ist kein sichtbares Objekt im Sinne von R7: Einzelabfragen d
 
 | Audit | `GET /audit` | `object_type`, `object_id`, `actor` (`monika` für Einträge ohne Akteur), `verb` |
 
+Gelesen wird über eigene, rein lesende Queries (`queries/history.sql`); Filter und Einträge beschreibt das Paket `internal/history`, Befunde und Läufe sind `evaluation.Finding` bzw. `action.Run`. Eine Seite liest einen Eintrag mehr, um `next_before` zu setzen. `element` muss sichtbar sein (sonst `404`); ein gelöschtes Element geht nur mit `view` global, mit `recursive` findet es nichts. `element_deleted` setzt die API: Das Element steht nicht mehr im Graph. Der Laufverlauf enthält alle Läufe, auch Kinder (`parent_id`); die UI gruppiert. Beendete Läufe liefert `GET /runs/{id}` aus dem Verlauf, bei laufenden Läufen mit den beendeten Kindern daraus; `cancel` auf einen beendeten Lauf ergibt `409 run_finished`.
+
 Die Sichtbarkeit filtert die Datenbank, damit jede Seite voll ist und das Blättern stimmt: Die API gibt die IDs der sichtbaren Elemente als Array mit (`element_id = ANY(…)`); mit `view` global entfällt der Filter. Gerüst-Elemente zählen nicht als sichtbar.
 
 Einträge zu gelöschten Elementen bleiben im Verlauf; sie tragen `element_path` (Name beim Entstehen) und `element_deleted = true`. Weil sich ihr Geltungsbereich nicht mehr auflösen lässt, sieht sie nur, wer `view` global hat. Mit `recursive` findet der Filter nur Elemente, die noch existieren.

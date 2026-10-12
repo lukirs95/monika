@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/lukirs95/monika/internal/action"
 	"github.com/lukirs95/monika/internal/action/executor"
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
@@ -125,6 +126,7 @@ func runWorld(t *testing.T) (*scene, *Server, *fakeExecutor, *fakePresets) {
 	ex := &fakeExecutor{targets: map[uuid.UUID][]uuid.UUID{sc.p1: {sc.p1}, sc.g: {sc.p1}}}
 	pr := &fakePresets{presets: map[uuid.UUID]preset.Preset{}}
 	s.cfg.Executor, s.cfg.Presets = ex, pr
+	s.cfg.History = &fakeHistory{runs: map[uuid.UUID]action.Run{}}
 	s.cfg.Auth.(*fakeAuth).grants = map[uuid.UUID][]auth.Grant{
 		anna.UserID: {{Permission: auth.PermView, ScopeElementID: sc.g}, {Permission: auth.PermOperate, ScopeElementID: sc.g}},
 		boss.UserID: {
