@@ -56,7 +56,7 @@ func (a *authCfg) compile() error {
 	if len(a.RetryOn) == 0 {
 		a.RetryOn = []int{http.StatusUnauthorized}
 	}
-	if a.Apply.Format == "" {
+	if a.Apply.As != "" && a.Apply.Format == "" {
 		a.Apply.Format = "{{token}}"
 	}
 	var errs []error
@@ -82,11 +82,13 @@ func (a *authCfg) compile() error {
 		}
 		a.body = &t
 	}
-	var err error
-	if a.format, err = parseTemplate(a.Apply.Format, func(name string) bool { return name == "token" }); err != nil {
-		errs = append(errs, fmt.Errorf("apply.format: %w", err))
-	} else if !strings.Contains(a.Apply.Format, "{{") {
-		errs = append(errs, errors.New("apply.format: needs {{token}}"))
+	if a.Apply.As != "" { // ohne apply geht der Token nur über {{auth.token}} im Body mit
+		var err error
+		if a.format, err = parseTemplate(a.Apply.Format, func(name string) bool { return name == "token" }); err != nil {
+			errs = append(errs, fmt.Errorf("apply.format: %w", err))
+		} else if !strings.Contains(a.Apply.Format, "{{") {
+			errs = append(errs, errors.New("apply.format: needs {{token}}"))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -161,9 +163,9 @@ func (a *authenticator) current() (string, uint64) {
 
 func (a *authenticator) retry(status int) bool { return slices.Contains(a.cfg.RetryOn, status) }
 
-// apply setzt den Token in die Anfrage; ohne Token nichts.
+// apply setzt den Token in die Anfrage; ohne Token oder ohne apply nichts.
 func (a *authenticator) apply(req *http.Request, token string) {
-	if token == "" {
+	if token == "" || a.cfg.Apply.As == "" {
 		return
 	}
 	v := a.cfg.format.render(map[string]any{"token": token}, asText)

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,6 +29,7 @@ type source struct {
 	health     *healthCfg
 	secret     secretValue
 	auth       *authenticator // nil ohne auth
+	redact     []string       // Text-Werte des Secrets, die in keiner gespeicherten Antwort stehen
 	retryLogin time.Duration  // login on_start: Abstand neuer Versuche
 	calls      map[string]*call
 	order      []*call
@@ -77,7 +79,8 @@ func newSource(cfg sdk.SourceConfig) (sdk.Source, error) {
 	}
 	s := &source{
 		log: cfg.Logger, sched: cfg.Scheduler, base: base, timeout: time.Duration(c.TimeoutS * float64(time.Second)),
-		health: c.Health, secret: sec, auth: auth, retryLogin: loginRetry, calls: map[string]*call{}, order: calls,
+		health: c.Health, secret: sec, auth: auth, retryLogin: loginRetry, redact: secretTexts(cfg.Secret),
+		calls: map[string]*call{}, order: calls,
 		client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse // Weiterleitungen nicht verfolgen
 		}},
@@ -210,7 +213,7 @@ func (c *call) element() sdk.Element {
 
 // checkHealth ruft den Health-Check auf; das Ergebnis geht an Run.
 func (s *source) checkHealth(ctx context.Context) error {
-	res, err := s.send(ctx, func(ctx context.Context) (*http.Request, error) {
+	res, err := s.send(ctx, func(ctx context.Context, _ string) (*http.Request, error) {
 		return http.NewRequestWithContext(ctx, s.health.Method, s.url(s.health.Path, nil), nil)
 	})
 	if err == nil && !ok(res.status) {
@@ -237,7 +240,9 @@ func (s *source) Execute(ctx context.Context, cmd sdk.Command) (sdk.Result, erro
 		return sdk.Result{Status: sdk.Rejected, Detail: detail, RejectedFields: rejected}, nil
 	}
 	start := time.Now()
-	res, err := s.send(ctx, func(ctx context.Context) (*http.Request, error) { return s.request(ctx, c, values) })
+	res, err := s.send(ctx, func(ctx context.Context, token string) (*http.Request, error) {
+		return s.request(ctx, c, values, token)
+	})
 	s.observe(c.ID, start, time.Since(start), res.status)
 	var authErr *authError
 	switch {
@@ -269,8 +274,13 @@ func (s *source) observe(id string, start time.Time, d time.Duration, status int
 	}
 }
 
-// request baut die Anfrage eines Aufrufs mit eingesetzten Werten.
-func (s *source) request(ctx context.Context, c *call, values map[string]any) (*http.Request, error) {
+// request baut die Anfrage eines Aufrufs mit eingesetzten Werten; token ist der aktuelle Token
+// der Anmeldung für {{auth.token}} im Body.
+func (s *source) request(ctx context.Context, c *call, values map[string]any, token string) (*http.Request, error) {
+	if c.usesToken {
+		values = maps.Clone(values)
+		values[tokenPlaceholder] = token
+	}
 	q := url.Values{}
 	for k, t := range c.query {
 		q.Set(k, t.render(values, asText))
@@ -311,7 +321,7 @@ type response struct {
 // baut sie, für eine Wiederholung erneut. Antwortet das Ziel mit einem Status aus retry_on, meldet
 // sich send an und wiederholt genau einmal; scheitert die Anmeldung, kommt die erste Antwort mit
 // dem Fehler zurück. Ein anderer Fehler heißt: keine Antwort.
-func (s *source) send(ctx context.Context, build func(context.Context) (*http.Request, error)) (response, error) {
+func (s *source) send(ctx context.Context, build func(ctx context.Context, token string) (*http.Request, error)) (response, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	var token string
@@ -330,8 +340,8 @@ func (s *source) send(ctx context.Context, build func(context.Context) (*http.Re
 	return s.sendOnce(ctx, build, token)
 }
 
-func (s *source) sendOnce(ctx context.Context, build func(context.Context) (*http.Request, error), token string) (response, error) {
-	req, err := build(ctx)
+func (s *source) sendOnce(ctx context.Context, build func(ctx context.Context, token string) (*http.Request, error), token string) (response, error) {
+	req, err := build(ctx, token)
 	if err != nil {
 		return response{}, err
 	}
@@ -351,7 +361,46 @@ func (s *source) sendOnce(ctx context.Context, build func(context.Context) (*htt
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) // Rest verwerfen, Verbindung wiederverwenden
-	return response{status: resp.StatusCode, body: string(bytes.ToValidUTF8(b, []byte("�")))}, nil
+	return response{status: resp.StatusCode, body: s.redacted(string(bytes.ToValidUTF8(b, []byte("�"))), token)}, nil
+}
+
+// redacted ersetzt Token und Text-Werte des Secrets in einer Antwort, die im Lauf gespeichert
+// wird: Manche Ziele geben den Body der Anfrage im Fehlerfall zurück.
+func (s *source) redacted(body, token string) string {
+	for _, v := range s.redact {
+		body = strings.ReplaceAll(body, v, "[redacted]")
+	}
+	if token != "" {
+		body = strings.ReplaceAll(body, token, "[redacted]")
+	}
+	return body
+}
+
+// secretTexts sammelt die Text-Werte des Secrets ab 4 Zeichen, auch verschachtelte; kürzere
+// würden beliebigen Text treffen.
+func secretTexts(raw json.RawMessage) []string {
+	var doc any
+	_ = json.Unmarshal(raw, &doc)
+	var out []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case string:
+			if len(v) >= 4 {
+				out = append(out, v)
+			}
+		case map[string]any:
+			for _, x := range v {
+				walk(x)
+			}
+		case []any:
+			for _, x := range v {
+				walk(x)
+			}
+		}
+	}
+	walk(doc)
+	return out
 }
 
 // do sendet eine fertige Anfrage. Fehler nennen die URL ohne Passwort; *url.Error nennt sie

@@ -30,6 +30,7 @@ type loginTarget struct {
 	loginStatus int    // ≠ 0: Anmeldung abgelehnt
 	deliver     string // cookie, header, json oder none
 	loginDelay  time.Duration
+	echo        bool // /bt antwortet mit 400 und gibt den Body der Anfrage zurück
 }
 
 func newLoginTarget(t *testing.T, deliver string) *loginTarget {
@@ -76,6 +77,20 @@ func newLoginTarget(t *testing.T, deliver string) *loginTarget {
 			w.WriteHeader(nethttp.StatusNoContent)
 		case "/always":
 			w.WriteHeader(nethttp.StatusUnauthorized)
+		case "/bt": // Token im Body statt im Header
+			lt.calls++
+			b, _ := io.ReadAll(r.Body)
+			var req struct{ Session string }
+			_ = json.Unmarshal(b, &req)
+			switch {
+			case lt.valid == "" || req.Session != lt.valid:
+				w.WriteHeader(nethttp.StatusUnauthorized)
+			case lt.echo:
+				w.WriteHeader(nethttp.StatusBadRequest)
+				_, _ = fmt.Fprintf(w, "invalid request: %s", b)
+			default:
+				w.WriteHeader(nethttp.StatusNoContent)
+			}
 		}
 	}))
 	t.Cleanup(lt.Close)
@@ -148,6 +163,39 @@ func TestAuthTokens(t *testing.T) {
 				t.Errorf("after expiry: %d logins", logins)
 			}
 		})
+	}
+}
+
+// Der Token geht nur im Body mit (ohne apply); nach Ablauf trägt die Wiederholung den neuen.
+func TestAuthTokenInBody(t *testing.T) {
+	lt := newLoginTarget(t, "json")
+	cfg := `{"timeout_s": 2, "auth": {"path": "/login",
+	  "body": "{\"user\": {{secret.user}}, \"password\": {{secret.password}}}",
+	  "token": {"from": "json", "pointer": "/data/token"}},
+	  "calls": [{"id": "bt", "name": "BT", "method": "POST", "path": "/bt",
+	    "body": "{\"session\": {{auth.token}}, \"camera\": {{camera}}}",
+	    "params": {"camera": {"type": "int", "default": 1}}}]}`
+	s := newTestSource(t, lt.URL, cfg, loginSecret)
+
+	if res := trigger(t, s, "bt"); res.Status != sdk.Accepted {
+		t.Fatalf("first call = %+v", res)
+	}
+	if logins, calls := lt.counts(); logins != 1 || calls != 2 {
+		t.Errorf("first call: %d logins, %d calls", logins, calls)
+	}
+	lt.with(func() { lt.valid = "" })
+	if res := trigger(t, s, "bt"); res.Status != sdk.Accepted {
+		t.Errorf("after expiry = %+v", res)
+	}
+	if logins, _ := lt.counts(); logins != 2 {
+		t.Errorf("logins = %d", logins)
+	}
+
+	// Gibt das Ziel den Body zurück, steht der Token geschwärzt in der Antwort des Laufs.
+	lt.with(func() { lt.echo = true })
+	res := trigger(t, s, "bt")
+	if res.Status != sdk.Rejected || strings.Contains(string(res.Response), "tok-") || !strings.Contains(string(res.Response), "[redacted]") {
+		t.Errorf("echo = %s", res.Response)
 	}
 }
 
@@ -249,6 +297,7 @@ func TestAuthConfig(t *testing.T) {
 		{"format without token", `{"path": "/login", "token": {"from": "cookie", "name": "s"}, "apply": {"as": "header", "name": "A", "format": "Bearer"}}`, "", "needs {{token}}"},
 		{"cookie without name", `{"path": "/login", "token": {"from": "cookie"}, "apply": {"as": "cookie", "name": "s"}}`, "", "name missing"},
 		{"pointer without slash", `{"path": "/login", "token": {"from": "json", "pointer": "token"}, "apply": {"as": "cookie", "name": "s"}}`, "", "pointer must start with /"},
+		{"token never used", `{"path": "/login", "token": {"from": "cookie", "name": "s"}}`, "", "never used"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -264,6 +313,18 @@ func TestAuthConfig(t *testing.T) {
 	}
 }
 
+func TestTokenPlaceholderNeedsAuth(t *testing.T) {
+	cfg := `{"calls": [{"id": "x", "name": "X", "method": "POST", "path": "/x", "body": "{\"s\": {{auth.token}}}"}]}`
+	_, err := newSource(sdk.SourceConfig{Address: "http://h", Config: json.RawMessage(cfg), Logger: slog.New(slog.DiscardHandler)})
+	if err == nil || !strings.Contains(err.Error(), "needs auth") {
+		t.Errorf("New = %v", err)
+	}
+	cfg = `{"calls": [{"id": "x", "name": "X", "method": "POST", "path": "/x/{{auth.token}}"}]}`
+	if _, err := newSource(sdk.SourceConfig{Address: "http://h", Config: json.RawMessage(cfg), Logger: slog.New(slog.DiscardHandler)}); err == nil {
+		t.Error("{{auth.token}} in the path accepted")
+	}
+}
+
 func TestJSONPointer(t *testing.T) {
 	var doc any
 	_ = json.Unmarshal([]byte(`{"a": {"b/c": [{"d~e": "x"}]}}`), &doc)
@@ -274,5 +335,13 @@ func TestJSONPointer(t *testing.T) {
 		if _, err := jsonPointer(doc, p); err == nil {
 			t.Errorf("%s: no error", p)
 		}
+	}
+}
+
+func TestRedacted(t *testing.T) {
+	s := &source{redact: secretTexts(json.RawMessage(`{"user": "monika", "password": "pw-geheim", "pin": "12", "headers": {"X-Key": "k3y-abc"}}`))}
+	got := s.redacted(`user monika, pw-geheim, key k3y-abc, pin 12, token tok-9`, "tok-9")
+	if got != `user [redacted], [redacted], key [redacted], pin 12, token [redacted]` {
+		t.Errorf("redacted = %q", got)
 	}
 }

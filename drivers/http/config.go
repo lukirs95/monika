@@ -32,7 +32,7 @@ const configSchema = `{
     "auth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "token", "apply"],
+      "required": ["path", "token"],
       "properties": {
         "login": {"enum": ["on_demand", "on_start"]},
         "method": {"enum": ["GET", "POST", "PUT"]},
@@ -143,11 +143,15 @@ type paramConfig struct {
 // call ist ein geprüfter Aufruf mit kompilierten Vorlagen.
 type call struct {
 	callConfig
-	params map[string]param
-	path   template
-	query  map[string]template
-	body   *template // nil = ohne Body
+	params    map[string]param
+	path      template
+	query     map[string]template
+	body      *template // nil = ohne Body
+	usesToken bool      // der Body setzt {{auth.token}} ein
 }
+
+// tokenPlaceholder setzt den Token der Anmeldung in den Body eines Aufrufs (nur dort).
+const tokenPlaceholder = "auth.token"
 
 // parseConfig liest und prüft die Konfiguration über das Schema hinaus. Fehler sammelt es alle.
 func parseConfig(raw json.RawMessage) (config, []*call, error) {
@@ -181,6 +185,17 @@ func parseConfig(raw json.RawMessage) (config, []*call, error) {
 		if err := c.Auth.compile(); err != nil {
 			errs = append(errs, fmt.Errorf("auth: %w", err))
 		}
+	}
+	// {{auth.token}} braucht auth; ein Token, der nirgends mitgeht, ist ein Fehler.
+	usesToken := false
+	for _, cl := range calls {
+		usesToken = usesToken || cl.usesToken
+		if cl.usesToken && c.Auth == nil {
+			errs = append(errs, fmt.Errorf("call %q: {{%s}} needs auth", cl.ID, tokenPlaceholder))
+		}
+	}
+	if c.Auth != nil && c.Auth.Apply.As == "" && !usesToken {
+		errs = append(errs, fmt.Errorf("auth: the token is never used; set apply or use {{%s}} in a body", tokenPlaceholder))
 	}
 	return c, calls, errors.Join(errs...)
 }
@@ -216,7 +231,10 @@ func compileCall(cc callConfig) (*call, error) {
 		cl.query[k] = t
 	}
 	if cc.Body != "" {
-		t, err := parseTemplate(cc.Body, known)
+		t, err := parseTemplate(cc.Body, func(name string) bool {
+			cl.usesToken = cl.usesToken || name == tokenPlaceholder
+			return known(name) || name == tokenPlaceholder
+		})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("body: %w", err))
 		}
@@ -227,7 +245,7 @@ func compileCall(cc callConfig) (*call, error) {
 	}
 	// Probe mit Standardwerten bzw. Beispielwerten: Ergibt die Vorlage Unsinn, merkt es der User
 	// beim Speichern und nicht erst beim ersten Aufruf.
-	sample := map[string]any{}
+	sample := map[string]any{tokenPlaceholder: "token"}
 	for name, p := range cl.params {
 		sample[name] = p.sample()
 	}
