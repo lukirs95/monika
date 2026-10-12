@@ -2,11 +2,8 @@
 
 Einstiegspunkt des Monolithen.
 
-- Bootstrap laden (`internal/config`)
-- Master-Key prüfen (Startprüfung des Secret-Stores)
-- Datenbank-Migrationen ausführen
-- initialen Admin anlegen, falls noch kein Benutzer existiert
-- Treiber über `drivers/all` einbinden
-- Komponenten verdrahten und starten
+- `main.go`: Flags (`-version`, `-healthcheck`), `run(…) int`
+- `serve.go`: Datenbank, Einzelinstanz-Sperre, Migrationen, Secrets prüfen und rotieren, initialer Admin, Komponenten verdrahten, Dienste in der Reihenfolge aus `flows.md` starten, in sechs Phasen herunterfahren
+- Treiber kommen über `drivers/all`
 
-Siehe `docs/ARCHITECTURE.md`, Abschnitt 3 und 14.
+Vertrag: `docs/contracts/bootstrap.md` und `flows.md` (Start, Herunterfahren).

@@ -122,7 +122,10 @@ sequenceDiagram
 | **Summe** | **höchstens 30 s** |
 
 Die Umgebung muss etwas länger warten (Docker: `stop_grace_period: 35s`, `docs/OPERATIONS.md`).
-- **Die `errgroup`** dient nur dazu, einen Dienst zu bemerken, der mit Fehler zurückkehrt; sie bricht keine anderen Dienste ab.
+- **Einen Dienst bemerken, der zurückkehrt:** Jeder Dienst läuft in eigener Goroutine mit eigenem `ctx`; kehrt er zurück, bevor seine Phase ihn abbricht (mit Fehler oder ohne), meldet er das über einen Kanal, und `main` fährt herunter. Das ersetzt die `errgroup`; abgebrochen wird kein anderer Dienst.
+- **Testbar:** `main` ruft nur `run(ctx, args, environ, stdout, stderr) int`; ein Integrationstest startet Monika gegen eine frische Datenbank (Healthcheck, Anmeldung, zweite Instanz bricht ab, geordnetes Herunterfahren mit Exit-Code 0).
+- **HTTP:** nur `/api/v1/` (die UI folgt in Phase 2), `ReadHeaderTimeout` 10 s, `IdleTimeout` 2 min, kein `WriteTimeout`. In Phase 1 schließt `main` erst die Ereignisströme (Verteiler, `api.md` V7), dann `Shutdown`.
+- **Version** (`-version`): aus `-ldflags -X main.version=…` (setzt `make`), sonst die Modulversion aus den Build-Infos, sonst `dev`.
 - **Logger:** `slog` mit `MONIKA_LOG_FORMAT` (`json` oder `text`) und `MONIKA_LOG_LEVEL`; `slog.SetDefault`, damit auch `log`-Ausgaben fremder Libraries strukturiert landen (`sdk.md`, Logging). Beim Start eine Zeile mit Version und den wesentlichen, nicht geheimen Einstellungen.
 - **Initialer Admin:** wird nur angelegt, wenn es noch keinen Benutzer gibt; das Passwort muss A6 erfüllen (`auth.md`), sonst startet Monika nicht. TOTP richtet er bei der ersten Anmeldung ein (A1). Gibt es schon Benutzer und die Variablen sind gesetzt, warnt Monika, dass sie entfernt werden können.
 - **Kein Unterbefehl**, nur zwei Flags: `-version` und `-healthcheck` (fragt `GET /healthz` auf `MONIKA_LISTEN` ab und endet mit `0` oder `1`; für den Healthcheck im Container, der kein `curl` hat). Migrationen laufen beim Start; für die Entwicklung gibt es `make db-migrate`.

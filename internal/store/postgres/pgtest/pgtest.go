@@ -8,6 +8,9 @@ package pgtest
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -106,6 +109,16 @@ func (s *Server) NewDB(t testing.TB) *pgxpool.Pool {
 		}
 	})
 	return pool
+}
+
+// NewDBURL legt wie NewDB eine frische, migrierte Datenbank an und liefert ihre URL, etwa für
+// einen Test, der Monika als Ganzes startet.
+func (s *Server) NewDBURL(t testing.TB) string {
+	t.Helper()
+	c := s.NewDB(t).Config().ConnConfig
+	u := url.URL{Scheme: "postgres", User: url.UserPassword(c.User, c.Password),
+		Host: net.JoinHostPort(c.Host, strconv.Itoa(int(c.Port))), Path: "/" + c.Database, RawQuery: "sslmode=disable"}
+	return u.String()
 }
 
 func (s *Server) pool(ctx context.Context, database string) (*pgxpool.Pool, error) {
