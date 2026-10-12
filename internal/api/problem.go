@@ -28,7 +28,7 @@ type Problem struct {
 	Status  int              `json:"status"`
 	Code    string           `json:"code"`
 	Detail  string           `json:"detail,omitempty"`
-	Presets []oapi.PresetRef `json:"presets,omitempty"` // bei *_in_use
+	Presets []oapi.PresetRef `json:"presets,omitzero"` // bei *_in_use; leer, wenn der Benutzer keine Presets sehen darf
 
 	retryAfter time.Duration // bei 429: Header Retry-After
 }
@@ -127,14 +127,19 @@ func toProblem(err error) *Problem {
 	return problem(http.StatusInternalServerError, "internal", "internal error")
 }
 
-// inUse übersetzt *inventory.InUseError in 409 mit dem Code des Endpunkts und den Presets.
-func inUse(err error, code string) error {
+// inUse übersetzt *inventory.InUseError in 409 mit dem Code des Endpunkts; die Presets nennt es
+// nur, wenn der Benutzer Presets sehen darf (showPresets).
+func inUse(err error, code string, showPresets bool) error {
 	e, ok := errors.AsType[*inventory.InUseError](err)
 	if !ok {
 		return err
 	}
-	p := problem(http.StatusConflict, code, err.Error())
+	p := problem(http.StatusConflict, code, "used by presets")
+	p.Presets = []oapi.PresetRef{}
 	for _, ref := range e.Presets {
+		if !showPresets {
+			break
+		}
 		p.Presets = append(p.Presets, oapi.PresetRef{ID: ref.ID, Name: ref.Name})
 	}
 	return p

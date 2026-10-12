@@ -127,7 +127,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~11d Sichtbarkeit und Gerüst: `/state`, Fakten, geltende Regeln, Treiber~~: erledigt; freie JSON-Felder als `json.RawMessage` durchgereicht, Zahlen als `double`, Richtung `equal` wie im Core
       - 11e Befehle für Inventar, Regeln und Quittierung über `Core.Do`:
         - ~~11e1 Prüfung der Konfiguration gegen das `ConfigSchema` im Inventar~~ (Entscheidung A vom 2026-10-12): erledigt, auch in `sdktest.Conformance`
-        - 11e2 Endpunkte
+        - ~~11e2 Endpunkte~~: erledigt; Tests gegen einen laufenden Core mit Stores im Speicher (`coretest.Start`), doppelte Quellen und Mitgliedschaften prüft das Inventar jetzt auch vorab
       - 11f Läufe, Presets, Weiterleitung, Secrets, Benutzer, Rollen, Tokens
       - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams`
       - 11h Verlauf (lesende Queries) und abgeschlossene Läufe in `GET /runs/{id}`

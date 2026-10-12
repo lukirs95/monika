@@ -37,35 +37,11 @@ func newScene(t *testing.T) (*scene, *core.View) {
 	sc := &scene{x8: id(), a: id(), p1: id(), p2: id(), x9: id(), b: id(), q1: id(), g: id(), s8: id(), s9: id(),
 		member: id(), feeds: id(), dangling: id(), ruleDevice: id(), ruleGroup: id(), ruleGlobal: id(),
 		findingP1: id(), findingQ1: id(), runP1: id(), presetRoot: id()}
-	el := func(id, parent, device, source uuid.UUID, kind inventory.Kind, name string) inventory.Element {
-		return inventory.Element{ID: id, ParentID: parent, DeviceID: device, SourceID: source, Kind: kind, Name: name,
-			Present: true, Monitored: true, Attributes: json.RawMessage(`{"slot":1}`)}
-	}
 	inv := inventory.New(nil, func(string) (sdk.Driver, bool) { return sdk.Driver{}, true }, slog.New(slog.DiscardHandler))
-	inv.Load(inventory.Snapshot{
-		Sources: []inventory.Source{
-			{ID: sc.s8, DeviceID: sc.x8, Driver: "videoxlink", Enabled: true, AccessElementID: sc.a},
-			{ID: sc.s9, DeviceID: sc.x9, Driver: "videoxlink", Enabled: true, AccessElementID: sc.b},
-		},
-		Elements: []inventory.Element{
-			el(sc.x8, uuid.Nil, sc.x8, uuid.Nil, inventory.KindDevice, ""),
-			el(sc.a, sc.x8, sc.x8, sc.s8, inventory.KindAccess, "videoxlink"),
-			el(sc.p1, sc.a, sc.x8, sc.s8, "port", "SDI 1"),
-			el(sc.p2, sc.a, sc.x8, sc.s8, "port", "SDI 2"),
-			el(sc.x9, uuid.Nil, sc.x9, uuid.Nil, inventory.KindDevice, ""),
-			el(sc.b, sc.x9, sc.x9, sc.s9, inventory.KindAccess, "videoxlink"),
-			el(sc.q1, sc.b, sc.x9, sc.s9, "port", "SDI 1"),
-			el(sc.g, uuid.Nil, uuid.Nil, uuid.Nil, inventory.KindGroup, ""),
-		},
-		Links: []inventory.Link{
-			{ID: sc.member, Type: inventory.LinkMember, FromID: sc.g, ToID: sc.p1},
-			{ID: sc.feeds, Type: inventory.LinkFeeds, SourceID: sc.s8, FromID: sc.p1, ToID: sc.q1},
-			{ID: sc.dangling, Type: inventory.LinkFeeds, SourceID: sc.s8, FromID: sc.p2, ToRef: "xlink:REMOTE"},
-		},
-	})
+	inv.Load(sc.snapshot())
 	rule := func(id, scope uuid.UUID, name, limit string) evaluation.Rule {
 		return evaluation.Rule{ID: id, Name: name, Enabled: true, Severity: evaluation.SeverityWarning, ScopeElementID: scope,
-			Fact: "device.temperature_c", Op: evaluation.OpLte, Value: json.RawMessage(limit)}
+			Fact: "system.temperature_c", Op: evaluation.OpLte, Value: json.RawMessage(limit)}
 	}
 	rules, errs := evaluation.NewRules([]evaluation.Rule{
 		rule(sc.ruleDevice, sc.x8, "X8 warm", "90"),
@@ -78,7 +54,7 @@ func newScene(t *testing.T) (*scene, *core.View) {
 	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 	v := &core.View{
 		Version: 4711, Graph: inv.Graph(), Rules: rules,
-		Facts: map[uuid.UUID]sdk.Facts{sc.p1: {"device.temperature_c": 95.0}, sc.q1: {"device.temperature_c": 40.0}},
+		Facts: map[uuid.UUID]sdk.Facts{sc.p1: {"system.temperature_c": 95.0}, sc.q1: {"system.temperature_c": 40.0}},
 		Health: map[uuid.UUID]evaluation.ElementHealth{
 			sc.p1: {ElementID: sc.p1, Health: evaluation.HealthWarning},
 			sc.q1: {ElementID: sc.q1, Health: evaluation.HealthOK},
@@ -98,6 +74,35 @@ func newScene(t *testing.T) (*scene, *core.View) {
 		},
 	}
 	return sc, v
+}
+
+// snapshot ist das Inventar der Szene.
+func (sc *scene) snapshot() inventory.Snapshot {
+	el := func(id, parent, device, source uuid.UUID, kind inventory.Kind, name string) inventory.Element {
+		return inventory.Element{ID: id, ParentID: parent, DeviceID: device, SourceID: source, Kind: kind, Name: name,
+			Present: true, Monitored: true, Attributes: json.RawMessage(`{"slot":1}`)}
+	}
+	return inventory.Snapshot{
+		Sources: []inventory.Source{
+			{ID: sc.s8, DeviceID: sc.x8, Driver: "videoxlink", Enabled: true, AccessElementID: sc.a},
+			{ID: sc.s9, DeviceID: sc.x9, Driver: "videoxlink", Enabled: true, AccessElementID: sc.b},
+		},
+		Elements: []inventory.Element{
+			el(sc.x8, uuid.Nil, sc.x8, uuid.Nil, inventory.KindDevice, ""),
+			el(sc.a, sc.x8, sc.x8, sc.s8, inventory.KindAccess, "videoxlink"),
+			el(sc.p1, sc.a, sc.x8, sc.s8, "port", "SDI 1"),
+			el(sc.p2, sc.a, sc.x8, sc.s8, "port", "SDI 2"),
+			el(sc.x9, uuid.Nil, sc.x9, uuid.Nil, inventory.KindDevice, ""),
+			el(sc.b, sc.x9, sc.x9, sc.s9, inventory.KindAccess, "videoxlink"),
+			el(sc.q1, sc.b, sc.x9, sc.s9, "port", "SDI 1"),
+			el(sc.g, uuid.Nil, uuid.Nil, uuid.Nil, inventory.KindGroup, ""),
+		},
+		Links: []inventory.Link{
+			{ID: sc.member, Type: inventory.LinkMember, FromID: sc.g, ToID: sc.p1},
+			{ID: sc.feeds, Type: inventory.LinkFeeds, SourceID: sc.s8, FromID: sc.p1, ToID: sc.q1},
+			{ID: sc.dangling, Type: inventory.LinkFeeds, SourceID: sc.s8, FromID: sc.p2, ToRef: "xlink:REMOTE"},
+		},
+	}
 }
 
 // ref ist ein Eintrag aus /state, nur mit seinen IDs.
@@ -185,7 +190,7 @@ func TestElementFactsAndRules(t *testing.T) {
 	s.cfg.Auth.(*fakeAuth).grants = map[uuid.UUID][]auth.Grant{anna.UserID: {{Permission: auth.PermView, ScopeElementID: sc.g}}}
 
 	w := call(t, s, "GET", "/api/v1/elements/"+sc.p1.String()+"/facts", "", "anna")
-	if w.Code != 200 || w.Body.String() != `{"element_id":"`+sc.p1.String()+`","facts":{"device.temperature_c":95},"version":4711}`+"\n" {
+	if w.Code != 200 || w.Body.String() != `{"element_id":"`+sc.p1.String()+`","facts":{"system.temperature_c":95},"version":4711}`+"\n" {
 		t.Errorf("facts = %d %s", w.Code, w.Body)
 	}
 	for _, hidden := range []uuid.UUID{sc.q1, sc.a, uuid.New()} { // unsichtbar, Gerüst, unbekannt
@@ -213,7 +218,7 @@ func TestElementFactsAndRules(t *testing.T) {
 		t.Fatalf("rules = %d %s", w.Code, w.Body)
 	}
 	set := sets[0]
-	if set.Fact != "device.temperature_c" || set.Direction != "upper" || len(set.Effective) != 1 || len(set.Overridden) != 2 {
+	if set.Fact != "system.temperature_c" || set.Direction != "upper" || len(set.Effective) != 1 || len(set.Overridden) != 2 {
 		t.Fatalf("rule set = %s", w.Body)
 	}
 	if e := set.Effective[0]; e.RuleID != sc.ruleDevice || e.Scope != "device" || e.ScopeElementID != nil || e.Satisfied == nil || *e.Satisfied {

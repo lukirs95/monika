@@ -13,21 +13,6 @@ type unimplemented struct{}
 func (unimplemented) ListAudit(context.Context, oapi.ListAuditRequestObject) (oapi.ListAuditResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) CreateDevice(context.Context, oapi.CreateDeviceRequestObject) (oapi.CreateDeviceResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteDevice(context.Context, oapi.DeleteDeviceRequestObject) (oapi.DeleteDeviceResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ListSources(context.Context, oapi.ListSourcesRequestObject) (oapi.ListSourcesResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreateSource(context.Context, oapi.CreateSourceRequestObject) (oapi.CreateSourceResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdateUserFields(context.Context, oapi.UpdateUserFieldsRequestObject) (oapi.UpdateUserFieldsResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) GetEvents(context.Context, oapi.GetEventsRequestObject) (oapi.GetEventsResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -35,9 +20,6 @@ func (unimplemented) Watch(context.Context, oapi.WatchRequestObject) (oapi.Watch
 	return nil, errNotImplemented
 }
 func (unimplemented) ListFindingHistory(context.Context, oapi.ListFindingHistoryRequestObject) (oapi.ListFindingHistoryResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) AckFinding(context.Context, oapi.AckFindingRequestObject) (oapi.AckFindingResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) ListForwardTargets(context.Context, oapi.ListForwardTargetsRequestObject) (oapi.ListForwardTargetsResponseObject, error) {
@@ -50,21 +32,6 @@ func (unimplemented) DeleteForwardTarget(context.Context, oapi.DeleteForwardTarg
 	return nil, errNotImplemented
 }
 func (unimplemented) UpdateForwardTarget(context.Context, oapi.UpdateForwardTargetRequestObject) (oapi.UpdateForwardTargetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreateGroup(context.Context, oapi.CreateGroupRequestObject) (oapi.CreateGroupResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteGroup(context.Context, oapi.DeleteGroupRequestObject) (oapi.DeleteGroupResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) AddGroupMember(context.Context, oapi.AddGroupMemberRequestObject) (oapi.AddGroupMemberResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) RemoveGroupMember(context.Context, oapi.RemoveGroupMemberRequestObject) (oapi.RemoveGroupMemberResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdateGroupMember(context.Context, oapi.UpdateGroupMemberRequestObject) (oapi.UpdateGroupMemberResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) ListPresets(context.Context, oapi.ListPresetsRequestObject) (oapi.ListPresetsResponseObject, error) {
@@ -103,18 +70,6 @@ func (unimplemented) SetRoleGrants(context.Context, oapi.SetRoleGrantsRequestObj
 func (unimplemented) SetRoleMembers(context.Context, oapi.SetRoleMembersRequestObject) (oapi.SetRoleMembersResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) ListRules(context.Context, oapi.ListRulesRequestObject) (oapi.ListRulesResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreateRule(context.Context, oapi.CreateRuleRequestObject) (oapi.CreateRuleResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteRule(context.Context, oapi.DeleteRuleRequestObject) (oapi.DeleteRuleResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdateRule(context.Context, oapi.UpdateRuleRequestObject) (oapi.UpdateRuleResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) SubmitRun(context.Context, oapi.SubmitRunRequestObject) (oapi.SubmitRunResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -137,12 +92,6 @@ func (unimplemented) DeleteSecret(context.Context, oapi.DeleteSecretRequestObjec
 	return nil, errNotImplemented
 }
 func (unimplemented) ReplaceSecretValue(context.Context, oapi.ReplaceSecretValueRequestObject) (oapi.ReplaceSecretValueResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeleteSource(context.Context, oapi.DeleteSourceRequestObject) (oapi.DeleteSourceResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdateSource(context.Context, oapi.UpdateSourceRequestObject) (oapi.UpdateSourceResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) RevokeToken(context.Context, oapi.RevokeTokenRequestObject) (oapi.RevokeTokenResponseObject, error) {

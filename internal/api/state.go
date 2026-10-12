@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lukirs95/monika/internal/api/oapi"
+	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
 	"github.com/lukirs95/monika/internal/core/evaluation"
 	"github.com/lukirs95/monika/internal/core/inventory"
@@ -19,6 +20,12 @@ import (
 // Aktueller Stand aus der View, gefiltert nach Rechten (api.md, Stand, Ereignisse und Abos).
 
 var errNotFound = problem(http.StatusNotFound, "not_found", "unknown or not visible")
+
+// viewFor liefert die aktuelle View und den angemeldeten Benutzer.
+func (s *Server) viewFor(ctx context.Context) (*core.View, auth.Principal, error) {
+	v, err := s.view()
+	return v, principal(ctx), err
+}
 
 // view liefert die aktuelle View; ohne sie läuft der Core noch nicht.
 func (s *Server) view() (*core.View, error) {

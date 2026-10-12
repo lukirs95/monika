@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func TestWriteProblem(t *testing.T) {
 	preset := uuid.New()
 	w = httptest.NewRecorder()
 	err := fmt.Errorf("delete device: %w", &inventory.InUseError{Presets: []inventory.PresetRef{{ID: preset, Name: "Show A"}}})
-	writeProblem(w, toProblem(inUse(err, "device_in_use")))
+	writeProblem(w, toProblem(inUse(err, "device_in_use", true)))
 	var got struct {
 		Type, Code string
 		Status     int
@@ -67,7 +68,11 @@ func TestWriteProblem(t *testing.T) {
 		got.Presets[0].ID != preset.String() || got.Presets[0].Name != "Show A" {
 		t.Errorf("in use = %s", w.Body)
 	}
-	if err := inUse(inventory.ErrNotFound, "device_in_use"); !errors.Is(err, inventory.ErrNotFound) || toProblem(err).Code != "not_found" {
+	hidden := toProblem(inUse(err, "device_in_use", false))
+	if b, _ := json.Marshal(hidden); !strings.Contains(string(b), `"presets":[]`) || strings.Contains(string(b), "Show A") {
+		t.Errorf("hidden presets = %s", b)
+	}
+	if err := inUse(inventory.ErrNotFound, "device_in_use", true); !errors.Is(err, inventory.ErrNotFound) || toProblem(err).Code != "not_found" {
 		t.Error("inUse changed another error")
 	}
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,9 +94,23 @@ func (f *fakeAuth) Grants(user uuid.UUID) []auth.Grant {
 
 var scope = uuid.New()
 
+// Allowed wie auth.Service: Ein Recht gilt global oder für Elemente in seinem Geltungsbereich.
+func (f *fakeAuth) Allowed(v *core.View, p auth.Principal, perm auth.Permission, element uuid.UUID) bool {
+	for _, g := range f.Grants(p.UserID) {
+		if g.Permission == perm && (g.ScopeElementID == uuid.Nil || (element != uuid.Nil && v.InScope(g.ScopeElementID, element))) {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeCore hält eine feste View; Befehle nimmt nur der echte Core aus coretest an.
 type fakeCore struct{ view atomic.Pointer[core.View] }
 
 func (c *fakeCore) View() *core.View { return c.view.Load() }
+func (c *fakeCore) Do(context.Context, core.Command) error {
+	return errors.New("fake core takes no commands")
+}
 
 // call schickt eine Anfrage durch den ganzen Handler, als Browser von monika.example.
 func call(t *testing.T, s *Server, method, path, body, cookie string) *httptest.ResponseRecorder {

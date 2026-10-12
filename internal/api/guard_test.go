@@ -22,10 +22,11 @@ import (
 )
 
 var (
-	anna  = auth.Principal{UserID: uuid.New(), Username: "anna", SessionID: uuid.New()}
-	wall  = auth.Principal{UserID: uuid.New(), Username: "wand", Service: true, SessionID: uuid.New(), ReadOnly: true}
-	robot = auth.Principal{UserID: uuid.New(), Username: "companion", Service: true, TokenID: uuid.New()}
-	boss  = auth.Principal{UserID: uuid.New(), Username: "chefin", SessionID: uuid.New()}
+	anna   = auth.Principal{UserID: uuid.New(), Username: "anna", SessionID: uuid.New()}
+	wall   = auth.Principal{UserID: uuid.New(), Username: "wand", Service: true, SessionID: uuid.New(), ReadOnly: true}
+	robot  = auth.Principal{UserID: uuid.New(), Username: "companion", Service: true, TokenID: uuid.New()}
+	boss   = auth.Principal{UserID: uuid.New(), Username: "chefin", SessionID: uuid.New()}
+	viewer = auth.Principal{UserID: uuid.New(), Username: "gast", SessionID: uuid.New()}
 )
 
 // fakeAuth kennt zwei Sitzungen und ein Token; die übrigen Methoden stehen in auth_test.go.
@@ -45,6 +46,8 @@ func (*fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, 
 		return wall, nil
 	case "boss":
 		return boss, nil
+	case "viewer":
+		return viewer, nil
 	}
 	return auth.Principal{}, auth.ErrUnauthenticated
 }
@@ -58,9 +61,15 @@ func (*fakeAuth) AuthenticateToken(_ context.Context, bearer string) (auth.Princ
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	return newServerWith(t, &fakeCore{})
+}
+
+// newServerWith baut den Server mit einem anderen Core, etwa dem laufenden aus coretest.
+func newServerWith(t *testing.T, c Core) *Server {
+	t.Helper()
 	public, _ := url.Parse("https://monika.example")
 	s, err := New(Config{
-		Auth: &fakeAuth{}, Core: &fakeCore{}, PublicURL: public, Log: slog.New(slog.DiscardHandler),
+		Auth: &fakeAuth{}, Core: c, PublicURL: public, Log: slog.New(slog.DiscardHandler),
 		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")},
 		Drivers:        func() []sdk.Driver { return nil },
 	})

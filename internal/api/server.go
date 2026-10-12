@@ -39,11 +39,13 @@ type Auth interface {
 	ListSessions(ctx context.Context, user uuid.UUID) ([]auth.Session, error)
 	RevokeSession(ctx context.Context, user, id uuid.UUID) error
 	Grants(user uuid.UUID) []auth.Grant
+	Allowed(v *core.View, p auth.Principal, perm auth.Permission, element uuid.UUID) bool
 }
 
-// Core liefert den aktuellen Stand (core.Core).
+// Core liefert den aktuellen Stand und nimmt Befehle an (core.Core).
 type Core interface {
 	View() *core.View
+	Do(ctx context.Context, cmd core.Command) error
 }
 
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.

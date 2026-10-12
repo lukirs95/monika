@@ -118,3 +118,29 @@ func nonNil[T any](s []T) []T {
 	}
 	return s
 }
+
+// value übersetzt ein fehlendes Feld in den leeren Wert.
+func value[T any](p *T) T {
+	if p == nil {
+		var zero T
+		return zero
+	}
+	return *p
+}
+
+// valueID übersetzt eine fehlende ID in uuid.Nil.
+func valueID(p *uuid.UUID) uuid.UUID { return value(p) }
+
+func toSource(s inventory.Source) oapi.Source {
+	out := oapi.Source{
+		ID: s.ID, DeviceID: s.DeviceID, AccessElementID: s.AccessElementID, Driver: s.Driver,
+		Address: optional(s.Address), Config: s.Config, SecretID: optionalID(s.SecretID), Enabled: s.Enabled,
+	}
+	if len(out.Config) == 0 {
+		out.Config = []byte(`{}`)
+	}
+	if id := s.Identity; id != (inventory.Identity{}) {
+		out.Identity = &oapi.Identity{Vendor: optional(id.Vendor), Model: optional(id.Model), Serial: optional(id.Serial), Firmware: optional(id.Firmware)}
+	}
+	return out
+}
