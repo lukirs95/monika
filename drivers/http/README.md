@@ -68,7 +68,7 @@ Die einzige Aktion jedes Aufruf-Elements; kritisch, wenn der Aufruf `critical: t
 
 | Stelle | eingesetzt als |
 |---|---|
-| `body` | JSON-Wert (`"program"`, `2`, `true`) |
+| `body` | JSON-Wert (`"program"`, `2`, `true`); zusätzlich `{{auth.token}}` (siehe Anmeldung) |
 | `path` | URL-kodiert für einen Pfadabschnitt; `path` enthält kein `?` |
 | Werte in `query` | URL-kodiert als Query-Parameter, z. B. `"query": {"state": "{{state}}", "source": "monika"}` |
 
@@ -146,6 +146,9 @@ Für Ziele, die weder festen Bearer noch Basic Auth können, sondern eine Anmeld
 | | `json` (`pointer`) | Wert im JSON der Antwort, als JSON Pointer (RFC 6901); muss ein String sein |
 | `apply.as` | `cookie` (`name`) | als Cookie bei jeder Anfrage |
 | | `header` (`name`, `format`) | als Header; `format` mit `{{token}}`, Standard `{{token}}` |
+| `apply` fehlt | | der Token geht nur über `{{auth.token}}` im Body mit |
+
+**Token im Body:** Der Platzhalter `{{auth.token}}` im `body` eines Aufrufs setzt den Token als JSON-String ein, etwa `"{\"session\": {{auth.token}}, \"camera\": {{camera}}}"`. Er ist bei jedem Versuch neu eingesetzt: Ohne Token (erster Aufruf mit `on_demand`) steht dort `""`, die Wiederholung nach einer Anmeldung trägt den neuen. Nur im Body, nicht in `path` oder `query`: URLs landen in Fehlermeldungen, damit in der Antwort eines Laufs, und in Zugriffslogs von Proxys. `{{auth.token}}` ohne `auth` lehnt `New` ab, ebenso `auth`, dessen Token weder über `apply` noch im Body verwendet wird.
 | `retry_on` | Standard `[401]` | Status, die eine neue Anmeldung auslösen, z. B. `[401, 403]` |
 
 **Ablauf eines Aufrufs mit `auth`:**
@@ -162,7 +165,7 @@ Für Ziele, die weder festen Bearer noch Basic Auth können, sondern eine Anmeld
 - Der Health-Check läuft durch denselben Ablauf und kann den Token ebenso auffrischen. Mit `on_start` meldet ein Fehlschlag der ersten Anmeldung `Disconnected`; `Run` versucht es im Takt des Health-Checks (ohne Health-Check alle 10 s) erneut.
 - `call.*` beschreibt nur den eigentlichen Aufruf: `call.duration_ms` misst ihn samt Anmeldung und Wiederholung, `http.status_code` ist der letzte Status.
 - `auth` schließt Basic Auth aus (`username`/`password` im Secret sind dann nur noch für Platzhalter da); feste `headers` aus dem Secret gelten weiter.
-- Token und Antworten der Anmeldung erscheinen nie im Log, in Fehlern, Fakten oder Antworten eines Laufs.
+- Token und Antworten der Anmeldung erscheinen nie im Log, in Fehlern, Fakten oder Antworten eines Laufs. Gibt ein Ziel den Body der Anfrage im Fehlerfall zurück, ersetzt der Treiber vor dem Speichern jedes Vorkommen des Tokens in der Antwort durch `[redacted]`. Bodys von Anfragen und Antworten loggt er nie.
 
 ## Secret
 
@@ -175,7 +178,7 @@ Optional (`secret_id` der Quelle), JSON:
 - `username` und `password` → HTTP Basic Auth bei jeder Anfrage, auch beim Health-Check; mit `auth` stattdessen nur für Platzhalter.
 - `headers` → zusätzliche Header bei jeder Anfrage; sie überschreiben gleichnamige aus der Konfiguration.
 - Weitere Felder dürfen vorkommen; `auth` setzt sie als `{{secret.<feld>}}` ein (Werte: String, Zahl, Bool).
-- Alles darf fehlen. Werte des Secrets erscheinen nie im Log, in Fehlern, Fakten oder Antworten.
+- Alles darf fehlen. Werte des Secrets erscheinen nie im Log, in Fehlern, Fakten oder Antworten. Als Absicherung ersetzt der Treiber Text-Werte des Secrets ab 4 Zeichen in jeder gespeicherten Antwort eines Ziels durch `[redacted]` (kürzere würden beliebigen Text treffen).
 
 ## Katalog
 
@@ -190,5 +193,5 @@ Optional (`secret_id` der Quelle), JSON:
 - Attrappe des Ziels: `httptest.Server` mit umschaltbaren Antworten (2xx, 4xx, 5xx, Verzögerung, Abbruch) und Aufzeichnung der Anfragen.
 - `sdktest.Conformance` mit und ohne Health-Check.
 - Eigene Tests: Platzhalter und Kodierung in Pfad, Query und Body, Prüfung der Parameter, Ergebnisse und Fakten, Secret als Basic Auth und Header, keine Weiterleitung, Health-Check fällt aus und kommt wieder, ungültige Konfigurationen in `New`.
-- Anmeldung: Token aus Cookie, Header und JSON; Anwenden als Cookie und Header; erneute Anmeldung nach `retry_on`; genau eine Wiederholung; parallele Aufrufe melden sich nur einmal an; gescheiterte Anmeldung ohne Body in der Antwort; `on_start`; kein Token und kein Secret im Log.
+- Anmeldung: Token aus Cookie, Header und JSON; Anwenden als Cookie und Header; Token im Body (`{{auth.token}}`, nach Ablauf mit dem neuen Token wiederholt); erneute Anmeldung nach `retry_on`; genau eine Wiederholung; parallele Aufrufe melden sich nur einmal an; gescheiterte Anmeldung ohne Body in der Antwort; Echo des Bodys im Fehlerfall geschwärzt; `on_start`; kein Token und kein Secret im Log; `{{auth.token}}` ohne `auth` und ein ungenutzter Token als Fehler in `New`.
 - **Ende zu Ende** (Integrationstest in `cmd/monika`): Monika startet mit dem Treiber, über die API werden Gerät, Secret und Quelle (mit `auth`) angelegt; die Quelle wird Live, ein `trigger` meldet sich an der Attrappe an und erreicht sie mit eingesetzten Parametern, der Lauf endet `accepted`, `call.ok` steht in den Fakten; eine Regel `call.ok eq true` wird bei einer `503` verletzt und mit dem nächsten erfolgreichen Aufruf wieder erfüllt; läuft der Token in der Attrappe ab, meldet sich der Treiber beim nächsten Aufruf selbst neu an.
