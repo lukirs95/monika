@@ -24,7 +24,9 @@ var (
 )
 
 // Die Befehle der API. Jeder schreibt erst über den Store (eine Transaktion mit Audit) und
-// ändert danach den Speicher; schlägt der Store fehl, bleibt der Speicher unverändert. Neue IDs
+// ändert danach den Speicher; schlägt der Store fehl, bleibt der Speicher unverändert. Was der
+// Speicher schon weiß (unbekannt, doppelt), prüfen sie vorher; die Datenbank sichert es
+// zusätzlich ab, falls etwas dazwischenkommt. Neue IDs
 // vergibt der Aufrufer (die API), nur die ID des Zugangs-Elements einer Quelle vergibt das
 // Inventar.
 
@@ -71,6 +73,11 @@ func (inv *Inventory) CreateSource(ctx context.Context, actor uuid.UUID, s Sourc
 	d, ok := inv.drivers(s.Driver)
 	if !ok {
 		return Diff{}, fmt.Errorf("create source: %q: %w", s.Driver, ErrUnknownDriver)
+	}
+	for _, other := range inv.sources {
+		if other.DeviceID == s.DeviceID && other.Driver == s.Driver {
+			return Diff{}, fmt.Errorf("create source: %q: %w", s.Driver, ErrSourceExists)
+		}
 	}
 	if err := inv.checkConfig(d, s.Config); err != nil {
 		return Diff{}, fmt.Errorf("create source: %w", err)
@@ -177,6 +184,11 @@ func (inv *Inventory) AddGroupMember(ctx context.Context, actor uuid.UUID, l Lin
 	}
 	if _, ok := inv.elements[l.ToID]; !ok {
 		return Diff{}, fmt.Errorf("add group member: member %s: %w", l.ToID, ErrNotFound)
+	}
+	for m := range inv.Graph().Outgoing(l.FromID) {
+		if m.Type == LinkMember && m.ToID == l.ToID {
+			return Diff{}, fmt.Errorf("add group member: %w", ErrMemberExists)
+		}
 	}
 	m := Link{ID: l.ID, Type: LinkMember, FromID: l.FromID, ToID: l.ToID, Position: l.Position, Label: l.Label}
 	if err := inv.store.AddGroupMember(ctx, actor, m); err != nil {

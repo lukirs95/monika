@@ -120,9 +120,11 @@ func TestCommandsRulesAndAck(t *testing.T) {
 
 func TestCommandsReplaceSecret(t *testing.T) {
 	r := newRig(t)
-	secret := uuid.New()
-	source := uuid.New()
-	if err := r.do(CreateSource{Source: inventory.Source{ID: source, DeviceID: r.device, Driver: "videoxlink", SecretID: secret, Enabled: true}}); err != nil {
+	secret, device, source := uuid.New(), uuid.New(), uuid.New()
+	if err := r.do(CreateDevice{Device: inventory.Element{ID: device}}); err != nil {
+		t.Fatalf("CreateDevice: %v", err)
+	}
+	if err := r.do(CreateSource{Source: inventory.Source{ID: source, DeviceID: device, Driver: "videoxlink", SecretID: secret, Enabled: true}}); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
 	if err := r.do(ReplaceSecret{ID: secret, Value: []byte(`{"password":"x"}`)}); err != nil {

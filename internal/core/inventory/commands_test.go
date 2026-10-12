@@ -149,6 +149,9 @@ func TestUserFieldsAndMembers(t *testing.T) {
 	if l := tr.inv.Links()[member]; l.Type != LinkMember || l.FromID != group || l.ToID != tr.port || l.Label != "Cam" {
 		t.Errorf("link = %+v", l)
 	}
+	if _, err := tr.inv.AddGroupMember(ctx, actor, Link{ID: id(), FromID: group, ToID: tr.port}); !errors.Is(err, ErrMemberExists) {
+		t.Errorf("member twice = %v, want ErrMemberExists", err)
+	}
 	if _, err := tr.inv.UpdateGroupMember(ctx, actor, Link{ID: member, Label: "Kamera", FromID: id()}); err != nil {
 		t.Fatalf("UpdateGroupMember: %v", err)
 	}
@@ -199,6 +202,9 @@ func TestCommandErrors(t *testing.T) {
 		{"config missing a required field", nil, func(tr tree) (Diff, error) {
 			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "nmos"})
 		}, ErrInvalidConfig},
+		{"second source with the driver", nil, func(tr tree) (Diff, error) {
+			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "videoxlink"})
+		}, ErrSourceExists},
 		{"source with unknown driver", nil, func(tr tree) (Diff, error) {
 			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "acme"})
 		}, ErrUnknownDriver},
@@ -215,7 +221,7 @@ func TestCommandErrors(t *testing.T) {
 			return tr.inv.RemoveGroupMember(t.Context(), id(), feeds(tr))
 		}, ErrNotFound},
 		{"store fails on create", storeErr, func(tr tree) (Diff, error) {
-			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "videoxlink"})
+			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "nmos", Config: []byte(`{"port":1}`)})
 		}, storeErr},
 		{"store fails on delete", storeErr, func(tr tree) (Diff, error) {
 			return tr.inv.DeleteDevice(t.Context(), id(), tr.device)
