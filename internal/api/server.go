@@ -16,9 +16,11 @@ import (
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/google/uuid"
 
+	"github.com/lukirs95/monika/internal/action/executor"
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
+	"github.com/lukirs95/monika/internal/preset"
 	"github.com/lukirs95/monika/sdk"
 )
 
@@ -48,10 +50,30 @@ type Core interface {
 	Do(ctx context.Context, cmd core.Command) error
 }
 
+// Executor führt Aktionen aus (executor.Executor).
+type Executor interface {
+	Targets(v *core.View, r executor.Request) ([]executor.Target, error)
+	Submit(ctx context.Context, r executor.Request) (uuid.UUID, error)
+	Cancel(ctx context.Context, ids []uuid.UUID) error
+}
+
+// Presets verwaltet und startet Presets (preset.Runner).
+type Presets interface {
+	List(ctx context.Context) ([]preset.Preset, error)
+	Get(ctx context.Context, id uuid.UUID) (preset.Preset, error)
+	CreatePreset(ctx context.Context, actor uuid.UUID, p preset.Preset) error
+	UpdatePreset(ctx context.Context, actor uuid.UUID, p preset.Preset) error
+	DeletePreset(ctx context.Context, actor, id uuid.UUID) error
+	Start(ctx context.Context, p auth.Principal, presetID uuid.UUID) (uuid.UUID, error)
+	Cancel(ctx context.Context, root uuid.UUID) error
+}
+
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.
 type Config struct {
 	Auth           Auth
 	Core           Core
+	Executor       Executor
+	Presets        Presets
 	PublicURL      *url.URL            // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
 	TrustedProxies []netip.Prefix      // Proxys, deren X-Forwarded-For gilt
 	Drivers        func() []sdk.Driver // registrierte Treiber (sdk.Drivers)

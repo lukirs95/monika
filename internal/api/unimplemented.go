@@ -34,24 +34,6 @@ func (unimplemented) DeleteForwardTarget(context.Context, oapi.DeleteForwardTarg
 func (unimplemented) UpdateForwardTarget(context.Context, oapi.UpdateForwardTargetRequestObject) (oapi.UpdateForwardTargetResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) ListPresets(context.Context, oapi.ListPresetsRequestObject) (oapi.ListPresetsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CreatePreset(context.Context, oapi.CreatePresetRequestObject) (oapi.CreatePresetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) DeletePreset(context.Context, oapi.DeletePresetRequestObject) (oapi.DeletePresetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetPreset(context.Context, oapi.GetPresetRequestObject) (oapi.GetPresetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) UpdatePreset(context.Context, oapi.UpdatePresetRequestObject) (oapi.UpdatePresetResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) RunPreset(context.Context, oapi.RunPresetRequestObject) (oapi.RunPresetResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) ListRoles(context.Context, oapi.ListRolesRequestObject) (oapi.ListRolesResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -70,16 +52,7 @@ func (unimplemented) SetRoleGrants(context.Context, oapi.SetRoleGrantsRequestObj
 func (unimplemented) SetRoleMembers(context.Context, oapi.SetRoleMembersRequestObject) (oapi.SetRoleMembersResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) SubmitRun(context.Context, oapi.SubmitRunRequestObject) (oapi.SubmitRunResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) ListRunHistory(context.Context, oapi.ListRunHistoryRequestObject) (oapi.ListRunHistoryResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetRun(context.Context, oapi.GetRunRequestObject) (oapi.GetRunResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) CancelRun(context.Context, oapi.CancelRunRequestObject) (oapi.CancelRunResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) ListSecrets(context.Context, oapi.ListSecretsRequestObject) (oapi.ListSecretsResponseObject, error) {

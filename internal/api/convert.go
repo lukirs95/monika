@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -142,5 +143,32 @@ func toSource(s inventory.Source) oapi.Source {
 	if id := s.Identity; id != (inventory.Identity{}) {
 		out.Identity = &oapi.Identity{Vendor: optional(id.Vendor), Model: optional(id.Model), Serial: optional(id.Serial), Firmware: optional(id.Firmware)}
 	}
+	return out
+}
+
+func toRun(r action.Run, children []action.Run) oapi.Run {
+	sum := toRunSummary(r)
+	out := oapi.Run{
+		ID: sum.ID, ParentID: sum.ParentID, PresetID: sum.PresetID, ElementID: sum.ElementID, ElementPath: sum.ElementPath,
+		Action: sum.Action, Status: oapi.RunStatus(sum.Status), Critical: sum.Critical, RequestedByID: sum.RequestedByID,
+		RequestedAt: sum.RequestedAt, FinishedAt: sum.FinishedAt,
+		SourceID: optionalID(r.SourceID), PresetStepID: optionalID(r.PresetStepID), Params: r.Params, Response: r.Response,
+		SentAt: optionalTime(r.SentAt), RespondedAt: optionalTime(r.RespondedAt),
+	}
+	if v := r.Verify; v != nil {
+		out.Verify = &struct {
+			Conditions []oapi.Condition `json:"conditions"`
+			TimeoutMs  int              `json:"timeout_ms"`
+		}{Conditions: []oapi.Condition{}, TimeoutMs: int(v.Timeout / time.Millisecond)}
+		for _, c := range v.Conditions {
+			out.Verify.Conditions = append(out.Verify.Conditions, oapi.Condition{Fact: c.Fact, Op: oapi.ConditionOp(c.Op), Value: c.Value})
+		}
+	}
+	kids := make([]oapi.RunSummary, 0, len(children))
+	for _, c := range children {
+		kids = append(kids, toRunSummary(c))
+	}
+	slices.SortFunc(kids, func(a, b oapi.RunSummary) int { return compareIDs(a.ID, b.ID) })
+	out.Children = &kids
 	return out
 }

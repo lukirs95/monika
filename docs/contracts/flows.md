@@ -136,7 +136,8 @@ sequenceDiagram
     participant Src as Source
     participant C as Core (View, Ereignisse)
 
-    A->>A: Rechte: operate bzw. configure (+ critical) am Ziel
+    A->>X: Targets (Ziel auflösen wie Submit)
+    A->>A: Rechte: operate bzw. configure (+ critical) an jedem Ziel
     A->>X: Submit(Lauf: Ziel, Aktion, Parameter, device_level, Treiber?)
     X->>X: Ziel auflösen: Element selbst oder Verteilung über View.InScope (Zugänge bzw. übrige Elemente, Treiber als Filter)
     X->>S: action_run anlegen (pending), bei Sammelaktion mit Kindern

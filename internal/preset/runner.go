@@ -28,6 +28,22 @@ var (
 	ErrInvalidStep    = errors.New("invalid preset step")
 )
 
+// Missing ist ein fehlendes Recht an einem Ziel eines Schritts.
+type Missing struct {
+	StepID     uuid.UUID
+	ElementID  uuid.UUID
+	Permission auth.Permission
+}
+
+// MissingRightsError nennt alle fehlenden Rechte eines Presets (API: 403 missing_rights);
+// errors.Is(err, ErrForbidden) gilt.
+type MissingRightsError struct{ Missing []Missing }
+
+func (e *MissingRightsError) Error() string {
+	return fmt.Sprintf("%v: %d missing", ErrForbidden, len(e.Missing))
+}
+func (e *MissingRightsError) Is(target error) bool { return target == ErrForbidden }
+
 const reasonStopped = "monika stopped"
 
 // Executor ist, was der Runner vom Executor braucht.
@@ -134,8 +150,8 @@ func prepare(p *Preset) error {
 }
 
 // Start friert die Ziele aller Schritte ein, prüft an ihnen die Rechte (operate, bei set
-// configure, dazu critical) und startet das Preset; ohne Recht startet nichts. Das Recht
-// preset_run prüft die API.
+// configure, dazu critical) und startet das Preset; fehlt eines, startet nichts, und
+// *MissingRightsError nennt alle fehlenden. Das Recht preset_run prüft die API.
 func (r *Runner) Start(ctx context.Context, p auth.Principal, presetID uuid.UUID) (uuid.UUID, error) {
 	r.mu.Lock()
 	ready := r.ctx != nil && !r.stopped
@@ -149,6 +165,7 @@ func (r *Runner) Start(ctx context.Context, p auth.Principal, presetID uuid.UUID
 	}
 	v := r.cfg.Core.View()
 	targets := map[uuid.UUID][]uuid.UUID{}
+	var missing []Missing
 	for _, s := range preset.Steps {
 		ts, err := r.cfg.Executor.Targets(v, request(p.UserID, preset.ID, s))
 		if err != nil {
@@ -159,12 +176,17 @@ func (r *Runner) Start(ctx context.Context, p auth.Principal, presetID uuid.UUID
 			perm = auth.PermConfigure
 		}
 		for _, t := range ts {
-			if !r.cfg.Permissions.Allowed(v, p, perm, t.ElementID) ||
-				t.Critical && !r.cfg.Permissions.Allowed(v, p, auth.PermCritical, t.ElementID) {
-				return uuid.Nil, fmt.Errorf("%w: %s on %s", ErrForbidden, s.Action, v.Graph.Path(t.ElementID))
+			if !r.cfg.Permissions.Allowed(v, p, perm, t.ElementID) {
+				missing = append(missing, Missing{StepID: s.ID, ElementID: t.ElementID, Permission: perm})
+			}
+			if t.Critical && !r.cfg.Permissions.Allowed(v, p, auth.PermCritical, t.ElementID) {
+				missing = append(missing, Missing{StepID: s.ID, ElementID: t.ElementID, Permission: auth.PermCritical})
 			}
 			targets[s.ID] = append(targets[s.ID], t.ElementID)
 		}
+	}
+	if len(missing) > 0 {
+		return uuid.Nil, &MissingRightsError{Missing: missing}
 	}
 	root, err := r.cfg.Executor.Submit(ctx, executor.Request{Actor: p.UserID, Action: executor.ActionPreset, PresetID: preset.ID})
 	if err != nil {

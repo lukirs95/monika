@@ -291,9 +291,18 @@ func TestContinueOnError(t *testing.T) {
 func TestStartRefused(t *testing.T) {
 	r := newRig(t, fakePerms{deny: auth.PermCritical})
 	p := r.preset(Step{Stage: 1}, Step{Stage: 2, Action: vocab.ActionReboot})
-	if _, err := r.runner.Start(t.Context(), auth.Principal{}, p.ID); !errors.Is(err, ErrForbidden) {
+	_, err := r.runner.Start(t.Context(), auth.Principal{}, p.ID)
+	missing, ok := errors.AsType[*MissingRightsError](err)
+	if !errors.Is(err, ErrForbidden) || !ok || len(missing.Missing) != 1 ||
+		missing.Missing[0].StepID != p.Steps[1].ID || missing.Missing[0].Permission != auth.PermCritical {
 		t.Errorf("Start without critical = %v", err)
 	}
+	// Alle fehlenden Rechte, nicht nur das erste.
+	r.runner.cfg.Permissions = fakePerms{deny: auth.PermOperate}
+	if _, err := r.runner.Start(t.Context(), auth.Principal{}, p.ID); !errors.As(err, &missing) || len(missing.Missing) != 2 {
+		t.Errorf("Start without operate = %v", err)
+	}
+	r.runner.cfg.Permissions = fakePerms{}
 	r.ex.targetErr = executor.ErrUnsupported
 	if _, err := r.runner.Start(t.Context(), auth.Principal{}, p.ID); !errors.Is(err, executor.ErrUnsupported) {
 		t.Errorf("Start with unresolvable step = %v", err)

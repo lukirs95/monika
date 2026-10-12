@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/lukirs95/monika/internal/action"
 	"github.com/lukirs95/monika/internal/action/executor"
 	"github.com/lukirs95/monika/internal/api/oapi"
@@ -29,6 +31,7 @@ type Problem struct {
 	Code    string           `json:"code"`
 	Detail  string           `json:"detail,omitempty"`
 	Presets []oapi.PresetRef `json:"presets,omitzero"` // bei *_in_use; leer, wenn der Benutzer keine Presets sehen darf
+	Missing []missingRight   `json:"missing,omitzero"` // bei missing_rights
 
 	retryAfter time.Duration // bei 429: Header Retry-After
 }
@@ -99,6 +102,7 @@ var codes = []struct {
 	{auth.ErrInvalidCode, http.StatusUnauthorized, "invalid_code"},
 	{auth.ErrUnauthenticated, http.StatusUnauthorized, "unauthenticated"},
 	{preset.ErrForbidden, http.StatusForbidden, "missing_rights"},
+	{executor.ErrNotPresetRoot, http.StatusConflict, "not_preset_root"},
 
 	{core.ErrStopped, http.StatusServiceUnavailable, "unavailable"},
 	{executor.ErrStopped, http.StatusServiceUnavailable, "unavailable"},
@@ -125,6 +129,26 @@ func toProblem(err error) *Problem {
 		return problem(http.StatusServiceUnavailable, "unavailable", "request cancelled")
 	}
 	return problem(http.StatusInternalServerError, "internal", "internal error")
+}
+
+// missingRight ist ein fehlendes Recht beim Start eines Presets (ProblemMissingRights).
+type missingRight struct {
+	StepID     *uuid.UUID `json:"step_id,omitempty"` // leer, wenn preset_run selbst fehlt
+	ElementID  *uuid.UUID `json:"element_id,omitempty"`
+	Permission string     `json:"permission"`
+}
+
+// missingRights übersetzt *preset.MissingRightsError in 403 missing_rights mit allen Einträgen.
+func missingRights(err error) error {
+	e, ok := errors.AsType[*preset.MissingRightsError](err)
+	if !ok {
+		return err
+	}
+	p := problem(http.StatusForbidden, "missing_rights", "missing permissions for preset targets")
+	for _, m := range e.Missing {
+		p.Missing = append(p.Missing, missingRight{StepID: optionalID(m.StepID), ElementID: optionalID(m.ElementID), Permission: string(m.Permission)})
+	}
+	return p
 }
 
 // inUse übersetzt *inventory.InUseError in 409 mit dem Code des Endpunkts; die Presets nennt es

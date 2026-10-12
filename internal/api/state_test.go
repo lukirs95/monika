@@ -65,7 +65,7 @@ func newScene(t *testing.T) (*scene, *core.View) {
 			sc.findingQ1: {ID: sc.findingQ1, ElementID: sc.q1, Origin: evaluation.OriginDevice, Code: "los", Severity: evaluation.SeverityError, RaisedAt: now},
 		},
 		Runs: map[uuid.UUID]action.Run{
-			sc.runP1:      {ID: sc.runP1, ElementID: sc.p1, Action: "set", Status: action.StatusSent, RequestedAt: now},
+			sc.runP1:      {ID: sc.runP1, ElementID: sc.p1, Action: "set", Status: action.StatusSent, RequestedAt: now, RequestedByID: boss.UserID},
 			sc.presetRoot: {ID: sc.presetRoot, PresetID: uuid.New(), Action: "preset", Status: action.StatusPending, RequestedAt: now},
 		},
 		Sources: map[uuid.UUID]core.SourceStatus{
