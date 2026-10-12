@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -24,10 +26,15 @@ var (
 	robot = auth.Principal{UserID: uuid.New(), Username: "companion", Service: true, TokenID: uuid.New()}
 )
 
-// fakeAuth kennt zwei Sitzungen und ein Token.
-type fakeAuth struct{}
+// fakeAuth kennt zwei Sitzungen und ein Token; die übrigen Methoden stehen in auth_test.go.
+type fakeAuth struct {
+	Auth
+	mu        sync.Mutex
+	meta      auth.Meta // der letzten Anmeldung
+	loggedOut []string
+}
 
-func (fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, error) {
+func (*fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, error) {
 	switch token {
 	case "anna":
 		return anna, nil
@@ -37,7 +44,7 @@ func (fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, e
 	return auth.Principal{}, auth.ErrUnauthenticated
 }
 
-func (fakeAuth) AuthenticateToken(_ context.Context, bearer string) (auth.Principal, error) {
+func (*fakeAuth) AuthenticateToken(_ context.Context, bearer string) (auth.Principal, error) {
 	if bearer == "monika_ok" {
 		return robot, nil
 	}
@@ -47,7 +54,10 @@ func (fakeAuth) AuthenticateToken(_ context.Context, bearer string) (auth.Princi
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	public, _ := url.Parse("https://monika.example")
-	s, err := New(Config{Auth: fakeAuth{}, PublicURL: public, Log: slog.New(slog.DiscardHandler)})
+	s, err := New(Config{
+		Auth: &fakeAuth{}, Core: &fakeCore{}, PublicURL: public, Log: slog.New(slog.DiscardHandler),
+		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")},
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

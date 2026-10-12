@@ -1196,6 +1196,9 @@ paths:
       tags: [self]
       operationId: changeOwnPassword
       summary: Eigenes Passwort ändern; beendet alle anderen eigenen Sitzungen
+      description: |
+        Falsches aktuelles Passwort: 422 `wrong_password` (die Sitzung gilt weiter). Es zählt wie ein
+        Fehlversuch bei der Anmeldung; nach zu vielen folgt 429.
       requestBody:
         required: true
         content:
@@ -1205,12 +1208,13 @@ paths:
         '204': { description: Geändert }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /auth/sessions:
     get:
       tags: [self]
       operationId: listOwnSessions
-      summary: Eigene aktive Sitzungen
+      summary: Eigene gültige Sitzungen (ohne durch Leerlauf abgelaufene)
       responses:
         '200':
           description: Sitzungen

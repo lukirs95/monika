@@ -37,6 +37,8 @@ classDiagram
         +UpdateUser(ctx, actor, u User) error
         +SetPassword(ctx, actor, user ID, password, keepSession ID) error
         +ResetTOTP(ctx, actor, user ID) error
+        +ChangePassword(ctx, p Principal, current, next, meta) error
+        +ListSessions(ctx, user ID) ([]Session, error)
         +CreateRole(ctx, actor, r Role) error
         +SetGrants(ctx, actor, role ID, g []Grant) error
         +SetMembers(ctx, actor, role ID, users []ID) error
@@ -103,6 +105,9 @@ classDiagram
 - **`Allowed`** mit `element = uuid.Nil` fragt ein globales Recht ab; ein Recht mit Geltungsbereich gilt dann nicht. `Restore` lädt Rollen und Rechte beim Start, jede Änderung an Rollen, Rechten oder Mitgliedern lädt sie neu.
 - **`CheckSession`, `CheckToken`** prüfen wie `Authenticate` bzw. `AuthenticateToken`, zählen aber nicht als Aktivität bzw. Verwendung. Offene Ereignisströme prüfen damit alle 60 s, ob ihre Anmeldung noch gilt (`api.md`); ein offener Tab allein verlängert den Leerlauf einer Sitzung nicht. Für Wände gibt es Kiosk-Sitzungen.
 - **`AuthzVersion`** zählt jedes Neuladen von Rollen und Rechten. Offene Ereignisströme filtern nach den Rechten; ändert sich die Zahl, bekommen sie `resync` (`api.md`).
+- **`ChangePassword`** ist das eigene Passwort: Es prüft das aktuelle; ein falsches zählt wie ein Fehlversuch bei der Anmeldung (Begrenzung, Audit `login_failed`). Danach wie `SetPassword` mit der eigenen Sitzung als `keepSession`.
+- **`ListSessions`** liefert die gültigen Sitzungen mit der letzten Aktivität aus dem Speicher; durch Leerlauf abgelaufene fehlen.
+- **`Principal.DisplayName`** kommt mit der Anmeldung mit, für `GET /auth/me`.
 - **`SetPassword`** beendet alle Sitzungen des Benutzers außer `keepSession` (die eigene, wenn er es selbst ändert).
 - **`EnsureAdmin`** (M8) nutzt `Store.CreateInitialAdmin`: Benutzer, Rolle, Rechte und Mitgliedschaft in **einer** Transaktion und nur ohne vorhandene Benutzer, damit ein Abbruch keinen Admin ohne Rechte hinterlässt.
 - **Rollen und Rechte hält `auth` im Speicher** (`LoadAuthz` beim Start, nach jeder Änderung neu). `Allowed` braucht deshalb keine Datenbank, nur die `View` für den Geltungsbereich.

@@ -80,8 +80,48 @@ func (s *Service) ResetTOTP(ctx context.Context, actor, user uuid.UUID) error {
 
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) { return s.cfg.Store.ListUsers(ctx) }
 
+// ChangePassword ändert das eigene Passwort nach Prüfung des aktuellen und beendet alle anderen
+// eigenen Sitzungen. Ein falsches aktuelles Passwort zählt wie ein Fehlversuch bei der Anmeldung
+// (ErrInvalidCredentials, ThrottledError); Dienstkonten haben kein Passwort.
+func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next string, meta Meta) error {
+	if wait := s.throttle.wait(p.Username, meta.RemoteAddr, s.now()); wait > 0 {
+		return ThrottledError{Wait: wait}
+	}
+	u, err := s.cfg.Store.UserByID(ctx, p.UserID)
+	if err != nil {
+		return err
+	}
+	if u.PasswordHash == "" || !VerifyPassword(current, u.PasswordHash) {
+		return s.failed(ctx, u, meta, "wrong_password", ErrInvalidCredentials)
+	}
+	if err := s.SetPassword(ctx, u.ID, u.ID, next, p.SessionID); err != nil {
+		return err
+	}
+	s.throttle.succeed(u.Username, meta.RemoteAddr)
+	return nil
+}
+
+// ListSessions liefert die gültigen Sitzungen eines Benutzers mit der letzten Aktivität aus dem
+// Speicher; durch Leerlauf abgelaufene fehlen.
 func (s *Service) ListSessions(ctx context.Context, user uuid.UUID) ([]Session, error) {
-	return s.cfg.Store.ListSessions(ctx, user)
+	all, err := s.cfg.Store.ListSessions(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := all[:0]
+	for _, sess := range all {
+		if t := s.seen[sess.ID]; t.After(sess.LastSeenAt) {
+			sess.LastSeenAt = t
+		}
+		if sess.Kind == SessionUser && now.Sub(sess.LastSeenAt) > s.cfg.SessionIdle {
+			continue
+		}
+		out = append(out, sess)
+	}
+	return out, nil
 }
 
 func (s *Service) RevokeSession(ctx context.Context, user, id uuid.UUID) error {

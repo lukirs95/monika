@@ -8,30 +8,50 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
+	"github.com/google/uuid"
 
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
+	"github.com/lukirs95/monika/internal/core"
 )
 
 // Prefix ist der Pfad, unter dem die API liegt (R3).
 const Prefix = "/api/v1"
 
-// Authenticator prüft Sitzungen und API-Tokens (auth.Service).
-type Authenticator interface {
+// Auth ist Anmeldung, Sitzungen und Rechte (auth.Service).
+type Auth interface {
+	Login(ctx context.Context, username, password string, meta auth.Meta) (auth.LoginStep, error)
+	VerifyTOTP(ctx context.Context, challenge, code string, meta auth.Meta) (auth.IssuedSession, error)
+	EnrollTOTP(ctx context.Context, challenge string) (auth.Enrollment, error)
+	ConfirmTOTP(ctx context.Context, challenge, code string, meta auth.Meta) (auth.IssuedSession, []string, error)
+	KioskLogin(ctx context.Context, bearer string, meta auth.Meta) (auth.IssuedSession, error)
 	Authenticate(ctx context.Context, sessionToken string) (auth.Principal, error)
 	AuthenticateToken(ctx context.Context, bearer string) (auth.Principal, error)
+	Logout(ctx context.Context, sessionToken string) error
+	ChangePassword(ctx context.Context, p auth.Principal, current, next string, meta auth.Meta) error
+	ListSessions(ctx context.Context, user uuid.UUID) ([]auth.Session, error)
+	RevokeSession(ctx context.Context, user, id uuid.UUID) error
+	Grants(user uuid.UUID) []auth.Grant
+}
+
+// Core liefert den aktuellen Stand (core.Core).
+type Core interface {
+	View() *core.View
 }
 
 // Config enthält, was die API braucht; verdrahtet wird in cmd/monika.
 type Config struct {
-	Auth      Authenticator
-	PublicURL *url.URL // Herkunft für die Prüfung des Origin-Headers
-	Log       *slog.Logger
+	Auth           Auth
+	Core           Core
+	PublicURL      *url.URL       // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
+	TrustedProxies []netip.Prefix // Proxys, deren X-Forwarded-For gilt
+	Log            *slog.Logger
 }
 
 // Server implementiert die Endpunkte der Spezifikation.

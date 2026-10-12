@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -38,10 +39,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			writeProblem(w, problem(http.StatusNotFound, "not_found", "unknown path"))
 			return
 		}
-		ctx, session := r.Context(), false
+		rq := request{meta: auth.Meta{RemoteAddr: s.clientIP(r), UserAgent: r.UserAgent()}}
 		if !public(route.Operation) {
-			p, viaSession, err := s.authenticate(r)
-			if err == nil && !s.schemeAllowed(route.Operation, viaSession) {
+			p, session, err := s.authenticate(r)
+			if err == nil && !s.schemeAllowed(route.Operation, session != "") {
 				err = errUnauthenticated
 			}
 			if err != nil {
@@ -52,9 +53,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				writeProblem(w, errReadOnly)
 				return
 			}
-			ctx, session = withPrincipal(ctx, p), viaSession
+			rq.principal, rq.session = p, session
 		}
-		if !s.originOK(r, session) {
+		ctx := context.WithValue(r.Context(), requestKey{}, rq)
+		if !s.originOK(r, rq.session != "") {
 			writeProblem(w, errOrigin)
 			return
 		}
@@ -99,22 +101,59 @@ func changes(method string) bool {
 }
 
 // authenticate meldet die Anfrage an: API-Token aus Authorization, sonst die Sitzung aus dem
-// Cookie. Ein falsches Token fällt nicht auf das Cookie zurück.
-func (s *Server) authenticate(r *http.Request) (p auth.Principal, session bool, err error) {
+// Cookie (session ist dann ihr Token). Ein falsches Token fällt nicht auf das Cookie zurück.
+func (s *Server) authenticate(r *http.Request) (p auth.Principal, session string, err error) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		bearer, ok := strings.CutPrefix(h, "Bearer ")
 		if !ok {
-			return auth.Principal{}, false, errUnauthenticated
+			return auth.Principal{}, "", errUnauthenticated
 		}
 		p, err := s.cfg.Auth.AuthenticateToken(r.Context(), bearer)
-		return p, false, err
+		return p, "", err
 	}
 	c, err := r.Cookie(SessionCookie)
-	if err != nil {
-		return auth.Principal{}, false, errUnauthenticated
+	if err != nil || c.Value == "" {
+		return auth.Principal{}, "", errUnauthenticated
 	}
-	p, err = s.cfg.Auth.Authenticate(r.Context(), c.Value)
-	return p, true, err
+	if p, err = s.cfg.Auth.Authenticate(r.Context(), c.Value); err != nil {
+		return auth.Principal{}, "", err
+	}
+	return p, c.Value, nil
+}
+
+// clientIP ist die Adresse des Clients für Begrenzung der Fehlversuche und Audit: die
+// Gegenstelle, hinter vertrauenswürdigen Proxys (MONIKA_TRUSTED_PROXIES) der letzte Eintrag in
+// X-Forwarded-For, der nicht selbst ein vertrauenswürdiger Proxy ist. Weiter links steht, was
+// der Client selbst behauptet.
+func (s *Server) clientIP(r *http.Request) string {
+	addr, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	ip := addr.Addr().Unmap()
+	if !s.trusted(ip) {
+		return ip.String()
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			break
+		}
+		if ip = hop.Unmap(); !s.trusted(ip) {
+			break
+		}
+	}
+	return ip.String()
+}
+
+func (s *Server) trusted(ip netip.Addr) bool {
+	for _, p := range s.cfg.TrustedProxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // originOK prüft den Origin-Header ändernder Anfragen (auth.md, A4): Ist er gesetzt, muss er die
@@ -154,14 +193,20 @@ func validationDetail(err error) string {
 	return where + " is invalid"
 }
 
-type principalKey struct{}
+// request ist, was der Guard über eine Anfrage weiß und die Handler brauchen; der strict server
+// gibt ihnen die *http.Request nicht.
+type request struct {
+	principal auth.Principal // leer bei öffentlichen Operationen
+	session   string         // Token der Sitzung aus dem Cookie; leer bei API-Token
+	meta      auth.Meta
+}
 
-func withPrincipal(ctx context.Context, p auth.Principal) context.Context {
-	return context.WithValue(ctx, principalKey{}, p)
+type requestKey struct{}
+
+func requestOf(ctx context.Context) request {
+	rq, _ := ctx.Value(requestKey{}).(request)
+	return rq
 }
 
 // principal liefert den angemeldeten Benutzer; bei öffentlichen Operationen den leeren.
-func principal(ctx context.Context) auth.Principal {
-	p, _ := ctx.Value(principalKey{}).(auth.Principal)
-	return p
-}
+func principal(ctx context.Context) auth.Principal { return requestOf(ctx).principal }

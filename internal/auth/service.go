@@ -352,8 +352,8 @@ func (s *Service) session(ctx context.Context, sessionToken string) (Principal, 
 	case sess.Kind == SessionKiosk && !tokenValid(tok, now):
 		return Principal{}, ErrUnauthenticated
 	}
-	return Principal{UserID: u.ID, Username: u.Username, Service: u.Service, SessionID: sess.ID, TokenID: sess.TokenID,
-		ReadOnly: sess.Kind == SessionKiosk}, nil
+	return Principal{UserID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Service: u.Service,
+		SessionID: sess.ID, TokenID: sess.TokenID, ReadOnly: sess.Kind == SessionKiosk}, nil
 }
 
 // AuthenticateToken prüft ein API-Token (Authorization: Bearer).
@@ -365,7 +365,8 @@ func (s *Service) AuthenticateToken(ctx context.Context, bearer string) (Princip
 	s.mu.Lock()
 	s.tokens[tok.ID] = s.now()
 	s.mu.Unlock()
-	return Principal{UserID: u.ID, Username: u.Username, Service: u.Service, TokenID: tok.ID, ReadOnly: tok.ReadOnly}, nil
+	return Principal{UserID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Service: u.Service,
+		TokenID: tok.ID, ReadOnly: tok.ReadOnly}, nil
 }
 
 // CheckToken prüft ein API-Token wie AuthenticateToken, zählt aber nicht als Verwendung.

@@ -44,12 +44,13 @@ func (p Permission) Global() bool {
 // seine UserID als actor an die Fachpakete weiter; ist ReadOnly gesetzt, lehnt sie jede
 // ändernde Anfrage ab.
 type Principal struct {
-	UserID    uuid.UUID
-	Username  string
-	Service   bool
-	SessionID uuid.UUID
-	TokenID   uuid.UUID
-	ReadOnly  bool
+	UserID      uuid.UUID
+	Username    string
+	DisplayName string
+	Service     bool
+	SessionID   uuid.UUID
+	TokenID     uuid.UUID
+	ReadOnly    bool
 }
 
 // User ist ein Mensch oder ein Dienstkonto. Benutzer werden nie gelöscht, nur deaktiviert.

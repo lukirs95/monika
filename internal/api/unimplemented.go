@@ -13,36 +13,6 @@ type unimplemented struct{}
 func (unimplemented) ListAudit(context.Context, oapi.ListAuditRequestObject) (oapi.ListAuditResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) KioskLogin(context.Context, oapi.KioskLoginRequestObject) (oapi.KioskLoginResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) Login(context.Context, oapi.LoginRequestObject) (oapi.LoginResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) LoginTOTP(context.Context, oapi.LoginTOTPRequestObject) (oapi.LoginTOTPResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) Logout(context.Context, oapi.LogoutRequestObject) (oapi.LogoutResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetMe(context.Context, oapi.GetMeRequestObject) (oapi.GetMeResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ChangeOwnPassword(context.Context, oapi.ChangeOwnPasswordRequestObject) (oapi.ChangeOwnPasswordResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ListOwnSessions(context.Context, oapi.ListOwnSessionsRequestObject) (oapi.ListOwnSessionsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) RevokeOwnSession(context.Context, oapi.RevokeOwnSessionRequestObject) (oapi.RevokeOwnSessionResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) ConfirmTOTP(context.Context, oapi.ConfirmTOTPRequestObject) (oapi.ConfirmTOTPResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) EnrollTOTP(context.Context, oapi.EnrollTOTPRequestObject) (oapi.EnrollTOTPResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) CreateDevice(context.Context, oapi.CreateDeviceRequestObject) (oapi.CreateDeviceResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -98,9 +68,6 @@ func (unimplemented) DeleteGroup(context.Context, oapi.DeleteGroupRequestObject)
 	return nil, errNotImplemented
 }
 func (unimplemented) AddGroupMember(context.Context, oapi.AddGroupMemberRequestObject) (oapi.AddGroupMemberResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetHealthz(context.Context, oapi.GetHealthzRequestObject) (oapi.GetHealthzResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) RemoveGroupMember(context.Context, oapi.RemoveGroupMemberRequestObject) (oapi.RemoveGroupMemberResponseObject, error) {

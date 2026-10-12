@@ -434,3 +434,122 @@ func TestTokensAndKiosk(t *testing.T) {
 		t.Errorf("CheckToken = %v", err)
 	}
 }
+
+func (m *memStore) UserByID(_ context.Context, id uuid.UUID) (User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.users[id]
+	if !ok {
+		return User{}, ErrNotFound
+	}
+	return u, nil
+}
+
+// SetPasswordHash setzt den Hash und widerruft alle Sitzungen außer keep.
+func (m *memStore) SetPasswordHash(_ context.Context, _, user uuid.UUID, hash string, keep uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u := m.users[user]
+	u.PasswordHash = hash
+	m.users[user] = u
+	for h, s := range m.sessions {
+		if s.UserID == user && s.ID != keep {
+			s.RevokedAt = time.Now()
+			m.sessions[h] = s
+		}
+	}
+	return nil
+}
+
+func (m *memStore) ListSessions(_ context.Context, user uuid.UUID) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Session
+	for _, s := range m.sessions {
+		if s.UserID == user && s.RevokedAt.IsZero() {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// login meldet anna mit eingerichtetem TOTP erneut an, einen Zeitschritt später.
+func (b *bench) login(key []byte) IssuedSession {
+	b.t.Helper()
+	b.now = b.now.Add(30 * time.Second)
+	step, err := b.s.Login(b.t.Context(), "anna", "correct horse battery", b.meta)
+	if err != nil {
+		b.t.Fatalf("Login: %v", err)
+	}
+	issued, err := b.s.VerifyTOTP(b.t.Context(), step.Challenge, totpCode(key, b.now.Unix()/30), b.meta)
+	if err != nil {
+		b.t.Fatalf("VerifyTOTP: %v", err)
+	}
+	return issued
+}
+
+func TestChangePassword(t *testing.T) {
+	b := newBench(t)
+	key, own, _ := b.enroll()
+	other := b.login(key)
+	ctx := t.Context()
+	p, err := b.s.Authenticate(ctx, own.Token)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if p.DisplayName != b.anna.DisplayName || p.Username != "anna" {
+		t.Errorf("principal = %+v", p)
+	}
+
+	if err := b.s.ChangePassword(ctx, p, "wrong", "a new correct horse", b.meta); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong current password = %v", err)
+	}
+	if err := b.s.ChangePassword(ctx, p, "correct horse battery", "short", b.meta); !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("weak new password = %v", err)
+	}
+	if err := b.s.ChangePassword(ctx, p, "correct horse battery", "a new correct horse", b.meta); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if !VerifyPassword("a new correct horse", b.store.users[b.anna.ID].PasswordHash) {
+		t.Error("password not changed")
+	}
+	if _, err := b.s.Authenticate(ctx, own.Token); err != nil {
+		t.Errorf("own session = %v, want kept", err)
+	}
+	if _, err := b.s.Authenticate(ctx, other.Token); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("other session = %v, want ended", err)
+	}
+
+	// Falsche aktuelle Passwörter zählen wie Fehlversuche bei der Anmeldung.
+	for range 5 {
+		_ = b.s.ChangePassword(ctx, p, "wrong", "a new correct horse", b.meta)
+	}
+	if err := b.s.ChangePassword(ctx, p, "a new correct horse", "another correct horse", b.meta); !errors.Is(err, ErrThrottled) {
+		t.Errorf("after 5 failures = %v, want ErrThrottled", err)
+	}
+	service := Principal{UserID: uuid.New(), Username: "wand", Service: true}
+	b.store.users[service.UserID] = User{ID: service.UserID, Username: "wand", Service: true}
+	if err := b.s.ChangePassword(ctx, service, "", "a new correct horse", b.meta); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("service account = %v", err)
+	}
+}
+
+// Durch Leerlauf abgelaufene Sitzungen fehlen; die letzte Aktivität kommt aus dem Speicher.
+func TestListSessions(t *testing.T) {
+	b := newBench(t)
+	key, old, _ := b.enroll()
+	b.now = b.now.Add(11 * time.Hour)
+	fresh := b.login(key)
+	b.now = b.now.Add(2 * time.Hour) // old: 13 h ohne Aktivität, fresh: 2 h
+	p, err := b.s.Authenticate(t.Context(), fresh.Token)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	got, err := b.s.ListSessions(t.Context(), b.anna.ID)
+	if err != nil || len(got) != 1 || got[0].ID != p.SessionID || !got[0].LastSeenAt.Equal(b.now) {
+		t.Fatalf("ListSessions = %+v, %v; want only the fresh one, seen now", got, err)
+	}
+	if _, err := b.s.Authenticate(t.Context(), old.Token); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("old session = %v", err)
+	}
+}
