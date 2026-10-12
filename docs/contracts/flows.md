@@ -45,7 +45,7 @@ sequenceDiagram
         M->>M: Abbruch, kein Start
     end
     M->>DB: initialen Admin anlegen, falls es keinen Benutzer gibt
-    M->>DB: unterbrochene Läufe abschließen (siehe Aktion)
+    M->>DB: unterbrochene Läufe abschließen (Executor.FinishInterrupted, F2)
     M->>C: Laden: Inventar, Regeln, aktive Befunde, Health (Restore)
     M->>+C: go Run(ctx)
     M->>X: go Run(ctx) (abonnieren Ereignisse, dazu Aufbewahrung)
@@ -60,7 +60,7 @@ sequenceDiagram
 
 - **Abbruch statt Warten:** Ist die Konfiguration ungültig, die Datenbank nicht erreichbar, eine Migration fehlerhaft oder ein Secret nicht lesbar, beendet sich Monika mit Fehler. Neustarts übernimmt die Umgebung (Docker, systemd).
 - Die API öffnet zuletzt, damit keine Anfrage einen halb gestarteten Core sieht.
-- **Einzelinstanz:** Die Sperre ist ein Advisory Lock auf Sitzungsebene und hängt an einer eigenen Verbindung, die Monika bis zum Ende hält. Zwei Instanzen auf derselben Datenbank würden alle Geräte doppelt abfragen und Aktionen doppelt ausführen. Reißt die Verbindung ab, beendet sich Monika (die Sperre wäre sonst frei für eine zweite Instanz).
+- **Einzelinstanz:** Die Sperre ist ein Advisory Lock auf Sitzungsebene und hängt an einer eigenen Verbindung, die Monika bis zum Ende hält (`postgres.AcquireLock`, belegt: `ErrLocked`). `Lock.Watch` prüft die Verbindung alle 5 s und kehrt mit Fehler zurück, wenn sie reißt; `Lock.Release` gibt sie in Phase 6 frei. Zwei Instanzen auf derselben Datenbank würden alle Geräte doppelt abfragen und Aktionen doppelt ausführen. Reißt die Verbindung ab, beendet sich Monika (die Sperre wäre sonst frei für eine zweite Instanz).
 
 ## Herunterfahren
 

@@ -136,7 +136,11 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
         - ~~11g1 Verteiler und Warteschlange pro Strom~~: erledigt; `core.WithVersion` für Tests von Abonnenten exportiert
         - ~~11g2 `/events` (SSE), `watch`, `api_streams`~~: erledigt; Ende-zu-Ende-Test über echtes HTTP mit laufendem Core und Reporter; `hello` ohne SSE-`id`; Ereignisschemas mit `skip-prune` erzeugt
       - ~~11h Verlauf und abgeschlossene Läufe~~: erledigt; Filter und Einträge im Paket `internal/history`, lesende Queries in `queries/history.sql`, beendete Läufe in `GET /runs/{id}` (mit beendeten Kindern auch bei laufenden) und `409 run_finished` beim Abbrechen
-   12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`). Vorgaben aus den vorigen Schritten: Supervisor → Core (mit dem Supervisor) → `sup.Run(ctx, core)`; den Verteiler der API vor `http.Server.Shutdown` stoppen (V7); `http.Server` ohne `WriteTimeout`, die Ströme setzen ihre Deadline selbst; `Distributor.Streams` als Kennzahl `api_streams` an den Influx-Schreiber
+   12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`); Festlegungen S1–S4 vom 2026-10-12 (Version per `-ldflags`, HTTP nur `/api/v1/` ohne `WriteTimeout`, `run(…) int` mit Integrationstest, `deploy/roles.sql`):
+      - ~~12a Einzelinstanz-Sperre, `Executor.FinishInterrupted`, `drivers/all`~~: erledigt
+      - 12b `cmd/monika`: Verdrahtung, Start, sechs Phasen beim Stopp, Flags, Integrationstest
+      - 12c Deploy-Dateien, `make build` und `make image`
+      Vorgaben aus den vorigen Schritten: Supervisor → Core (mit dem Supervisor) → `sup.Run(ctx, core)`; den Verteiler der API vor `http.Server.Shutdown` stoppen (V7); `http.Server` ohne `WriteTimeout`, die Ströme setzen ihre Deadline selbst; `Distributor.Streams` als Kennzahl `api_streams` an den Influx-Schreiber
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
 
 ## Leistung

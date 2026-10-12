@@ -25,7 +25,10 @@ const (
 // ErrFinished bedeutet, dass ein Lauf schon im Endzustand ist (API: 409 run_finished).
 var ErrFinished = errors.New("run already finished")
 
-const reasonStopped = "monika stopped"
+const (
+	reasonStopped   = "monika stopped"
+	reasonRestarted = "monika restarted"
+)
 
 // Config enthält, was der Executor braucht; verdrahtet wird in cmd/monika.
 type Config struct {
@@ -74,6 +77,17 @@ func New(cfg Config) *Executor {
 		waiters: map[uuid.UUID][]chan struct{}{},
 		results: map[uuid.UUID]action.Run{},
 	}
+}
+
+// FinishInterrupted schließt beim Start Läufe ab, die ein harter Abbruch offen gelassen hat
+// (F2): pending und sent werden failed, accepted wird unconfirmed. Nichts wird erneut gesendet.
+// main ruft es vor Run.
+func (e *Executor) FinishInterrupted(ctx context.Context) (int, error) {
+	n, err := e.cfg.Store.FinishInterruptedRuns(ctx, reasonRestarted)
+	if err != nil {
+		return 0, fmt.Errorf("finish interrupted runs: %w", err)
+	}
+	return n, nil
 }
 
 // Submit löst den Auftrag auf, legt die Läufe in einer Transaktion an und reiht die Element-Läufe

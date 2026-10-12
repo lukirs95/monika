@@ -82,9 +82,10 @@ func (f *fakeSources) Execute(ctx context.Context, _ uuid.UUID, c sdk.Command) (
 }
 
 type fakeStore struct {
-	mu      sync.Mutex
-	created []action.Run
-	updates map[uuid.UUID][]action.Status
+	mu          sync.Mutex
+	created     []action.Run
+	updates     map[uuid.UUID][]action.Status
+	interrupted string // Grund des letzten FinishInterruptedRuns
 }
 
 func (f *fakeStore) CreateRuns(_ context.Context, runs []action.Run) error {
@@ -101,7 +102,19 @@ func (f *fakeStore) UpdateRun(_ context.Context, r action.Run) error {
 	return nil
 }
 
-func (f *fakeStore) FinishInterruptedRuns(context.Context, string) (int, error) { return 0, nil }
+func (f *fakeStore) FinishInterruptedRuns(_ context.Context, reason string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.interrupted = reason
+	return 2, nil
+}
+
+func TestFinishInterrupted(t *testing.T) {
+	r := newRig(t)
+	if n, err := r.ex.FinishInterrupted(t.Context()); err != nil || n != 2 || r.store.interrupted != "monika restarted" {
+		t.Errorf("FinishInterrupted = %d, %v; reason %q", n, err, r.store.interrupted)
+	}
+}
 
 type rig struct {
 	t       *testing.T
