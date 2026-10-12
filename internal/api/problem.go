@@ -76,6 +76,7 @@ var codes = []struct {
 
 	{inventory.ErrSecretNotFound, http.StatusUnprocessableEntity, "invalid_secret"},
 	{inventory.ErrUnknownDriver, http.StatusUnprocessableEntity, "unknown_driver"},
+	{inventory.ErrInvalidConfig, http.StatusUnprocessableEntity, "invalid_config"},
 	{inventory.ErrNotAGroup, http.StatusUnprocessableEntity, "not_a_group"},
 	{evaluation.ErrInvalidRule, http.StatusUnprocessableEntity, "invalid_rule"},
 	{executor.ErrUnsupported, http.StatusUnprocessableEntity, "unsupported_action"},

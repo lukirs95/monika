@@ -26,7 +26,7 @@ Weitere Regeln:
 - **Adresse des Clients** (Begrenzung der Fehlversuche, Audit, Sitzungen): die Gegenstelle; ist sie ein vertrauenswürdiger Proxy (`MONIKA_TRUSTED_PROXIES`), der letzte Eintrag in `X-Forwarded-For`, der nicht selbst einer ist. Weiter links steht, was der Client behauptet.
 - **Anlegen** liefert `201` mit dem angelegten Objekt; IDs vergibt der Server.
 - **Rechte fehlen** bei sichtbarem Objekt: `403` mit `code = forbidden`.
-- **Konflikte beim Anlegen:** Quelle mit einem Treiber, den das Gerät schon hat: `409 source_exists`; Element schon Mitglied der Gruppe: `409 member_exists`; Zyklus zwischen Gruppen: `409 member_cycle`; unbekanntes Secret an einer Quelle: `422 invalid_secret`.
+- **Konflikte beim Anlegen:** Quelle mit einem Treiber, den das Gerät schon hat: `409 source_exists`; Element schon Mitglied der Gruppe: `409 member_exists`; Zyklus zwischen Gruppen: `409 member_cycle`; unbekanntes Secret an einer Quelle: `422 invalid_secret`; Konfiguration passt nicht zum Schema des Treibers: `422 invalid_config`.
 
 ## Sichtbarkeit
 

@@ -398,7 +398,7 @@ classDiagram
 | Baustein | Wirkung |
 |---|---|
 | `sdktest.Reporter` | zeichnet alle Meldungen einer `Source` auf; Tests prüfen damit, was der Treiber gemeldet hat |
-| `sdktest.Conformance(t, driver, cfg)` | prüft die Regeln automatisch: Katalog gültig (wie `Register`); nach `Connected` zuerst ein vollständiger `Snapshot`; nur deklarierte Fakten mit genau dem richtigen Go-Typ; zu jedem Zähler auch die Rate; keine reservierten `kind`s und Fakten; `external_id`s stabil über zwei `Snapshot`s; `Heartbeat()` wird eingehalten; `Run` kehrt nach Abbruch des `ctx` binnen 10 s zurück; `Execute` verträgt parallele Aufrufe |
+| `sdktest.Conformance(t, driver, cfg)` | prüft die Regeln automatisch: Katalog gültig (wie `Register`); `ConfigSchema` ein gültiges JSON-Schema und `cfg.Config` passt dazu; nach `Connected` zuerst ein vollständiger `Snapshot`; nur deklarierte Fakten mit genau dem richtigen Go-Typ; zu jedem Zähler auch die Rate; keine reservierten `kind`s und Fakten; `external_id`s stabil über zwei `Snapshot`s; `Heartbeat()` wird eingehalten; `Run` kehrt nach Abbruch des `ctx` binnen 10 s zurück; `Execute` verträgt parallele Aufrufe |
 | Attrappe des Geräts | jeder Treiber testet gegen eine Attrappe seines Geräts (z. B. `httptest.Server`), nie gegen echte Hardware in `make test`; die Attrappe liefert `cfg` für `Conformance` |
 | `sdktest.Fake` | programmierbarer Treiber für Tests des **Core**: pro Adresse ein `Device`, das auf Kommando Struktur, Fakten und Alarme ändert, die Verbindung trennt und wiederherstellt, `New` oder `Run` scheitern lässt, eine Panic auslöst, hängt oder Befehle beantwortet. Er besteht selbst `Conformance` |
 | `sdktest.Scheduler` | einfacher Scheduler für Tests, ohne Versatz und globale Obergrenze |

@@ -164,7 +164,7 @@ func (c *Core) commandErr(r *round, err error) error {
 	domain := errors.As(err, &inUse)
 	for _, e := range []error{
 		inventory.ErrNotFound, inventory.ErrMemberCycle, inventory.ErrUnknownDriver, inventory.ErrNotAGroup,
-		inventory.ErrMissingID, inventory.ErrSourceExists, inventory.ErrMemberExists, inventory.ErrSecretNotFound,
+		inventory.ErrMissingID, inventory.ErrInvalidConfig, inventory.ErrSourceExists, inventory.ErrMemberExists, inventory.ErrSecretNotFound,
 		evaluation.ErrNotFound, evaluation.ErrInvalidRule, evaluation.ErrAlreadyActive,
 	} {
 		domain = domain || errors.Is(err, e)

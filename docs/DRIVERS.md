@@ -144,7 +144,7 @@ Meldet das Gerät eigene Alarme („PSU 2 failure“), gibt der Treiber sie pro 
 
 ## Schritt 9: Konfiguration und Secret
 
-- **`ConfigSchema`** (JSON-Schema) für `device_source.config`, z. B. `{"port": 443, "tls": true}`. Die UI baut daraus das Formular. Keine Zugangsdaten in `config`.
+- **`ConfigSchema`** (JSON-Schema) für `device_source.config`, z. B. `{"port": 443, "tls": true}`. Die UI baut daraus das Formular; das Inventar prüft jede neue oder geänderte Konfiguration dagegen (`422 invalid_config`). Keine Zugangsdaten in `config`.
 - **Secret** als JSON in `SourceConfig.Secret`, Format legt der Treiber fest und dokumentiert es: `{"username": "…", "password": "…"}`. Nie loggen.
 - `SourceConfig.Address` ist die Management-Adresse; sie gehört dem User.
 
@@ -186,6 +186,6 @@ Bevor Code für einen Treiber entsteht, wird sein `drivers/<name>/README.md` ges
 - [ ] `Heartbeat()` passt zum Abfragetakt bzw. Keepalive.
 - [ ] Nach jedem `Connected` ein vollständiger `Snapshot`; Strukturänderungen als `Snapshot`.
 - [ ] Aktionen im Katalog mit Prüfbedingung und `Critical`; keine Management-Adresse, keine Geheimnisse als Einstellung; keine Aktion ändert `feeds`.
-- [ ] `ConfigSchema` vorhanden, Format des Secrets dokumentiert, nichts Geheimes im Log.
+- [ ] `ConfigSchema` vorhanden und gültig (`Conformance` prüft die Test-Konfiguration dagegen), Format des Secrets dokumentiert, nichts Geheimes im Log.
 - [ ] Tests gegen eine Attrappe, `sdktest.Conformance` grün.
 - [ ] `drivers/<name>/README.md`: Gerät, unterstützte Firmware, Elementbaum, `external_id`-Schema, rohe Fakten, Aktionen, Format von Konfiguration und Secret, Besonderheiten (z. B. wiederverwendete IDs).

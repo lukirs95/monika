@@ -28,6 +28,18 @@ func TestConformanceViolations(t *testing.T) {
 		setup func(f *Fake) sdk.Driver
 		want  string
 	}{
+		{"config schema is broken", func(f *Fake) sdk.Driver {
+			f.Device("a", gw4()).SetHeartbeat(0)
+			d := f.Driver()
+			d.ConfigSchema = []byte(`{"type":"objekt"}`)
+			return d
+		}, "ConfigSchema"},
+		{"config does not match the schema", func(f *Fake) sdk.Driver {
+			f.Device("a", gw4()).SetHeartbeat(0)
+			d := f.Driver()
+			d.ConfigSchema = []byte(`{"type":"object","required":["port"]}`)
+			return d
+		}, "does not match ConfigSchema"},
 		{"reserved kind", func(f *Fake) sdk.Driver {
 			s := gw4()
 			s.Elements[0].Kind = vocab.ElementAccess

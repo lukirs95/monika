@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/lukirs95/monika/sdk"
 )
@@ -36,7 +37,8 @@ type Inventory struct {
 	linksBySource    ids[uuid.UUID] // Quelle → ihre Treiber-Links
 	linksByRef       ids[string]    // global_ref → Links mit diesem unaufgelösten Endpunkt
 
-	lastSeenWrite map[uuid.UUID]time.Time // je Quelle: letzter Abschluss einer Discovery in der Datenbank
+	lastSeenWrite map[uuid.UUID]time.Time       // je Quelle: letzter Abschluss einer Discovery in der Datenbank
+	schemas       map[string]*jsonschema.Schema // je Treiber: kompiliertes ConfigSchema
 
 	graph *Graph // nil = nach einer Änderung neu bauen; jede Änderung im Speicher setzt es zurück
 }
@@ -78,6 +80,7 @@ func New(store Store, drivers func(name string) (sdk.Driver, bool), log *slog.Lo
 		linksBySource:    ids[uuid.UUID]{},
 		linksByRef:       ids[string]{},
 		lastSeenWrite:    map[uuid.UUID]time.Time{},
+		schemas:          map[string]*jsonschema.Schema{},
 	}
 }
 

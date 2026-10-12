@@ -1,11 +1,16 @@
 package inventory
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/lukirs95/monika/sdk"
 )
 
 // Fehler der Befehle, zusätzlich zu ErrNotFound und ErrMemberCycle aus dem Store.
@@ -13,6 +18,9 @@ var (
 	ErrUnknownDriver = errors.New("driver not registered")
 	ErrNotAGroup     = errors.New("element is not a group")
 	ErrMissingID     = errors.New("missing ID")
+	// ErrInvalidConfig bedeutet, dass die Konfiguration einer Quelle nicht zum Schema ihres
+	// Treibers passt (sdk.Driver.ConfigSchema).
+	ErrInvalidConfig = errors.New("config does not match the driver's schema")
 )
 
 // Die Befehle der API. Jeder schreibt erst über den Store (eine Transaktion mit Audit) und
@@ -60,8 +68,12 @@ func (inv *Inventory) CreateSource(ctx context.Context, actor uuid.UUID, s Sourc
 	if inv.elements[s.DeviceID].Kind != KindDevice {
 		return Diff{}, fmt.Errorf("create source: device %s: %w", s.DeviceID, ErrNotFound)
 	}
-	if _, ok := inv.drivers(s.Driver); !ok {
+	d, ok := inv.drivers(s.Driver)
+	if !ok {
 		return Diff{}, fmt.Errorf("create source: %q: %w", s.Driver, ErrUnknownDriver)
+	}
+	if err := inv.checkConfig(d, s.Config); err != nil {
+		return Diff{}, fmt.Errorf("create source: %w", err)
 	}
 	s.Identity, s.AccessElementID = Identity{}, inv.newID()
 	if err := inv.store.CreateSource(ctx, actor, s, s.AccessElementID); err != nil {
@@ -82,8 +94,12 @@ func (inv *Inventory) UpdateSource(ctx context.Context, actor uuid.UUID, s Sourc
 	if !ok {
 		return Diff{}, fmt.Errorf("update source %s: %w", s.ID, ErrNotFound)
 	}
-	if _, ok := inv.drivers(next.Driver); !ok {
+	d, ok := inv.drivers(next.Driver)
+	if !ok {
 		return Diff{}, fmt.Errorf("update source %s: %q: %w", s.ID, next.Driver, ErrUnknownDriver)
+	}
+	if err := inv.checkConfig(d, s.Config); err != nil {
+		return Diff{}, fmt.Errorf("update source %s: %w", s.ID, err)
 	}
 	next.Address, next.Config, next.SecretID, next.Enabled = s.Address, s.Config, s.SecretID, s.Enabled
 	if err := inv.store.UpdateSource(ctx, actor, next); err != nil {
@@ -217,4 +233,44 @@ func (inv *Inventory) deleteElements(match func(Element) bool) Diff {
 		}
 	}
 	return diff
+}
+
+// checkConfig prüft die Konfiguration einer Quelle gegen das Schema ihres Treibers; ohne Schema
+// gilt jede. Das kompilierte Schema bleibt pro Treiber im Speicher. Auch ein ungültiges Schema
+// ist ErrInvalidConfig: Die Quelle lässt sich so nicht anlegen, die Datenbank ist nicht schuld.
+func (inv *Inventory) checkConfig(d sdk.Driver, config json.RawMessage) error {
+	if len(d.ConfigSchema) == 0 {
+		return nil
+	}
+	schema, ok := inv.schemas[d.Name]
+	if !ok {
+		var err error
+		if schema, err = compileSchema(d.ConfigSchema); err != nil {
+			return fmt.Errorf("%w: schema of driver %q: %w", ErrInvalidConfig, d.Name, err)
+		}
+		inv.schemas[d.Name] = schema
+	}
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
+	}
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(config))
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	if err := schema.Validate(v); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	return nil
+}
+
+func compileSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("config.json", doc); err != nil {
+		return nil, err
+	}
+	return c.Compile("config.json")
 }

@@ -37,6 +37,18 @@ func TestCreate(t *testing.T) {
 		t.Errorf("access = %+v", e)
 	}
 
+	// Mit Schema: Anlegen und Ändern prüfen die Konfiguration.
+	nmos := id()
+	if _, err := tr.inv.CreateSource(ctx, actor, Source{ID: nmos, DeviceID: device, Driver: "nmos", Config: []byte(`{"port":3000}`)}); err != nil {
+		t.Fatalf("CreateSource with schema: %v", err)
+	}
+	if _, err := tr.inv.UpdateSource(ctx, actor, Source{ID: nmos, Config: []byte(`{"port":3000,"user":"admin"}`)}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("UpdateSource with an unknown field = %v, want ErrInvalidConfig", err)
+	}
+	if src, _ := tr.inv.Source(nmos); string(src.Config) != `{"port":3000}` {
+		t.Errorf("config after a rejected update = %s", src.Config)
+	}
+
 	group := id()
 	if _, err := tr.inv.CreateGroup(ctx, actor, Element{ID: group, Label: "Studio A"}); err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -181,6 +193,12 @@ func TestCommandErrors(t *testing.T) {
 		{"source on unknown device", nil, func(tr tree) (Diff, error) {
 			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: id(), Driver: "videoxlink"})
 		}, ErrNotFound},
+		{"config against the schema", nil, func(tr tree) (Diff, error) {
+			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "nmos", Config: []byte(`{"port":"x"}`)})
+		}, ErrInvalidConfig},
+		{"config missing a required field", nil, func(tr tree) (Diff, error) {
+			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "nmos"})
+		}, ErrInvalidConfig},
 		{"source with unknown driver", nil, func(tr tree) (Diff, error) {
 			return tr.inv.CreateSource(t.Context(), id(), Source{ID: id(), DeviceID: tr.device, Driver: "acme"})
 		}, ErrUnknownDriver},

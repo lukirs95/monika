@@ -84,7 +84,11 @@ func testDrivers(name string) (sdk.Driver, bool) {
 	if name != "videoxlink" && name != "nmos" {
 		return sdk.Driver{}, false
 	}
-	return sdk.Driver{Name: name, Actions: []sdk.ActionDef{{Name: vocab.ActionReboot}}}, true
+	d := sdk.Driver{Name: name, Actions: []sdk.ActionDef{{Name: vocab.ActionReboot}}}
+	if name == "nmos" {
+		d.ConfigSchema = []byte(`{"type":"object","properties":{"port":{"type":"integer"}},"required":["port"],"additionalProperties":false}`)
+	}
+	return d, true
 }
 
 func (tr tree) snapshot() sdk.Snapshot {

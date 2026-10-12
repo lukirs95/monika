@@ -1,7 +1,9 @@
 package sdktest
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/lukirs95/monika/sdk"
 	"github.com/lukirs95/monika/sdk/vocab"
@@ -24,7 +28,7 @@ type Options struct {
 }
 
 // Conformance prüft einen Treiber gegen die Regeln des SDK-Vertrags, mit einer Attrappe seines
-// Geräts hinter cfg: gültiger Katalog; nach Connected zuerst ein vollständiger Snapshot; gültige
+// Geräts hinter cfg: gültiger Katalog; gültiges ConfigSchema, zu dem cfg.Config passt; nach Connected zuerst ein vollständiger Snapshot; gültige
 // Elemente, Links, Fakten und Alarme; Lebenszeichen innerhalb des Dreifachen von Heartbeat;
 // stabile external_ids über zwei Läufe; Run kehrt nach Abbruch zügig zurück; Execute verträgt
 // gleichzeitige Aufrufe.
@@ -50,6 +54,9 @@ func check(ctx context.Context, d sdk.Driver, cfg sdk.SourceConfig, opts Options
 	}
 	if err := d.Validate(); err != nil {
 		return []error{fmt.Errorf("catalog: %w", err)}
+	}
+	if err := checkConfig(d.ConfigSchema, cfg.Config); err != nil {
+		return []error{fmt.Errorf("config: %w", err)}
 	}
 
 	var errs []error
@@ -263,4 +270,35 @@ func externalIDs(s sdk.Snapshot) []string {
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+// checkConfig prüft, dass ConfigSchema ein gültiges JSON-Schema ist und die Konfiguration des
+// Tests dazu passt; der Core lehnt sonst jede Quelle mit invalid_config ab.
+func checkConfig(schema, config json.RawMessage) error {
+	if len(schema) == 0 {
+		return nil
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
+	if err != nil {
+		return fmt.Errorf("ConfigSchema is not JSON: %w", err)
+	}
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("config.json", doc); err != nil {
+		return fmt.Errorf("ConfigSchema: %w", err)
+	}
+	compiled, err := c.Compile("config.json")
+	if err != nil {
+		return fmt.Errorf("ConfigSchema: %w", err)
+	}
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
+	}
+	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(config))
+	if err != nil {
+		return fmt.Errorf("config is not JSON: %w", err)
+	}
+	if err := compiled.Validate(v); err != nil {
+		return fmt.Errorf("config does not match ConfigSchema: %w", err)
+	}
+	return nil
 }
