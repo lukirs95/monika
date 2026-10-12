@@ -33,7 +33,7 @@ type recorded struct {
 	header                             nethttp.Header
 }
 
-func newTarget(t *testing.T) *target {
+func newTarget(t testing.TB) *target {
 	t.Helper()
 	tg := &target{status: map[string]int{}}
 	tg.Server = httptest.NewServer(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
@@ -92,7 +92,7 @@ const tallyConfig = `{
   ]
 }`
 
-func newTestSource(t *testing.T, address, cfg, secret string) *source {
+func newTestSource(t testing.TB, address, cfg, secret string) *source {
 	t.Helper()
 	sc := sdk.SourceConfig{Address: address, Config: json.RawMessage(cfg), Logger: slog.New(slog.DiscardHandler), Scheduler: sdktest.Scheduler{}}
 	if secret != "" {

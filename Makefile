@@ -55,7 +55,7 @@ BENCHTIME ?= 1s
 
 .PHONY: bench
 bench: ## Benchmarks in Stufen bis 1000 Geräte; Auswahl mit BENCH=Muster, Dauer mit BENCHTIME
-	$(GO) test -run '^$$' -bench '$(BENCH)' -benchtime $(BENCHTIME) -benchmem -timeout 60m ./internal/...
+	$(GO) test -run '^$$' -bench '$(BENCH)' -benchtime $(BENCHTIME) -benchmem -timeout 60m ./internal/... ./drivers/...
 
 .PHONY: vet
 vet: ## go vet, inklusive Integrationstests

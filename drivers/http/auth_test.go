@@ -33,7 +33,7 @@ type loginTarget struct {
 	echo        bool // /bt antwortet mit 400 und gibt den Body der Anfrage zurück
 }
 
-func newLoginTarget(t *testing.T, deliver string) *loginTarget {
+func newLoginTarget(t testing.TB, deliver string) *loginTarget {
 	t.Helper()
 	lt := &loginTarget{deliver: deliver}
 	lt.Server = httptest.NewServer(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {

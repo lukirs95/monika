@@ -1,0 +1,72 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/api
+cpu: Apple M4 Max
+BenchmarkState/devices=10/view=global-14         	     621	   1921056 ns/op	       411.4 KiB	 2908912 B/op	   15314 allocs/op
+BenchmarkState/devices=10/view=group-14          	     547	   2199262 ns/op	       411.1 KiB	 3317194 B/op	   15351 allocs/op
+BenchmarkState/devices=50/view=global-14         	     124	   9545333 ns/op	      2056 KiB	19032886 B/op	   76132 allocs/op
+BenchmarkState/devices=50/view=group-14          	     526	   2246785 ns/op	       411.1 KiB	 2829986 B/op	   15336 allocs/op
+BenchmarkState/devices=100/view=global-14        	      56	  19925045 ns/op	      4112 KiB	43373889 B/op	  152143 allocs/op
+BenchmarkState/devices=100/view=group-14         	     481	   2486610 ns/op	       411.1 KiB	 2684598 B/op	   15331 allocs/op
+BenchmarkState/devices=200/view=global-14        	      26	  40159247 ns/op	      8224 KiB	91102972 B/op	  304145 allocs/op
+BenchmarkState/devices=200/view=group-14         	     403	   2953141 ns/op	       411.1 KiB	 2580233 B/op	   15328 allocs/op
+BenchmarkState/devices=400/view=global-14        	      13	  83440785 ns/op	     16448 KiB	177030383 B/op	  608130 allocs/op
+BenchmarkState/devices=400/view=group-14         	     295	   4039424 ns/op	       411.1 KiB	 2531569 B/op	   15326 allocs/op
+BenchmarkState/devices=1000/view=global-14       	       5	 219157350 ns/op	     41119 KiB	411456062 B/op	 1520081 allocs/op
+BenchmarkState/devices=1000/view=group-14        	     163	   7346410 ns/op	       411.1 KiB	 2516527 B/op	   15326 allocs/op
+BenchmarkRequest/devices=10-14                   	    6482	    182347 ns/op	  203855 B/op	     175 allocs/op
+BenchmarkRequest/devices=1000-14                 	    7035	    167377 ns/op	  203126 B/op	     173 allocs/op
+BenchmarkWatch/devices=10-14                     	    8389	    140151 ns/op	  150934 B/op	    1374 allocs/op
+BenchmarkWatch/devices=50-14                     	    9056	    128586 ns/op	  148288 B/op	    1372 allocs/op
+BenchmarkWatch/devices=100-14                    	    9830	    126056 ns/op	  147458 B/op	    1372 allocs/op
+BenchmarkWatch/devices=200-14                    	   10000	    124256 ns/op	  146924 B/op	    1372 allocs/op
+BenchmarkWatch/devices=400-14                    	   10000	    123258 ns/op	  146849 B/op	    1372 allocs/op
+BenchmarkWatch/devices=1000-14                   	    9457	    123663 ns/op	  146732 B/op	    1372 allocs/op
+BenchmarkDistribute/streams=1-14                 	  259904	      4577 ns/op	    5264 B/op	      15 allocs/op
+BenchmarkDistribute/streams=10-14                	   27640	     43364 ns/op	   51776 B/op	     132 allocs/op
+BenchmarkDistribute/streams=50-14                	    5535	    217299 ns/op	  258499 B/op	     652 allocs/op
+BenchmarkDistribute/streams=100-14               	    2786	    442394 ns/op	  516909 B/op	    1302 allocs/op
+BenchmarkDistribute/streams=200-14               	    1335	    908085 ns/op	 1033744 B/op	    2602 allocs/op
+BenchmarkStreamWrite/devices=10/view=global/elements-14         	    8260	    135820 ns/op	   94673 B/op	      92 allocs/op
+BenchmarkStreamWrite/devices=10/view=global/health-14           	   40160	     29815 ns/op	   40474 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=10/view=global/facts-14            	 1244498	       963.5 ns/op	    1009 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=10/view=group/elements-14          	    3176	    381191 ns/op	  285521 B/op	     147 allocs/op
+BenchmarkStreamWrite/devices=10/view=group/health-14            	   39169	     30449 ns/op	   40442 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=10/view=group/facts-14             	 1234053	       972.7 ns/op	    1009 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=50/view=global/elements-14         	    2186	    546895 ns/op	  325440 B/op	     166 allocs/op
+BenchmarkStreamWrite/devices=50/view=global/health-14           	   45007	     26830 ns/op	   40173 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=50/view=global/facts-14            	 1324304	       905.2 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=50/view=group/elements-14          	    2536	    469799 ns/op	  285183 B/op	     146 allocs/op
+BenchmarkStreamWrite/devices=50/view=group/health-14            	   42817	     27619 ns/op	   40180 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=50/view=group/facts-14             	 1320054	       917.5 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=100/view=global/elements-14        	    1074	   1094675 ns/op	  632438 B/op	     256 allocs/op
+BenchmarkStreamWrite/devices=100/view=global/health-14          	   46038	     25950 ns/op	   40104 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=100/view=global/facts-14           	 1349977	       887.8 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=100/view=group/elements-14         	    2008	    599237 ns/op	  285090 B/op	     146 allocs/op
+BenchmarkStreamWrite/devices=100/view=group/health-14           	   44678	     26686 ns/op	   40101 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=100/view=group/facts-14            	 1331216	       899.9 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=200/view=global/elements-14        	     543	   2215250 ns/op	 1245969 B/op	     433 allocs/op
+BenchmarkStreamWrite/devices=200/view=global/health-14          	   46516	     25776 ns/op	   40067 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=200/view=global/facts-14           	 1341586	       892.3 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=200/view=group/elements-14         	    1376	    859677 ns/op	  285039 B/op	     146 allocs/op
+BenchmarkStreamWrite/devices=200/view=group/health-14           	   45034	     26413 ns/op	   40062 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=200/view=group/facts-14            	 1335520	       899.8 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=400/view=global/elements-14        	     264	   4533760 ns/op	 2473463 B/op	     784 allocs/op
+BenchmarkStreamWrite/devices=400/view=global/health-14          	   46634	     25358 ns/op	   40054 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=400/view=global/facts-14           	 1352872	       886.4 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=400/view=group/elements-14         	     859	   1407248 ns/op	  285007 B/op	     146 allocs/op
+BenchmarkStreamWrite/devices=400/view=group/health-14           	   44702	     26530 ns/op	   40051 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=400/view=group/facts-14            	 1338020	       894.1 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=1000/view=global/elements-14       	     100	  11586389 ns/op	 5015767 B/op	    1709 allocs/op
+BenchmarkStreamWrite/devices=1000/view=global/health-14         	   47605	     25463 ns/op	   40042 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=1000/view=global/facts-14          	 1341657	       891.3 ns/op	    1008 B/op	      17 allocs/op
+BenchmarkStreamWrite/devices=1000/view=group/elements-14        	     398	   3034682 ns/op	  284997 B/op	     146 allocs/op
+BenchmarkStreamWrite/devices=1000/view=group/health-14          	   44870	     26276 ns/op	   40042 B/op	     217 allocs/op
+BenchmarkStreamWrite/devices=1000/view=group/facts-14           	 1338078	       896.3 ns/op	    1008 B/op	      17 allocs/op
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/drivers/http
+cpu: Apple M4 Max
+BenchmarkPrepare-14    	  309459	      3508 ns/op	    7303 B/op	      55 allocs/op
+BenchmarkTrigger/plain-14         	   21912	     53605 ns/op	   14083 B/op	     137 allocs/op
+BenchmarkTrigger/auth-14          	   27729	     42481 ns/op	    7743 B/op	      92 allocs/op

@@ -66,7 +66,7 @@ func newTestServer(t *testing.T) *Server {
 }
 
 // newServerWith baut den Server mit einem anderen Core, etwa dem laufenden aus coretest.
-func newServerWith(t *testing.T, c Core) *Server {
+func newServerWith(t testing.TB, c Core) *Server {
 	t.Helper()
 	public, _ := url.Parse("https://monika.example")
 	s, err := New(Config{
