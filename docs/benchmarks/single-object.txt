@@ -1,0 +1,6 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/lukirs95/monika/internal/api
+cpu: Apple M4 Max
+BenchmarkRequest/devices=10-14         	   93146	     12189 ns/op	   12833 B/op	     123 allocs/op
+BenchmarkRequest/devices=1000-14       	  108945	     10916 ns/op	   12785 B/op	     123 allocs/op

@@ -18,7 +18,7 @@ Wie Monika ausgeliefert, betrieben, gesichert und aktualisiert wird. Konfigurati
 | `monika` | Monika | Monitor und Konfigurator; Healthcheck `monika -healthcheck`; `stop_grace_period: 35s`: Das Herunterfahren in Phasen dauert höchstens 30 s (Docker beendet sonst nach 10 s mit `SIGKILL`) |
 | `postgres` | `postgres:18-alpine` | Hauptdatenbank, Volume für die Daten |
 | `influxdb` | `influxdb:2` | Zeitreihen; Bucket und Token beim ersten Start per `DOCKER_INFLUXDB_INIT_*`, Aufbewahrung des Buckets z. B. 30 Tage |
-| `caddy` | `caddy:2` | Reverse-Proxy mit automatischem TLS, leitet an `monika:8080` weiter, setzt `X-Forwarded-For` |
+| `caddy` | `caddy:2` | Reverse-Proxy mit automatischem TLS, leitet an `monika:8080` weiter, setzt `X-Forwarded-For`; komprimiert alle Antworten außer dem Ereignisstrom `/api/v1/events` (`/state` schrumpft auf etwa ein Zwölftel) |
 
 - InfluxDB ist fester Teil der Architektur und deshalb im Stack. Wer schon eine InfluxDB betreibt, lässt den Dienst weg und setzt `MONIKA_INFLUX_*` auf sie; Monika spricht nur Line Protocol und ist versionsunabhängig.
 - **Grafana** ist nicht im Stack: Es ist ein Werkzeug, das Monika nutzt, kein Teil davon. Es liest InfluxDB und das Schema `reporting` in PostgreSQL (Rolle `monika_reporting`).

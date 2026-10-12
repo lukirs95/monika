@@ -95,7 +95,8 @@ func (s *Server) GetElementFacts(ctx context.Context, rq oapi.GetElementFactsReq
 	if err != nil {
 		return nil, err
 	}
-	if !s.sight(v, principal(ctx)).sees(rq.ElementID) {
+	// Ein einzelnes Element: Allowed statt der ganzen Sicht (docs/benchmarks/api.txt).
+	if !s.visible(v, principal(ctx), rq.ElementID) {
 		return nil, errNotFound
 	}
 	return oapi.GetElementFacts200JSONResponse(elementFacts(v, rq.ElementID)), nil
@@ -115,8 +116,8 @@ func (s *Server) GetElementRules(ctx context.Context, rq oapi.GetElementRulesReq
 	if err != nil {
 		return nil, err
 	}
-	si := s.sight(v, principal(ctx))
-	if !si.sees(rq.ElementID) {
+	p := principal(ctx)
+	if !s.visible(v, p, rq.ElementID) {
 		return nil, errNotFound
 	}
 	// Erfüllt ist eine geltende Regel, solange sie keinen aktiven Befund am Element hat; das ist
@@ -129,7 +130,7 @@ func (s *Server) GetElementRules(ctx context.Context, rq oapi.GetElementRulesReq
 	}
 	ref := func(r evaluation.Rule, effective bool) oapi.RuleRef {
 		out := oapi.RuleRef{RuleID: r.ID, Name: optional(r.Name), Scope: scopeClass(v.Graph, rq.ElementID, r.ScopeElementID)}
-		if si.sees(r.ScopeElementID) {
+		if s.visible(v, p, r.ScopeElementID) {
 			out.ScopeElementID = optionalID(r.ScopeElementID)
 		}
 		if effective {

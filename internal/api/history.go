@@ -182,7 +182,7 @@ func (s *Server) storedRun(ctx context.Context, v *core.View, p auth.Principal, 
 		return action.Run{}, nil, err
 	}
 	if _, exists := v.Graph.Element(r.ElementID); r.ElementID != uuid.Nil && !exists {
-		if !s.sight(v, p).all {
+		if !s.cfg.Auth.Allowed(v, p, auth.PermView, uuid.Nil) { // gelöscht: nur mit view global
 			return action.Run{}, nil, errNotFound
 		}
 	} else if !s.seesRun(v, p, r) {
