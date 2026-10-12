@@ -13,12 +13,6 @@ type unimplemented struct{}
 func (unimplemented) ListAudit(context.Context, oapi.ListAuditRequestObject) (oapi.ListAuditResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) GetEvents(context.Context, oapi.GetEventsRequestObject) (oapi.GetEventsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) Watch(context.Context, oapi.WatchRequestObject) (oapi.WatchResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) ListFindingHistory(context.Context, oapi.ListFindingHistoryRequestObject) (oapi.ListFindingHistoryResponseObject, error) {
 	return nil, errNotImplemented
 }

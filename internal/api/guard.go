@@ -41,7 +41,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 		rq := request{meta: auth.Meta{RemoteAddr: s.clientIP(r), UserAgent: r.UserAgent()}}
 		if !public(route.Operation) {
-			p, session, err := s.authenticate(r)
+			p, session, bearer, err := s.authenticate(r)
 			if err == nil && !s.schemeAllowed(route.Operation, session != "") {
 				err = errUnauthenticated
 			}
@@ -53,7 +53,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				writeProblem(w, errReadOnly)
 				return
 			}
-			rq.principal, rq.session = p, session
+			rq.principal, rq.session, rq.bearer = p, session, bearer
 		}
 		ctx := context.WithValue(r.Context(), requestKey{}, rq)
 		if !s.originOK(r, rq.session != "") {
@@ -100,25 +100,27 @@ func changes(method string) bool {
 	return false
 }
 
-// authenticate meldet die Anfrage an: API-Token aus Authorization, sonst die Sitzung aus dem
-// Cookie (session ist dann ihr Token). Ein falsches Token fällt nicht auf das Cookie zurück.
-func (s *Server) authenticate(r *http.Request) (p auth.Principal, session string, err error) {
+// authenticate meldet die Anfrage an: API-Token aus Authorization (bearer), sonst die Sitzung
+// aus dem Cookie (session). Ein falsches Token fällt nicht auf das Cookie zurück.
+func (s *Server) authenticate(r *http.Request) (p auth.Principal, session, bearer string, err error) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		bearer, ok := strings.CutPrefix(h, "Bearer ")
 		if !ok {
-			return auth.Principal{}, "", errUnauthenticated
+			return auth.Principal{}, "", "", errUnauthenticated
 		}
-		p, err := s.cfg.Auth.AuthenticateToken(r.Context(), bearer)
-		return p, "", err
+		if p, err = s.cfg.Auth.AuthenticateToken(r.Context(), bearer); err != nil {
+			return auth.Principal{}, "", "", err
+		}
+		return p, "", bearer, nil
 	}
 	c, err := r.Cookie(SessionCookie)
 	if err != nil || c.Value == "" {
-		return auth.Principal{}, "", errUnauthenticated
+		return auth.Principal{}, "", "", errUnauthenticated
 	}
 	if p, err = s.cfg.Auth.Authenticate(r.Context(), c.Value); err != nil {
-		return auth.Principal{}, "", err
+		return auth.Principal{}, "", "", err
 	}
-	return p, c.Value, nil
+	return p, c.Value, "", nil
 }
 
 // clientIP ist die Adresse des Clients für Begrenzung der Fehlversuche und Audit: die
@@ -198,6 +200,7 @@ func validationDetail(err error) string {
 type request struct {
 	principal auth.Principal // leer bei öffentlichen Operationen
 	session   string         // Token der Sitzung aus dem Cookie; leer bei API-Token
+	bearer    string         // API-Token; leer bei Sitzung
 	meta      auth.Meta
 }
 

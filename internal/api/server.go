@@ -40,6 +40,9 @@ type Auth interface {
 	KioskLogin(ctx context.Context, bearer string, meta auth.Meta) (auth.IssuedSession, error)
 	Authenticate(ctx context.Context, sessionToken string) (auth.Principal, error)
 	AuthenticateToken(ctx context.Context, bearer string) (auth.Principal, error)
+	CheckSession(ctx context.Context, sessionToken string) error
+	CheckToken(ctx context.Context, bearer string) error
+	AuthzVersion() uint64
 	Logout(ctx context.Context, sessionToken string) error
 	ChangePassword(ctx context.Context, p auth.Principal, current, next string, meta auth.Meta) error
 	ListSessions(ctx context.Context, user uuid.UUID) ([]auth.Session, error)
@@ -69,6 +72,7 @@ type Admin interface {
 // Core liefert den aktuellen Stand und nimmt Befehle an (core.Core).
 type Core interface {
 	View() *core.View
+	Subscribe(buffer int) (<-chan core.Event, func())
 	Do(ctx context.Context, cmd core.Command) error
 }
 
@@ -126,6 +130,8 @@ type Server struct {
 	unimplemented
 
 	cfg      Config
+	dist     *Distributor
+	times    streamTimes
 	router   routers.Router                // Routen der Spezifikation: Operation, Anmeldung, Prüfung
 	security openapi3.SecurityRequirements // Vorgabe der Spezifikation für Operationen ohne eigenes security
 	origin   string
@@ -144,9 +150,18 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("build openapi router: %w", err)
 	}
 	return &Server{
-		cfg: cfg, router: router, security: spec.Security,
+		cfg: cfg, router: router, security: spec.Security, dist: NewDistributor(cfg.Core, cfg.Auth.AuthzVersion), times: defaultStreamTimes,
 		origin: cfg.PublicURL.Scheme + "://" + cfg.PublicURL.Host,
 	}, nil
+}
+
+// Run betreibt den Verteiler der Ereignisströme, bis ctx endet; dann schließt er alle Ströme.
+// cmd/monika beendet ihn vor dem HTTP-Server (V7).
+func (s *Server) Run(ctx context.Context) error { return s.dist.Run(ctx) }
+
+// Gauges liefert die Kennzahlen der API für das Measurement monika (influx.Gauges).
+func (s *Server) Gauges() map[string]int64 {
+	return map[string]int64{"api_streams": int64(s.dist.Streams())}
 }
 
 // Handler liefert die API für Pfade unter Prefix.

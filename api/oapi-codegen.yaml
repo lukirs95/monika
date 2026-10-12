@@ -7,4 +7,5 @@ generate:
   strict-server: true
   embedded-spec: true
 output-options:
+  skip-prune: true # auch Schemas ohne Operation, etwa die Ereignisse des Stroms
   name-normalizer: ToCamelCaseWithInitialisms # ID, URL, TOTP statt Id, Url, Totp

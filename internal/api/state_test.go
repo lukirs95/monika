@@ -79,8 +79,12 @@ func newScene(t *testing.T) (*scene, *core.View) {
 // snapshot ist das Inventar der Szene.
 func (sc *scene) snapshot() inventory.Snapshot {
 	el := func(id, parent, device, source uuid.UUID, kind inventory.Kind, name string) inventory.Element {
+		ext := ""
+		if kind == "port" {
+			ext = "sdi/" + name[len(name)-1:] // SDI 1 → sdi/1
+		}
 		return inventory.Element{ID: id, ParentID: parent, DeviceID: device, SourceID: source, Kind: kind, Name: name,
-			Present: true, Monitored: true, Attributes: json.RawMessage(`{"slot":1}`)}
+			ExternalID: ext, Present: true, Monitored: true, Attributes: json.RawMessage(`{"slot":1}`)}
 	}
 	return inventory.Snapshot{
 		Sources: []inventory.Source{

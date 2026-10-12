@@ -205,7 +205,7 @@ paths:
       operationId: getEvents
       summary: Ereignisstrom (Server-Sent Events)
       description: |
-        Erstes Ereignis ist `hello` mit der `stream_id`. Jedes Ereignis trägt als SSE-`id` die
+        Erstes Ereignis ist `hello` mit der `stream_id` (ohne SSE-`id`). Jedes weitere Ereignis trägt als SSE-`id` die
         Version der View, zu der es den Stand seines Objekts beschreibt; nach einem Abbruch sendet
         der Browser sie als `Last-Event-ID`. Liegt sie im Ringpuffer (letzte 100 Ereignisse ohne
         `facts_changed`), folgen alle Ereignisse ab einschließlich dieser Version daraus (Ereignisse

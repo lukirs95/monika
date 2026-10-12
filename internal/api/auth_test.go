@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,6 +33,19 @@ func (f *fakeAuth) Login(_ context.Context, username, password string, meta auth
 	}
 	return auth.LoginStep{Challenge: "challenge", NeedsEnrollment: username == "new"}, nil
 }
+
+// CheckSession: Sitzungen gelten, bis ended sie enthält.
+func (f *fakeAuth) CheckSession(_ context.Context, token string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if slices.Contains(f.ended, token) {
+		return auth.ErrUnauthenticated
+	}
+	return nil
+}
+
+func (*fakeAuth) CheckToken(context.Context, string) error { return nil }
+func (*fakeAuth) AuthzVersion() uint64                     { return 0 }
 
 func (*fakeAuth) VerifyTOTP(_ context.Context, challenge, code string, _ auth.Meta) (auth.IssuedSession, error) {
 	if challenge != "challenge" || code != "123456" {
@@ -107,7 +121,8 @@ func (f *fakeAuth) Allowed(v *core.View, p auth.Principal, perm auth.Permission,
 // fakeCore hält eine feste View; Befehle nimmt nur der echte Core aus coretest an.
 type fakeCore struct{ view atomic.Pointer[core.View] }
 
-func (c *fakeCore) View() *core.View { return c.view.Load() }
+func (c *fakeCore) View() *core.View                        { return c.view.Load() }
+func (*fakeCore) Subscribe(int) (<-chan core.Event, func()) { return nil, func() {} }
 func (c *fakeCore) Do(context.Context, core.Command) error {
 	return errors.New("fake core takes no commands")
 }

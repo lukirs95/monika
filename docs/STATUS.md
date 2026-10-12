@@ -134,7 +134,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
         - ~~11f3 Benutzer, Rollen, Tokens~~: erledigt, mit `User.TOTPEnabled` aus `ListUsers` und `CreateToken` mit Metadaten
       - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams` (Festlegungen V1–V7 vom 2026-10-12 in `api.md`):
         - ~~11g1 Verteiler und Warteschlange pro Strom~~: erledigt; `core.WithVersion` für Tests von Abonnenten exportiert
-        - 11g2 `/events` (SSE), `watch`, `api_streams`
+        - ~~11g2 `/events` (SSE), `watch`, `api_streams`~~: erledigt; Ende-zu-Ende-Test über echtes HTTP mit laufendem Core und Reporter; `hello` ohne SSE-`id`; Ereignisschemas mit `skip-prune` erzeugt
       - 11h Verlauf (lesende Queries) und abgeschlossene Läufe in `GET /runs/{id}`
    12. Bootstrap und Deployment-Dateien (`cmd/monika`, `deploy/`). Vorgaben aus den vorigen Schritten: Supervisor → Core (mit dem Supervisor) → `sup.Run(ctx, core)`; den Verteiler der API vor `http.Server.Shutdown` stoppen (V7); `http.Server` ohne `WriteTimeout`, die Ströme setzen ihre Deadline selbst; `Distributor.Streams` als Kennzahl `api_streams` an den Influx-Schreiber
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.

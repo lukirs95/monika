@@ -35,6 +35,7 @@ type fakeAuth struct {
 	mu        sync.Mutex
 	meta      auth.Meta // der letzten Anmeldung
 	loggedOut []string
+	ended     []string                   // Sitzungen, die CheckSession nicht mehr gelten lässt
 	grants    map[uuid.UUID][]auth.Grant // pro Benutzer; sonst die aus auth_test.go
 }
 

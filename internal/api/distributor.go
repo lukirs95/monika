@@ -57,7 +57,8 @@ type stream struct {
 	closed chan struct{} // der Verteiler ist beendet
 
 	mu      sync.Mutex
-	watched map[uuid.UUID]bool // beobachtete Elemente, aufgelöst aus den Geltungsbereichen
+	scopes  map[uuid.UUID]bool // beobachtete Geltungsbereiche (watch)
+	watched map[uuid.UUID]bool // daraus aufgelöste, sichtbare Elemente
 }
 
 func (st *stream) watching(id uuid.UUID) bool {
@@ -155,7 +156,8 @@ func (d *Distributor) stop() {
 // der Strom. Mit lastEventID (SSE Last-Event-ID) bekommt er zusätzlich alle Ereignisse ab
 // einschließlich dieser Version aus dem Ring; liegt sie nicht vollständig darin, lädt er neu.
 func (d *Distributor) open(p auth.Principal, lastEventID string) (*stream, uint64, error) {
-	st := &stream{id: newID(), principal: p, queue: newQueue(), closed: make(chan struct{}), watched: map[uuid.UUID]bool{}}
+	st := &stream{id: newID(), principal: p, queue: newQueue(), closed: make(chan struct{}),
+		scopes: map[uuid.UUID]bool{}, watched: map[uuid.UUID]bool{}}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.running {
