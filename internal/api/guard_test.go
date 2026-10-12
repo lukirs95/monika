@@ -18,12 +18,14 @@ import (
 
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
+	"github.com/lukirs95/monika/sdk"
 )
 
 var (
 	anna  = auth.Principal{UserID: uuid.New(), Username: "anna", SessionID: uuid.New()}
 	wall  = auth.Principal{UserID: uuid.New(), Username: "wand", Service: true, SessionID: uuid.New(), ReadOnly: true}
 	robot = auth.Principal{UserID: uuid.New(), Username: "companion", Service: true, TokenID: uuid.New()}
+	boss  = auth.Principal{UserID: uuid.New(), Username: "chefin", SessionID: uuid.New()}
 )
 
 // fakeAuth kennt zwei Sitzungen und ein Token; die übrigen Methoden stehen in auth_test.go.
@@ -32,6 +34,7 @@ type fakeAuth struct {
 	mu        sync.Mutex
 	meta      auth.Meta // der letzten Anmeldung
 	loggedOut []string
+	grants    map[uuid.UUID][]auth.Grant // pro Benutzer; sonst die aus auth_test.go
 }
 
 func (*fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, error) {
@@ -40,6 +43,8 @@ func (*fakeAuth) Authenticate(_ context.Context, token string) (auth.Principal, 
 		return anna, nil
 	case "kiosk":
 		return wall, nil
+	case "boss":
+		return boss, nil
 	}
 	return auth.Principal{}, auth.ErrUnauthenticated
 }
@@ -57,6 +62,7 @@ func newTestServer(t *testing.T) *Server {
 	s, err := New(Config{
 		Auth: &fakeAuth{}, Core: &fakeCore{}, PublicURL: public, Log: slog.New(slog.DiscardHandler),
 		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12")},
+		Drivers:        func() []sdk.Driver { return nil },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

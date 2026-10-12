@@ -82,7 +82,12 @@ func (*fakeAuth) RevokeSession(_ context.Context, _, id uuid.UUID) error {
 	return nil
 }
 
-func (*fakeAuth) Grants(uuid.UUID) []auth.Grant {
+func (f *fakeAuth) Grants(user uuid.UUID) []auth.Grant {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if g, ok := f.grants[user]; ok {
+		return g
+	}
 	return []auth.Grant{{Permission: auth.PermView}, {Permission: auth.PermOperate, ScopeElementID: scope}}
 }
 

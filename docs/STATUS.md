@@ -124,7 +124,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~11a Lücken vor der API~~: erledigt; Konflikte aus der Datenbank sind fachliche Fehler (`ErrSourceExists`, `ErrMemberExists`, `ErrSecretNotFound`) statt Störung der Datenbank, `SourceStatus.Since`, `auth.CheckSession`/`CheckToken` und `AuthzVersion`
       - ~~11b Code-Erzeugung, Problem Details, Middleware~~: erledigt; `make api-gen` erzeugt `internal/api/oapi`, Guard (Operation, Anmeldung, `read_only`, Origin, Prüfung gegen die Spezifikation), Fehlertabelle, alle noch fehlenden Operationen antworten mit `501` (`unimplemented.go`, entfällt mit 11h)
       - ~~11c Anmeldung, eigene Sitzungen und Passwort, `/auth/me`, `/healthz`~~: erledigt; dazu `auth.ChangePassword` (Prüfung des aktuellen Passworts mit Begrenzung), `ListSessions` ohne abgelaufene, `Principal.DisplayName`, Adresse des Clients hinter Proxys
-      - 11d Sichtbarkeit und Gerüst: `/state`, Fakten, geltende Regeln, Treiber
+      - ~~11d Sichtbarkeit und Gerüst: `/state`, Fakten, geltende Regeln, Treiber~~: erledigt; freie JSON-Felder als `json.RawMessage` durchgereicht, Zahlen als `double`, Richtung `equal` wie im Core
       - 11e Befehle für Inventar, Regeln und Quittierung über `Core.Do`
       - 11f Läufe, Presets, Weiterleitung, Secrets, Benutzer, Rollen, Tokens
       - 11g Verteiler, SSE, `watch`, Ringpuffer, `api_streams`

@@ -9,7 +9,7 @@ Die API ist eine dünne Schicht: Anmeldung prüfen, Rechte prüfen, Fachpaket au
 | # | Thema | Festlegung |
 |---|---|---|
 | R1 | Format der Spezifikation | OpenAPI **3.0.3** (wegen der Werkzeuge für die Code-Erzeugung) |
-| R2 | Spezifikation und Code | Code wird erzeugt (`oapi-codegen`, strict server): `make api-gen` erzeugt Typen und Server-Interface, die Handler implementieren es. `make api-check` prüft die Spezifikation. oapi-codegen ist als `tool` in `go.mod` eingetragen (`go tool oapi-codegen`, Version fest, ohne Docker); Router ist der `ServeMux` der Standardbibliothek (`std-http-server`). `/events` liefert ein eigenes Antwortobjekt, das selbst in den Strom schreibt |
+| R2 | Spezifikation und Code | Code wird erzeugt (`oapi-codegen`, strict server): `make api-gen` erzeugt Typen und Server-Interface, die Handler implementieren es. `make api-check` prüft die Spezifikation. oapi-codegen ist als `tool` in `go.mod` eingetragen (`go tool oapi-codegen`, Version fest, ohne Docker); Router ist der `ServeMux` der Standardbibliothek (`std-http-server`). `/events` liefert ein eigenes Antwortobjekt, das selbst in den Strom schreibt. Freie JSON-Felder (Attribute, Einstellungen, Konfiguration, Details, Regelwerte) tragen `x-go-type: json.RawMessage` und gehen unverändert durch; Fakten sind `map[string]any`; Zahlen ohne Ganzzahl-Typ haben `format: double` |
 | R3 | Pfad und Version | alles unter `/api/v1/`; inkompatible Änderungen bedeuten `/api/v2/` |
 | R4 | Fehler | RFC 9457 Problem Details (`application/problem+json`) mit stabilem `code`, z. B. `device_in_use`, `invalid_target`, `not_found`. `type` ist `about:blank`, `title` der Text des Status; unterschieden wird über `code`. Fachliche Fehler übersetzt eine Tabelle in `internal/api/problem.go`; unbekannte Fehler sind `500 internal` ohne Details und werden geloggt |
 | R5 | Verlauf | Cursor-Paginierung über UUIDv7: `?before=<id>&limit=100` (höchstens 500); Filter siehe unten, sie bleiben beim Weiterblättern gleich |
@@ -35,7 +35,9 @@ Sichtbar ist, was im Geltungsbereich eines `view`-Rechts liegt (`View.InScope`).
 | Fall | Regel |
 |---|---|
 | **Vorfahren** sichtbarer Elemente (z. B. Gerät und Zugang eines sichtbaren Encoders) | als **Gerüst** sichtbar, im eigenen Feld `skeleton` von `/state` und `elements_changed` (Schema `SkeletonElement`): nur `id`, `kind`, `name`, `label`, `parent_id`, `device_id`; keine Fakten, Health, Befunde, Aktionen, Einstellungen, Quellen |
-| **Links** | nur, wenn beide Enden sichtbar sind (nicht als Gerüst); sonst fehlen sie |
+| **Links** | nur, wenn beide Enden sichtbar sind (nicht als Gerüst); sonst fehlen sie. Ein unaufgelöstes Ende (nur `global_ref`) ist kein Objekt und zählt nicht |
+| **Quellen** (Zustand in `/state`) | sichtbar, wenn ihr Zugangs-Element sichtbar ist |
+| **Läufe** | sichtbar, wenn ihr Ziel sichtbar ist; Wurzel-Läufe von Presets (ohne Ziel) mit `preset_run` oder `preset_edit` |
 | **Ursache außerhalb der Sicht** | ein sichtbarer Befund behält `caused_by_id`; der Befund dahinter erscheint nicht, die UI zeigt „Ursache nicht sichtbar“ |
 | **Verlauf gelöschter Elemente** | nur mit `view` global (siehe Filter im Verlauf) |
 
@@ -59,6 +61,8 @@ Einträge zu gelöschten Elementen bleiben im Verlauf; sie tragen `element_path`
 
 - `GET /state` liefert, was der Benutzer sehen darf: Inventar und Links, Health und Rollups, aktive Befunde, laufende Läufe, Zustand der Quellen, jeweils mit der `version` der `View`. **Keine Fakten.**
 - `GET /elements/{id}/facts` liefert die Fakten eines Elements mit `version`.
+- `GET /elements/{id}/rules` liefert `View.EffectiveRules`. Eine geltende Regel ist `satisfied`, solange sie keinen aktiven Befund am Element hat; das ist das Urteil des Evaluators mit Haltezeit und Hysterese. Die Art des Geltungsbereichs (`element`, `ancestor`, `device`, `group`, `global`) steht immer da, seine ID nur, wenn er sichtbar ist.
+- `GET /drivers` liefert pro Treiber den Fakt-Katalog: das Vokabular und die rohen Fakten des Treibers, zu jedem Zähler seine Rate (`…_per_s`). Rohe Fakten sind nie `historized`.
 - `GET /events` ist der Ereignisstrom (SSE). Jedes Ereignis trägt als `id` die `Version`, zu der es den Stand seines Objekts beschreibt; nach einem Abbruch schickt der Browser sie als `Last-Event-ID`. Ist sie zu alt, kommt `resync`, und der Browser lädt `/state` neu.
 - **Erst Strom, dann Stand.** Der Browser öffnet zuerst `/events` und bekommt `hello{stream_id, version}`, lädt danach `/state` und wendet von den inzwischen empfangenen Ereignissen nur die mit `version` > Version des Stands an. So geht zwischen Stand und Strom nichts verloren; es ist dieselbe Regel wie für alle Abonnenten des Core (erst anmelden, dann die `View` lesen). Ebenso bei `watch`: Ereignisse mit `version` ≤ der Version der Antwort werden verworfen.
 - **Ereignisse sind idempotent.** Jedes Ereignis beschreibt den Stand eines Objekts zu einer Version, nicht eine Änderung daran; zweimal angewendet ergibt dasselbe. Eine Verarbeitung im Core kann mehrere Ereignisse mit derselben Version erzeugen; deshalb liefert die Wiederaufnahme alle Ereignisse **ab einschließlich** der Version aus `Last-Event-ID`.

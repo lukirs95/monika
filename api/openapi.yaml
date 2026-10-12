@@ -505,7 +505,7 @@ paths:
       operationId: getElementRules
       summary: Welche Regeln an einem Element gelten und welche sie überschreiben (view am Element)
       description: |
-        Pro Fakt und Richtung (`upper`, `lower`, `equality`) die geltenden und die überschriebenen Regeln,
+        Pro Fakt und Richtung (`upper`, `lower`, `equal`) die geltenden und die überschriebenen Regeln,
         aus `View.EffectiveRules`. Enthalten sind auch Regeln, deren Geltungsbereich der Benutzer nicht
         sehen darf; von ihnen erscheint nur die Art des Geltungsbereichs, nicht dessen Name.
       parameters:
@@ -1525,7 +1525,7 @@ components:
       required: [name, config_schema, actions, facts]
       properties:
         name: { type: string, pattern: '^[a-z0-9]+$' }
-        config_schema: { type: object, additionalProperties: true, description: 'JSON-Schema für SourceCreate.config' }
+        config_schema: { type: object, additionalProperties: true, description: 'JSON-Schema für SourceCreate.config', x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         actions:
           type: array
           items: { $ref: '#/components/schemas/ActionDef' }
@@ -1547,9 +1547,9 @@ components:
       required: [name, critical]
       properties:
         name: { type: string }
-        params: { type: object, additionalProperties: true, nullable: true, description: 'JSON-Schema der Parameter' }
+        params: { type: object, additionalProperties: true, nullable: true, description: 'JSON-Schema der Parameter', x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         critical: { type: boolean }
-        timeout_seconds: { type: number, nullable: true }
+        timeout_seconds: { type: number, format: double, nullable: true }
 
     DeviceCreate:
       type: object
@@ -1580,7 +1580,7 @@ components:
         access_element_id: { type: string, format: uuid }
         driver: { type: string }
         address: { type: string, nullable: true }
-        config: { type: object, additionalProperties: true }
+        config: { type: object, additionalProperties: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         secret_id: { type: string, format: uuid, nullable: true }
         enabled: { type: boolean }
         identity: { $ref: '#/components/schemas/Identity' }
@@ -1598,7 +1598,7 @@ components:
       properties:
         driver: { type: string }
         address: { type: string, nullable: true }
-        config: { type: object, additionalProperties: true }
+        config: { type: object, additionalProperties: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         secret_id: { type: string, format: uuid, nullable: true }
         enabled: { type: boolean }
     SourceUpdate:
@@ -1606,7 +1606,7 @@ components:
       required: [config, enabled]
       properties:
         address: { type: string, nullable: true }
-        config: { type: object, additionalProperties: true }
+        config: { type: object, additionalProperties: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         secret_id: { type: string, format: uuid, nullable: true }
         enabled: { type: boolean }
 
@@ -1625,6 +1625,8 @@ components:
         label: { type: string, nullable: true }
 
     JSONValue:
+      x-go-type: json.RawMessage
+      x-go-type-skip-optional-pointer: true
       description: beliebiger JSON-Wert (bool, Zahl, String, Liste)
       oneOf:
         - type: boolean
@@ -1659,7 +1661,7 @@ components:
           description: 'Vorbedingung; null = gilt immer'
           allOf:
             - $ref: '#/components/schemas/Condition'
-        clear_value: { type: number, nullable: true, description: 'Hysterese, nur numerisch' }
+        clear_value: { type: number, format: double, nullable: true, description: 'Hysterese, nur numerisch' }
         hold_seconds: { type: integer, minimum: 0 }
         clear_hold_seconds: { type: integer, minimum: 0, default: 0, description: 'Sollzustand muss so lange anliegen, bevor der Befund endet' }
     EffectiveRuleSet:
@@ -1667,7 +1669,7 @@ components:
       required: [fact, direction, effective, overridden]
       properties:
         fact: { type: string }
-        direction: { type: string, enum: [upper, lower, equality] }
+        direction: { type: string, enum: [upper, lower, equal] }
         effective:
           type: array
           items: { $ref: '#/components/schemas/RuleRef' }
@@ -1697,7 +1699,7 @@ components:
       properties:
         element_id: { type: string, format: uuid, description: 'Element, Gerät oder Gruppe' }
         action: { type: string }
-        params: { type: object, additionalProperties: true, nullable: true, description: 'bei set die Werte, bei trigger die Parameter' }
+        params: { type: object, additionalProperties: true, nullable: true, description: 'bei set die Werte, bei trigger die Parameter', x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         device_level: { type: boolean, default: false, description: 'nur bei Gerät oder Gruppe: true = an die Zugangs-Elemente (das Gerät selbst), false = an alle übrigen Elemente' }
         driver: { type: string, nullable: true, description: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true' }
     RunAccepted:
@@ -1712,7 +1714,7 @@ components:
           properties:
             source_id: { type: string, format: uuid, nullable: true }
             preset_step_id: { type: string, format: uuid, nullable: true }
-            params: { type: object, additionalProperties: true, nullable: true }
+            params: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
             verify:
               type: object
               nullable: true
@@ -1723,7 +1725,7 @@ components:
                 conditions:
                   type: array
                   items: { $ref: '#/components/schemas/Condition' }
-            response: { type: object, additionalProperties: true, nullable: true }
+            response: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
             sent_at: { type: string, format: date-time, nullable: true }
             responded_at: { type: string, format: date-time, nullable: true }
             children:
@@ -1740,7 +1742,7 @@ components:
         delay_ms: { type: integer, minimum: 0 }
         element_id: { type: string, format: uuid }
         action: { type: string }
-        params: { type: object, additionalProperties: true, nullable: true }
+        params: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         continue_on_error: { type: boolean }
         device_level: { type: boolean, default: false, description: 'wie RunRequest.device_level' }
         driver: { type: string, nullable: true, description: 'Filter auf Quellen dieses Treibers; Pflicht bei device_level = true' }
@@ -1793,7 +1795,7 @@ components:
         name: { type: string, minLength: 1 }
         kind: { type: string, enum: [syslog, webhook] }
         enabled: { type: boolean }
-        config: { type: object, additionalProperties: true, description: 'syslog: host, port, protocol (udp, tcp, tls), facility; webhook: url, method, headers, body (Vorlage, ohne = Ereignis als JSON). Platzhalter {{secret.<schlüssel>}} nur in url und headers (422 secret_in_body). Format: docs/ARCHITECTURE.md Abschnitt 13' }
+        config: { type: object, additionalProperties: true, description: 'syslog: host, port, protocol (udp, tcp, tls), facility; webhook: url, method, headers, body (Vorlage, ohne = Ereignis als JSON). Platzhalter {{secret.<schlüssel>}} nur in url und headers (422 secret_in_body). Format: docs/ARCHITECTURE.md Abschnitt 13', x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         secret_id: { type: string, format: uuid, nullable: true }
         events:
           type: array
@@ -1824,6 +1826,8 @@ components:
       required: [value]
       properties:
         value:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
           type: object
           additionalProperties: true
           description: 'Klartext als JSON, Format legt der Treiber fest, z. B. {"username": "admin", "password": "…"}'
@@ -1951,8 +1955,8 @@ components:
         verb: { type: string }
         object_type: { type: string }
         object_id: { type: string, format: uuid, nullable: true }
-        before: { type: object, additionalProperties: true, nullable: true }
-        after: { type: object, additionalProperties: true, nullable: true }
+        before: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
+        after: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
     AuditPage:
       type: object
       required: [items]
@@ -2092,10 +2096,14 @@ components:
         notes: { type: string, nullable: true }
         position: { type: integer, nullable: true }
         attributes:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
           type: object
           additionalProperties: true
           description: Statische Treiber-Attribute, nur zur Anzeige
         params:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
           type: object
           nullable: true
           description: |
@@ -2111,6 +2119,8 @@ components:
           type: array
           items: { type: string }
         settings:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
           type: object
           nullable: true
           description: Schreibbare Fakt-Schlüssel (für `set`); der Schlüssel ist der Fakt-Schlüssel
@@ -2137,8 +2147,8 @@ components:
         type:
           type: string
           description: 'int, float, bool, string, enum, ipv4, …'
-        min: { type: number, nullable: true }
-        max: { type: number, nullable: true }
+        min: { type: number, format: double, nullable: true }
+        max: { type: number, format: double, nullable: true }
         values:
           type: array
           description: erlaubte Werte bei `enum`
@@ -2205,7 +2215,7 @@ components:
         code: { type: string }
         severity: { type: string, enum: [info, warning, error] }
         message: { type: string, nullable: true }
-        details: { type: object, additionalProperties: true, nullable: true }
+        details: { type: object, additionalProperties: true, nullable: true, x-go-type: json.RawMessage, x-go-type-skip-optional-pointer: true }
         caused_by_id: { type: string, format: uuid, nullable: true, description: 'Wurzel-Ursache; null = selbst Ursache' }
         raised_at: { type: string, format: date-time }
         cleared_at: { type: string, format: date-time, nullable: true }
@@ -2233,11 +2243,13 @@ components:
       properties:
         source_id: { type: string, format: uuid }
         state: { type: string, enum: [starting, connecting, live, unreachable, backoff, stopping, stuck, disabled], description: 'nur live wird bewertet' }
-        heartbeat_seconds: { type: number, nullable: true, description: 'erwarteter Abstand der Lebenszeichen der laufenden Instanz; 0 = keine Überwachung' }
+        heartbeat_seconds: { type: number, format: double, nullable: true, description: 'erwarteter Abstand der Lebenszeichen der laufenden Instanz; 0 = keine Überwachung' }
         since: { type: string, format: date-time, nullable: true, description: 'Beginn des aktuellen Zustands' }
         last_error: { type: string, nullable: true }
 
     Facts:
+      x-go-type: map[string]any
+      x-go-type-skip-optional-pointer: true
       type: object
       description: 'Fakten eines Elements, Schlüssel <measurement>.<feld> bzw. <treiber>.<name>; Werte sind bool, Zahl oder String. Ob eine Zahl int oder float ist, sagt der Fakt-Katalog (GET /drivers); Ganzzahlen über 2^53 kann JavaScript nicht exakt darstellen'
       additionalProperties:

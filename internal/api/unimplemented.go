@@ -25,15 +25,6 @@ func (unimplemented) ListSources(context.Context, oapi.ListSourcesRequestObject)
 func (unimplemented) CreateSource(context.Context, oapi.CreateSourceRequestObject) (oapi.CreateSourceResponseObject, error) {
 	return nil, errNotImplemented
 }
-func (unimplemented) ListDrivers(context.Context, oapi.ListDriversRequestObject) (oapi.ListDriversResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetElementFacts(context.Context, oapi.GetElementFactsRequestObject) (oapi.GetElementFactsResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetElementRules(context.Context, oapi.GetElementRulesRequestObject) (oapi.GetElementRulesResponseObject, error) {
-	return nil, errNotImplemented
-}
 func (unimplemented) UpdateUserFields(context.Context, oapi.UpdateUserFieldsRequestObject) (oapi.UpdateUserFieldsResponseObject, error) {
 	return nil, errNotImplemented
 }
@@ -152,9 +143,6 @@ func (unimplemented) DeleteSource(context.Context, oapi.DeleteSourceRequestObjec
 	return nil, errNotImplemented
 }
 func (unimplemented) UpdateSource(context.Context, oapi.UpdateSourceRequestObject) (oapi.UpdateSourceResponseObject, error) {
-	return nil, errNotImplemented
-}
-func (unimplemented) GetState(context.Context, oapi.GetStateRequestObject) (oapi.GetStateResponseObject, error) {
 	return nil, errNotImplemented
 }
 func (unimplemented) RevokeToken(context.Context, oapi.RevokeTokenRequestObject) (oapi.RevokeTokenResponseObject, error) {

@@ -19,6 +19,7 @@ import (
 	"github.com/lukirs95/monika/internal/api/oapi"
 	"github.com/lukirs95/monika/internal/auth"
 	"github.com/lukirs95/monika/internal/core"
+	"github.com/lukirs95/monika/sdk"
 )
 
 // Prefix ist der Pfad, unter dem die API liegt (R3).
@@ -49,8 +50,9 @@ type Core interface {
 type Config struct {
 	Auth           Auth
 	Core           Core
-	PublicURL      *url.URL       // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
-	TrustedProxies []netip.Prefix // Proxys, deren X-Forwarded-For gilt
+	PublicURL      *url.URL            // Herkunft für die Prüfung des Origin-Headers; https = Cookie mit Secure
+	TrustedProxies []netip.Prefix      // Proxys, deren X-Forwarded-For gilt
+	Drivers        func() []sdk.Driver // registrierte Treiber (sdk.Drivers)
 	Log            *slog.Logger
 }
 
