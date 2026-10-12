@@ -2,7 +2,7 @@
 
 Treiber für **HTTP-Endpunkte als Sende-Ziel** (Webhooks, Tally, Companion, eigene Skripte). Vertrag dieses Treibers nach `docs/DRIVERS.md`; Regeln für Sende-Ziele: `docs/ARCHITECTURE.md`, Abschnitt 11.
 
-**Status:** Entwurf vom 2026-10-12, zur Abstimmung.
+**Status:** abgestimmt am 2026-10-12.
 
 Monika sendet nur. Sie liest keinen Zustand vom Ziel; ihre Fakten sind Beobachtungen über die eigenen Aufrufe.
 

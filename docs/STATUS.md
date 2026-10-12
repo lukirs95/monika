@@ -142,6 +142,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~12c Deploy-Dateien, `make build` und `make image`~~: erledigt; Probe des Stacks ohne Caddy (healthy, Kennzahlen in InfluxDB, Rollen, SIGTERM mit Exit-Code 0)
       Vorgaben aus den vorigen Schritten: Supervisor → Core (mit dem Supervisor) → `sup.Run(ctx, core)`; den Verteiler der API vor `http.Server.Shutdown` stoppen (V7); `http.Server` ohne `WriteTimeout`, die Ströme setzen ihre Deadline selbst; `Distributor.Streams` als Kennzahl `api_streams` an den Influx-Schreiber
 4. **Treiber**, jeder mit abgestimmtem Vertrag (`drivers/<name>/README.md`) vor dem Code, beginnend mit `videoxlink`.
+   - `http` (Entscheidung vom 2026-10-12: zuerst, weil ohne Gerät von Ende zu Ende testbar; Vertrag `drivers/http/README.md`):
+     - ~~A Aufrufe, Parameter, Vorlagen, Health-Check, Fakten~~: erledigt
+     - B Anmeldung vor dem Aufruf (`auth`)
+     - C Ende-zu-Ende-Test in `cmd/monika`
 
 ## Leistung
 
