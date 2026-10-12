@@ -68,6 +68,10 @@ docs-check: ## Rendert alle Mermaid-Diagramme in docs/ und bricht bei Syntaxfehl
 	      else echo "FEHLER $$f"; grep -m1 -A3 "Error" /tmp/log; status=1; fi; \
 	    done; exit $$status' sh $$files
 
+.PHONY: api-gen
+api-gen: ## Erzeugt Typen, Router und Server-Interface aus api/openapi.yaml (oapi-codegen)
+	$(GO) tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
+
 .PHONY: api-check
 api-check: ## Prüft die OpenAPI-Spezifikation api/openapi.yaml
 	$(DOCKER) run --rm -v $(CURDIR):/spec:ro -w /spec $(REDOCLY_IMAGE) lint --format=stylish api/openapi.yaml

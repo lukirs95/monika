@@ -1,0 +1,10 @@
+# Konfiguration für `make api-gen` (oapi-codegen, docs/contracts/api.md R2).
+package: oapi
+output: internal/api/oapi/oapi.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+  embedded-spec: true
+output-options:
+  name-normalizer: ToCamelCaseWithInitialisms # ID, URL, TOTP statt Id, Url, Totp

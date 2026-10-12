@@ -122,7 +122,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
       - ~~10c Rechte und Verwaltung, initialer Admin~~ (`Allowed` mit Rechten im Speicher, Benutzer, Rollen, Rechte, Tokens, `EnsureAdmin` über `CreateInitialAdmin` in einer Transaktion): erledigt
    11. API mit `oapi-codegen`, Verteiler und SSE (`internal/api`); Entscheidungen E1–E8 vom 2026-10-12 in `api.md` (`go tool oapi-codegen`, `ServeMux`, Prüfung gegen die Spezifikation mit `400 invalid_request`, `resync` bei geänderten Rechten, Anmeldung alle 60 s prüfen ohne Aktivität, Nutzdaten aus der aktuellen View, Keepalive 30 s, Sichtbarkeit im Verlauf per ID-Array in SQL):
       - ~~11a Lücken vor der API~~: erledigt; Konflikte aus der Datenbank sind fachliche Fehler (`ErrSourceExists`, `ErrMemberExists`, `ErrSecretNotFound`) statt Störung der Datenbank, `SourceStatus.Since`, `auth.CheckSession`/`CheckToken` und `AuthzVersion`
-      - 11b Code-Erzeugung, Problem Details, Middleware (Anmeldung, Origin, `read_only`, Prüfung), Server mit Platzhaltern
+      - ~~11b Code-Erzeugung, Problem Details, Middleware~~: erledigt; `make api-gen` erzeugt `internal/api/oapi`, Guard (Operation, Anmeldung, `read_only`, Origin, Prüfung gegen die Spezifikation), Fehlertabelle, alle noch fehlenden Operationen antworten mit `501` (`unimplemented.go`, entfällt mit 11h)
       - 11c Anmeldung, eigene Sitzungen und Passwort, `/auth/me`, `/healthz`
       - 11d Sichtbarkeit und Gerüst: `/state`, Fakten, geltende Regeln, Treiber
       - 11e Befehle für Inventar, Regeln und Quittierung über `Core.Do`

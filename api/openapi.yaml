@@ -1490,7 +1490,7 @@ components:
       description: RFC 9457 Problem Details
       required: [type, title, status, code]
       properties:
-        type: { type: string, format: uri, example: 'https://monika.invalid/problems/device_in_use' }
+        type: { type: string, format: uri, example: 'about:blank' }
         title: { type: string }
         status: { type: integer }
         detail: { type: string }
