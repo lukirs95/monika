@@ -703,6 +703,7 @@ Konfiguration pro Aufruf:
 | Ergebnis | 2xx → `accepted` · 4xx/5xx → `rejected` (Status, Body in `response`) · Timeout/keine Verbindung → `failed` |
 | Fakten pro Aufruf | `call.ok`, `call.called_at`, `call.duration_ms`, `http.status_code` |
 | Health-Check | optional pro Quelle (`path`, `interval_s`); `interval_s` ist der erwartete Abstand der Lebenszeichen, ohne Health-Check `0` |
+| Anmeldung | Basic Auth oder feste Header aus dem Secret, oder eine Anmeldung vor dem Aufruf: Token aus Cookie, Header oder JSON, im Speicher gehalten und nach `401` einmal erneuert (Vertrag: `drivers/http/README.md`) |
 
 Später möglich: weitere Sende-Treiber nach demselben Muster (`osc`, `tcp`).
 
