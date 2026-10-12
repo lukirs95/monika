@@ -145,7 +145,7 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
    - `http` (Entscheidung vom 2026-10-12: zuerst, weil ohne Gerät von Ende zu Ende testbar; Vertrag `drivers/http/README.md`):
      - ~~A Aufrufe, Parameter, Vorlagen, Health-Check, Fakten~~: erledigt
      - ~~B Anmeldung vor dem Aufruf (`auth`)~~: erledigt
-     - C Ende-zu-Ende-Test in `cmd/monika`
+     - ~~C Ende-zu-Ende-Test in `cmd/monika`~~: erledigt; Anmeldung samt TOTP, Gerät, Secret und Quelle über die API, Quelle Live, `trigger` mit Anmeldung am Ziel, Regel auf `call.ok` verletzt und erfüllt, abgelaufener Token erneuert
 
 ## Leistung
 
