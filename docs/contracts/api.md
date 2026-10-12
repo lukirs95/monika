@@ -82,13 +82,20 @@ Die API hält **ein** Abo am Core und verteilt an alle Browser-Ströme; das entl
 
 - **Sofort schreiben, zusammenfassen nur bei Rückstau.** Ist die Verbindung frei, geht ein Ereignis sofort raus. Während ein Schreiben läuft (langsamer Browser, Netz hakt), sammelt der Verteiler die folgenden Ereignisse nach Schlüssel; es gilt der neueste Stand. Danach geht das Gesammelte in einem Rutsch raus.
 
-| Ereignis | Schlüssel |
-|---|---|
-| `health_changed`, `elements_changed` | Element |
-| `facts_changed` | Element und Fakt |
-| `finding_raised`, `finding_ended`, `finding_acked`, `finding_cause_changed` | Befund |
-| `run_changed` | Lauf |
-| `source_status_changed` | Quelle |
+| Ereignis | Schlüssel | zusammengefasst (V2) |
+|---|---|---|
+| `elements_changed` | einer pro Strom | Vereinigung der geänderten und gelöschten Elemente, Links geändert |
+| `health_changed` | einer pro Strom | Vereinigung der Elemente |
+| `facts_changed` | Element | Vereinigung der Fakt-Schlüssel |
+| `finding_raised`, `finding_ended`, `finding_acked`, `finding_cause_changed` | Befund | aktiv: ein Ereignis mit dem Befund aus der View (`finding_raised`, wenn er darunter neu ist, sonst `finding_acked` bzw. `finding_cause_changed`); beendet: `finding_ended` |
+| `run_changed` | Lauf | neuester Stand |
+| `source_status_changed` | Quelle | neuester Zustand |
+
+- **Wer was tut (V1):** Der Verteiler leitet nur weiter: Ereignis vom Core, Ringpuffer, an jeden Strom. Jeder Strom baut die Nutzdaten beim Schreiben in seiner eigenen Goroutine aus der dann aktuellen View, gefiltert nach seinen Rechten; was die View nicht mehr hat (beendeter Befund, gelöschtes Element, beendeter Lauf), nimmt er aus dem Ereignis. Ein langsamer Browser bremst so niemanden.
+- **Versionen bleiben aufsteigend (V3):** Ein zusammengefasster Eintrag trägt die Version seines neuesten Ereignisses und rückt damit ans Ende; der Strom schreibt nach Version. Sonst könnte der Browser eine neuere `Last-Event-ID` haben als ein Ereignis, das er noch nicht bekommen hat.
+- **Sichtbarkeit ändert sich (V4):** Bei `elements_changed` berechnet der Strom seine Sicht neu und vergleicht: neu Sichtbares kommt in `elements`, nicht mehr Sichtbares in `removed_elements`, ebenso Gerüst und Links (Links auch inhaltlich, zwischen altem und neuem Graph). So erfährt der Browser auch von Elementen, die etwa durch eine neue Mitgliedschaft sichtbar werden.
+- **Abos (V5, V6):** Ein Strom merkt sich die beobachteten Geltungsbereiche und löst sie bei jedem `elements_changed` neu auf; neue Elemente eines beobachteten Geräts liefern so von selbst Fakten. Beobachtet wird nur, was sichtbar ist; die Grenze von 1 000 gilt beim Aufruf. `watch` auf den Strom eines anderen Benutzers: `404`.
+- **Herunterfahren (V7):** Endet der Verteiler, schließt er alle Ströme. `cmd/monika` stoppt ihn vor `http.Server.Shutdown`, denn ein offener Strom wird nie untätig.
 
 - Ein langsamer Browser bekommt so weniger, aber immer den aktuellen Stand; was offen ist, ist durch die sichtbaren Objekte begrenzt. Getrennt wird nur, wenn ein Schreiben länger als 30 s hängt (tote Verbindung).
 - **Ringpuffer für Netzaussetzer:** die letzten 100 Ereignisse **ohne** `facts_changed` (der Puffer gilt für alle Ströme; Fakten kommen nach dem Neuverbinden ohnehin über `watch`). Liegt `Last-Event-ID` im Puffer, bekommt der neue Strom alle Ereignisse ab einschließlich dieser Version daraus, zusammengefasst nach Schlüssel und gefiltert nach den Rechten des Benutzers. Sonst `resync`.
@@ -131,7 +138,7 @@ sequenceDiagram
 ```
 
 - Ein Strom beobachtet höchstens 1 000 Elemente; darüber `422` mit `code = watch_limit`.
-- Wird der Verteiler vom Core abgehängt (C6), bekommen alle Ströme `resync`.
+- Wird der Verteiler vom Core abgehängt (C6), meldet er sich neu an, leert den Ringpuffer, und alle Ströme bekommen `resync`. Wiederaufnahme mit `Last-Event-ID` gelingt nur, wenn der Ring alle Ereignisse ab dieser Version noch enthält.
 - **Nutzdaten aus der aktuellen View:** Der Verteiler baut die Nutzdaten eines Ereignisses (Elemente, Health, Fakten) aus der View, die er beim Empfang liest; sie ist mindestens so neu wie das Ereignis. Weil Ereignisse einen Stand beschreiben, schadet ein neuerer Stand nicht. Für `links` und `removed_links` vergleicht er die Links des zuletzt verteilten Graphen mit denen des aktuellen, denn `ElementsChanged` meldet nur `LinksChanged`.
 - **Rechte ändern sich:** Jeder Strom filtert nach den Rechten seines Benutzers. Ändert sich `auth.AuthzVersion` (Rollen, Rechte oder Mitglieder geändert), bekommen alle Ströme `resync` und laden den Stand nach den neuen Rechten. Rechte ändern sich selten; das ist einfacher und sicherer als eine Neuberechnung pro Strom.
 - **Anmeldung erneut prüfen:** Alle 60 s prüft jeder Strom seine Sitzung bzw. sein Token (`auth.CheckSession`, `auth.CheckToken`). Gilt sie nicht mehr (abgemeldet, widerrufen, abgelaufen, Benutzer deaktiviert, Leerlauf), endet der Strom. Die Prüfung zählt nicht als Aktivität: Ein offener Tab allein hält eine Sitzung nicht über den Leerlauf hinaus am Leben; `watch` und alle anderen Anfragen zählen.

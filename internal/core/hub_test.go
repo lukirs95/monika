@@ -10,8 +10,8 @@ func TestHubDelivers(t *testing.T) {
 	h := newHub()
 	ch, cancel := h.subscribe(4)
 	defer cancel()
-	h.publish([]Event{withVersion(ElementsChanged{}, 1), withVersion(HealthChanged{}, 1)})
-	h.publish([]Event{withVersion(FindingRaised{}, 2)})
+	h.publish([]Event{WithVersion(ElementsChanged{}, 1), WithVersion(HealthChanged{}, 1)})
+	h.publish([]Event{WithVersion(FindingRaised{}, 2)})
 	for _, want := range []uint64{1, 1, 2} {
 		if e := <-ch; e.Version() != want {
 			t.Fatalf("version = %d, want %d", e.Version(), want)
@@ -28,7 +28,7 @@ func TestHubDropsSlowSubscriber(t *testing.T) {
 	fast, cancelFast := h.subscribe(10)
 	defer cancelFast()
 
-	h.publish([]Event{withVersion(ElementsChanged{}, 1), withVersion(ElementsChanged{}, 1)})
+	h.publish([]Event{WithVersion(ElementsChanged{}, 1), WithVersion(ElementsChanged{}, 1)})
 
 	// Der langsame bekommt, was in seinen Puffer passte, dann ist sein Kanal zu.
 	if e, ok := <-slow; !ok || e.Version() != 1 {
@@ -45,7 +45,7 @@ func TestHubDropsSlowSubscriber(t *testing.T) {
 	}
 	cancelSlow() // nach dem Abhängen ohne Wirkung
 	cancelSlow()
-	h.publish([]Event{withVersion(ElementsChanged{}, 2)}) // kein Senden auf geschlossenen Kanal
+	h.publish([]Event{WithVersion(ElementsChanged{}, 2)}) // kein Senden auf geschlossenen Kanal
 }
 
 func TestWithVersion(t *testing.T) {
@@ -54,7 +54,7 @@ func TestWithVersion(t *testing.T) {
 		FindingCauseChanged{}, HealthChanged{}, SourceStatusChanged{}, RunChanged{},
 	}
 	for _, e := range events {
-		if got := withVersion(e, 7).Version(); got != 7 {
+		if got := WithVersion(e, 7).Version(); got != 7 {
 			t.Errorf("%T: version = %d", e, got)
 		}
 	}

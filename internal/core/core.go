@@ -285,7 +285,7 @@ func (c *Core) publish(ctx context.Context, r *round) {
 	subs, dropped, events := c.hub.stats()
 	v := c.buildView(Stats{LoopLag: r.lag, LoopQueue: len(c.queue), Subscribers: subs, SubscribersDropped: dropped, Events: events})
 	for i, e := range r.events {
-		r.events[i] = withVersion(e, v.Version)
+		r.events[i] = WithVersion(e, v.Version)
 	}
 	c.view.Store(v)
 	c.hub.publish(r.events)

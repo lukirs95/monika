@@ -60,8 +60,9 @@ type (
 	}
 )
 
-// withVersion setzt die Version eines Ereignisses der laufenden Runde.
-func withVersion(e Event, v uint64) Event {
+// WithVersion liefert das Ereignis mit der Version v. Die Schleife stempelt so die Ereignisse
+// einer Runde; Tests von Abonnenten bauen damit Ereignisse.
+func WithVersion(e Event, v uint64) Event {
 	switch e := e.(type) {
 	case ElementsChanged:
 		e.version = v
