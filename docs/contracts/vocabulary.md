@@ -274,6 +274,7 @@ Generische UI, Sammelaktionen und Gruppenregeln über Hersteller und Transporte 
 | `start` | Kern | – | `state.running eq true`, 10 s | `sender`, `receiver`, `processing` |
 | `stop` | Kern | – | `state.running eq false`, 10 s | wie `start` |
 | `reboot` | Kern | – | keine (`accepted` ist Endzustand; die Quelle verbindet danach neu) | `access`, `module`; immer `critical` |
+| `shutdown` | Kern | – | keine (`accepted` ist Endzustand; die Quelle wird danach unerreichbar, einschalten nur vor Ort) | `access`, `module`; immer `critical` |
 | `set` | Kern | `{"schlüssel": wert}` | erzeugt der Core aus den Werten (außer `write_only`) | alles mit `settings` |
 | `trigger` | Kern | laut `element.params` | keine | `trigger` |
 | `reset_counters` | bekannt | – | keine | Elemente mit Zählern |

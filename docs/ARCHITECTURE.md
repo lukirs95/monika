@@ -242,7 +242,7 @@ Das vollständige Vokabular (Arten, Transporte, Fakten mit Typ und Einheit, Meas
 
 | Stufe | Fakten | Aktionen | Verwendung |
 |---|---|---|---|
-| **Kern** (einheitliche Bedeutung) | Measurement `state`: `state.running`, `state.signal_present`, `state.connected`, `state.reachable`, `state.current_direction` | `start`, `stop`, `reboot`, `set`, `trigger` | generische UI, Sammelaktionen, Gruppenregeln über Hersteller und Transporte |
+| **Kern** (einheitliche Bedeutung) | Measurement `state`: `state.running`, `state.signal_present`, `state.connected`, `state.reachable`, `state.current_direction` | `start`, `stop`, `reboot`, `shutdown`, `set`, `trigger` | generische UI, Sammelaktionen, Gruppenregeln über Hersteller und Transporte |
 | **Bekannt** (Domänen) | `system.*`, `sdi.*`, `video.*`, `audio.*`, `ptp.*`, `stream.*`, `sfp.*`, … z. B. `ptp.offset_ns`, `sfp.rx_power_dbm`, `sdi.crc_errors` | `reset_counters` | Regeln und Dashboards über Hersteller hinweg |
 | **Roh** (Treibername als Präfix) | `videoxlink.p2p`, `videoxlink.needs_reboot`, `http.status_code` | `videoxlink.reset_video_buffer`, `videoxlink.flush_audio` | Detailseite und Regeln; nie in Zeitreihen |
 
@@ -749,7 +749,7 @@ Später möglich: weitere Sende-Treiber nach demselben Muster (`osc`, `tcp`).
 | Aktion | benötigte Rechte |
 |---|---|
 | Stream stoppen | `operate` |
-| Reboot | `operate` + `critical` |
+| Reboot, Shutdown | `operate` + `critical` |
 | Bitrate ändern | `configure` |
 | PTP-Domain ändern | `configure` + `critical` |
 
@@ -1021,10 +1021,10 @@ Jede Quelle verlinkt nur in ihren eigenen Baum; Links zu einem anderen Gerät la
 | Identität | Modell und Firmware aus Sicht der XLink-Quelle (`device_source`); `global_ref` des Geräts am Zugang (`xlink:<UnitID>`) |
 | Gerätealarme | SRT-`Error` |
 | Abgeleitete Alarme | über Regeln (PTP-Sync, Temperaturen, Lizenzen, `videoxlink.needs_reboot`) |
-| Befehle | `start`, `stop`, `reset_counters`, `videoxlink.reset_video_buffer`, `videoxlink.flush_audio`; `reboot` folgt, sobald `goxlinkclient` ihn kann |
+| Befehle | `start`, `stop`, `reset_counters`, `reboot`, `shutdown`, `videoxlink.reset_video_buffer`, `videoxlink.flush_audio` |
 | Einstellungen | Bitrate, Codec, 2110-Interface und -Adressen |
 | Ausgeschlossen | `DecoderSender` (ändert `feeds`) |
-| Kritisch (Beispiel) | Reboot, Start und Stopp von Trunks; Management-Adresse und Zugangsdaten werden nie angeboten |
+| Kritisch (Beispiel) | Reboot, Shutdown, Start und Stopp von Trunks; Management-Adresse und Zugangsdaten werden nie angeboten |
 | Fallstrick | Start vor Verbindungsaufbau oder ohne Decoder-Lizenz wird angenommen, wirkt aber nicht → `unconfirmed` |
 
 ---

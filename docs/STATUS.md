@@ -146,11 +146,10 @@ Kein Code mehr, bis das ganze System beschrieben und in sich schlüssig ist. Erl
      - ~~A Aufrufe, Parameter, Vorlagen, Health-Check, Fakten~~: erledigt
      - ~~B Anmeldung vor dem Aufruf (`auth`)~~: erledigt
      - ~~C Ende-zu-Ende-Test in `cmd/monika`~~: erledigt; Anmeldung samt TOTP, Gerät, Secret und Quelle über die API, Quelle Live, `trigger` mit Anmeldung am Ziel, Regel auf `call.ok` verletzt und erfüllt, abgelaufener Token erneuert
-   - `videoxlink` (Vertrag `drivers/videoxlink/README.md`, `goxlinkclient/v4` v4.0.1; Entscheidungen vom 2026-10-12: Links zu anderen Geräten nur über Stellvertreter, Temperaturen als `sensor`, `ethernet.rx_mbps`/`tx_mbps` im Vokabular, `reset_counters` statt `videoxlink.reset_stats`, Trunk-Start/-Stopp kritisch, `external_id` der Units ohne System-ID, Einstellungen zunächst nur Codec, Bitrate und 2110-Streams):
+   - `videoxlink` (Vertrag `drivers/videoxlink/README.md`, `goxlinkclient/v5` v5.0.0; Entscheidungen vom 2026-10-12/13: Links zu anderen Geräten nur über Stellvertreter, Temperatur als `sensor`, `ethernet.rx_mbps`/`tx_mbps` im Vokabular, `reset_counters` statt `videoxlink.reset_stats`, Trunk-Start/-Stopp kritisch, `reboot` und `shutdown` (neue Kern-Aktion im Vokabular) kritisch, `external_id` der Units ohne System-ID; Einstellungen für Video, Audio, GOP, CRF, Bit-Tiefe und ARQ der Encoder, Empfangspuffer der Decoder, 2110-Streams, auch an Stellvertretern):
      - A Abbildung `System`/`Stats` → Elemente, Links, Fakten, Alarme (reine Funktionen, table-driven)
      - B `Run` mit Neuverbinden, Attrappe des Geräts (WebSocket/JSON-RPC), `sdktest.Conformance`
      - C `Execute` (Aktionen, `set`, Übersetzung abgelehnter Felder)
-     - später: `reboot`/`shutdown` und Audio-Einstellungen, sobald `goxlinkclient` sie liefert
 
 ## Leistung
 

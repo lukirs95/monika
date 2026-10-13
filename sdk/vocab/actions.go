@@ -7,12 +7,13 @@ const (
 	ActionStart         = "start"
 	ActionStop          = "stop"
 	ActionReboot        = "reboot"
+	ActionShutdown      = "shutdown"
 	ActionSet           = "set"
 	ActionTrigger       = "trigger"
 	ActionResetCounters = "reset_counters"
 )
 
-var actions = []string{ActionStart, ActionStop, ActionReboot, ActionSet, ActionTrigger, ActionResetCounters}
+var actions = []string{ActionStart, ActionStop, ActionReboot, ActionShutdown, ActionSet, ActionTrigger, ActionResetCounters}
 
 // Action meldet, ob name eine Kern- oder bekannte Aktion ist.
 func Action(name string) bool { return slices.Contains(actions, name) }
